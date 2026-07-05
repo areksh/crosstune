@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   deduplicateTracks,
+  enrichReleaseDates,
   findDuplicateGroups,
   formatResolutionReport,
   normalise,
   removedTracks,
   resolveDuplicateGroups,
   selectKeeper,
+  strategyNeedsReleaseDates,
+  tracksToRemove,
   toDedupTrack,
   trackSignature,
   type DedupTrack,
@@ -153,6 +156,76 @@ describe("selectKeeper", () => {
   it("throws on an empty group", () => {
     expect(() => selectKeeper([], "first-added")).toThrow();
   });
+
+  it("keeps the last-added track", () => {
+    const group: DedupTrack[] = [
+      { id: 100, title: "T", artist: "X" },
+      { id: 200, title: "T", artist: "X" },
+    ];
+    expect(selectKeeper(group, "last-added")).toBe(200);
+  });
+
+  it("keeps the highest-quality track (bit depth then sample rate)", () => {
+    const group: DedupTrack[] = [
+      { id: 100, title: "T", artist: "X", bitDepth: 16, samplingRate: 44.1 },
+      { id: 200, title: "T", artist: "X", bitDepth: 24, samplingRate: 96 },
+      { id: 300, title: "T", artist: "X", bitDepth: 24, samplingRate: 192 },
+    ];
+    expect(selectKeeper(group, "highest-quality")).toBe(300);
+  });
+
+  it("keeps the oldest and newest releases, and ignores missing dates", () => {
+    const group: DedupTrack[] = [
+      { id: 100, title: "T", artist: "X", releaseDate: "1973-03-01" },
+      { id: 200, title: "T", artist: "X", releaseDate: "2011-09-26" },
+      { id: 300, title: "T", artist: "X" }, // no date
+    ];
+    expect(selectKeeper(group, "oldest")).toBe(100);
+    expect(selectKeeper(group, "newest")).toBe(200);
+  });
+
+  it("breaks ties by keeping the earlier member", () => {
+    const group: DedupTrack[] = [
+      { id: 100, title: "T", artist: "X", bitDepth: 24 },
+      { id: 200, title: "T", artist: "X", bitDepth: 24 },
+    ];
+    expect(selectKeeper(group, "highest-quality")).toBe(100);
+  });
+});
+
+describe("strategyNeedsReleaseDates", () => {
+  it("is true only for date-based strategies", () => {
+    expect(strategyNeedsReleaseDates("oldest")).toBe(true);
+    expect(strategyNeedsReleaseDates("newest")).toBe(true);
+    expect(strategyNeedsReleaseDates("first-added")).toBe(false);
+    expect(strategyNeedsReleaseDates("highest-quality")).toBe(false);
+  });
+});
+
+describe("enrichReleaseDates", () => {
+  it("fills missing dates, fetching each album only once", async () => {
+    const groups: DedupTrack[][] = [
+      [
+        { id: 1, title: "T", artist: "X", albumId: "alb-a" },
+        { id: 2, title: "T", artist: "X", albumId: "alb-a", releaseDate: "2000-01-01" },
+        { id: 3, title: "T", artist: "X", albumId: "alb-b" },
+      ],
+    ];
+    const calls: string[] = [];
+    const fetchDate = async (albumId: string): Promise<string | undefined> => {
+      calls.push(albumId);
+      return albumId === "alb-a" ? "1990-01-01" : undefined;
+    };
+
+    const enriched = await enrichReleaseDates(groups, fetchDate);
+
+    expect(enriched[0]?.map((t) => t.releaseDate)).toEqual([
+      "1990-01-01", // fetched
+      "2000-01-01", // already present, not refetched
+      undefined, // fetch returned nothing
+    ]);
+    expect(calls).toEqual(["alb-a", "alb-b"]); // alb-a fetched once despite two tracks
+  });
 });
 
 describe("resolveDuplicateGroups / removedTracks", () => {
@@ -178,6 +251,26 @@ describe("resolveDuplicateGroups / removedTracks", () => {
       ],
     };
     expect(removedTracks(resolved).map((t) => t.id)).toEqual([100]);
+  });
+
+  it("collects removals across all groups in a plan", () => {
+    const removals = tracksToRemove([
+      {
+        keepId: 1,
+        tracks: [
+          { id: 1, title: "A", artist: "X" },
+          { id: 2, title: "A", artist: "X" },
+        ],
+      },
+      {
+        keepId: 3,
+        tracks: [
+          { id: 3, title: "B", artist: "Y" },
+          { id: 4, title: "B", artist: "Y" },
+        ],
+      },
+    ]);
+    expect(removals.map((t) => t.id)).toEqual([2, 4]);
   });
 });
 
