@@ -31,6 +31,9 @@ interface FetchOptions {
   loginBody?: unknown;
   loginStatus?: number;
   favorites?: unknown;
+  artistSearch?: unknown;
+  artistTracks?: unknown;
+  playlist?: unknown;
 }
 
 /**
@@ -75,6 +78,24 @@ function makeFetch(options: FetchOptions): typeof fetch {
       return new Response(JSON.stringify(options.favorites ?? {}), {
         status: 200,
       });
+    }
+    if (path.endsWith("/artist/search")) {
+      return new Response(JSON.stringify(options.artistSearch ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/artist/get")) {
+      return new Response(JSON.stringify(options.artistTracks ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/playlist/create")) {
+      return new Response(JSON.stringify(options.playlist ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/playlist/addTracks")) {
+      return new Response(JSON.stringify({ status: "success" }), { status: 200 });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -184,5 +205,93 @@ describe("QobuzClient.getUserFavorites", () => {
     await expect(client.getUserFavorites("tracks")).rejects.toBeInstanceOf(
       QobuzError,
     );
+  });
+});
+
+describe("QobuzClient.searchArtists", () => {
+  it("signs the search and returns parsed artists", async () => {
+    const { client, recorded } = await initedClient({
+      artistSearch: { artists: { items: [{ id: 5, name: "Portishead" }] } },
+    });
+
+    const artists = await client.searchArtists("portishead", 5);
+
+    expect(artists).toEqual([{ id: 5, name: "Portishead" }]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/artist/search"));
+    expect(request?.url.searchParams.get("query")).toBe("portishead");
+    expect(request?.url.searchParams.get("limit")).toBe("5");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+    expect(request?.headers.get("X-App-Id")).toBe("100200300");
+  });
+});
+
+describe("QobuzClient.getArtistTopTracks", () => {
+  it("requests artist/get with extra=tracks and returns parsed tracks", async () => {
+    const { client, recorded } = await initedClient({
+      artistTracks: { tracks: { items: [{ id: 1, title: "Roads" }] } },
+    });
+
+    const tracks = await client.getArtistTopTracks(42, 3);
+
+    expect(tracks).toEqual([{ id: 1, title: "Roads" }]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/artist/get"));
+    expect(request?.url.searchParams.get("artist_id")).toBe("42");
+    expect(request?.url.searchParams.get("extra")).toBe("tracks");
+    expect(request?.url.searchParams.get("limit")).toBe("3");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("QobuzClient.createPlaylist", () => {
+  it("creates a playlist with the user token and returns its id", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+      playlist: { id: 777, name: "Road Trip" },
+    });
+    await client.loginWithOAuthCode("code");
+
+    const playlist = await client.createPlaylist("Road Trip", { isPublic: true });
+
+    expect(playlist).toEqual({ id: 777, name: "Road Trip" });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/playlist/create"));
+    expect(request?.url.searchParams.get("name")).toBe("Road Trip");
+    expect(request?.url.searchParams.get("is_public")).toBe("true");
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("throws when not signed in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.createPlaylist("x")).rejects.toBeInstanceOf(QobuzError);
+  });
+});
+
+describe("QobuzClient.addTracksToPlaylist", () => {
+  it("sends comma-joined track ids with the user token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.addTracksToPlaylist(777, [1, 2, 3]);
+
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/playlist/addTracks"),
+    );
+    expect(request?.url.searchParams.get("playlist_id")).toBe("777");
+    expect(request?.url.searchParams.get("track_ids")).toBe("1,2,3");
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("is a no-op for an empty track list (no request sent)", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.addTracksToPlaylist(777, []);
+
+    expect(
+      recorded.some((r) => r.url.pathname.endsWith("/playlist/addTracks")),
+    ).toBe(false);
   });
 });

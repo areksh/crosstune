@@ -12,6 +12,10 @@ export const paths = {
   oauthCallback: "/oauth/callback",
   trackGetFileUrl: "/track/getFileUrl",
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
+  artistSearch: "/artist/search",
+  artistGet: "/artist/get",
+  playlistCreate: "/playlist/create",
+  playlistAddTracks: "/playlist/addTracks",
 } as const;
 
 /** Build the full URL for an endpoint path. */

@@ -11,7 +11,15 @@ import { parseLoginResponse, type UserSession } from "./auth.js";
 import { fetchBundleTokens, type BundleTokens } from "./bundle.js";
 import { buildUrl, paths } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
-import { signGetFileUrl, signRequest } from "./signing.js";
+import {
+  parseArtists,
+  parsePlaylist,
+  parseTracks,
+  type Artist,
+  type Playlist,
+  type Track,
+} from "./models.js";
+import { signGetFileUrl, signRequest, signSearch } from "./signing.js";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0";
@@ -172,6 +180,169 @@ export class QobuzClient {
       );
     }
     return response.json();
+  }
+
+  /**
+   * Search for artists by name, most relevant first.
+   *
+   * @param query The artist name to search for.
+   * @param limit Maximum results (default 10).
+   * @param offset Result offset (default 0).
+   */
+  async searchArtists(query: string, limit = 10, offset = 0): Promise<Artist[]> {
+    const timestamp = this.#now();
+    const signature = signSearch(
+      "artistsearch",
+      query,
+      limit,
+      offset,
+      undefined,
+      timestamp,
+      this.#requireSecret(),
+    );
+    const response = await this.#request("GET", paths.artistSearch, {
+      query: {
+        query,
+        limit: String(limit),
+        offset: String(offset),
+        request_ts: String(timestamp),
+        request_sig: signature,
+      },
+      headers: this.#headers(),
+    });
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `artist search failed with HTTP ${response.status}`,
+      );
+    }
+    return parseArtists(await response.json());
+  }
+
+  /**
+   * Fetch an artist's top tracks.
+   *
+   * @param artistId The Qobuz artist id.
+   * @param limit Maximum tracks (default 10).
+   */
+  async getArtistTopTracks(artistId: number, limit = 10): Promise<Track[]> {
+    const response = await this.#signedGet("artistget", paths.artistGet, [
+      ["artist_id", String(artistId)],
+      ["extra", "tracks"],
+      ["limit", String(limit)],
+      ["offset", "0"],
+    ]);
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `artist/get failed with HTTP ${response.status}`,
+      );
+    }
+    return parseTracks(await response.json());
+  }
+
+  /**
+   * Create a new playlist owned by the signed-in user.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async createPlaylist(
+    name: string,
+    options: { description?: string; isPublic?: boolean } = {},
+  ): Promise<Playlist> {
+    const kvPairs: Array<[string, string]> = [
+      ["name", name],
+      ["is_public", String(options.isPublic ?? false)],
+    ];
+    if (options.description !== undefined) {
+      kvPairs.push(["description", options.description]);
+    }
+    const response = await this.#signedGet(
+      "playlistcreate",
+      paths.playlistCreate,
+      kvPairs,
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/create failed with HTTP ${response.status}`,
+      );
+    }
+    return parsePlaylist(await response.json());
+  }
+
+  /**
+   * Add tracks to a playlist. A no-op for an empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async addTracksToPlaylist(
+    playlistId: number,
+    trackIds: readonly number[],
+  ): Promise<void> {
+    if (trackIds.length === 0) {
+      return;
+    }
+    const response = await this.#signedGet(
+      "playlistaddTracks",
+      paths.playlistAddTracks,
+      [
+        ["playlist_id", String(playlistId)],
+        ["track_ids", trackIds.join(",")],
+      ],
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/addTracks failed with HTTP ${response.status}`,
+      );
+    }
+  }
+
+  /**
+   * Issue a signed GET: sign the (key-sorted) parameters, append request_ts and
+   * request_sig, and send with the app id header (plus the user token when
+   * signed in, or required when `requireAuth` is set).
+   */
+  async #signedGet(
+    methodName: string,
+    path: string,
+    kvPairs: ReadonlyArray<readonly [string, string]>,
+    options: { requireAuth?: boolean } = {},
+  ): Promise<Response> {
+    const timestamp = this.#now();
+    const signature = signRequest(
+      methodName,
+      kvPairs,
+      timestamp,
+      this.#requireSecret(),
+    );
+    const query: Record<string, string> = {};
+    for (const [key, value] of kvPairs) {
+      query[key] = value;
+    }
+    query["request_ts"] = String(timestamp);
+    query["request_sig"] = signature;
+
+    const headers = options.requireAuth
+      ? {
+          ...this.#appIdHeaders(),
+          "X-User-Auth-Token": this.#requireSession().userAuthToken,
+        }
+      : this.#headers();
+
+    return this.#request("GET", path, { query, headers });
+  }
+
+  /** App id header, plus the user token when signed in (optional auth). */
+  #headers(): Record<string, string> {
+    const headers = this.#appIdHeaders();
+    if (this.#session !== undefined) {
+      headers["X-User-Auth-Token"] = this.#session.userAuthToken;
+    }
+    return headers;
   }
 
   /** Try each candidate secret against a signed probe; return the first valid one. */
