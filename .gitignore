@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test/coverage output
+coverage/
+
+# Local cache (extracted Qobuz bundle tokens, etc.)
+.cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS cruft
+.idea/
+.vscode/
+.DS_Store
+*.log
