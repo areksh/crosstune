@@ -22,3 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signature that catches remasters and same-song-different-album while keeping
   live/acoustic/remix versions separate. Reports only; makes no changes. Adds
   paginated fetching of playlist and favourite tracks (with ISRC/artist/album).
+- Deduplicator keep/remove plan: each duplicate group marks one copy to keep and
+  the rest to remove, chosen by `--keep <strategy>` (default `first-added`). The
+  plan is a structured resolution whose kept choice can be overridden before a
+  future removal step consumes it.

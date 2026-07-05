@@ -73,7 +73,18 @@ npm run dev -- deduplicate --favourites
 The deduplicator matches tracks by ISRC or by a normalised artist+title
 signature: it treats remasters and the same song on different albums as
 duplicates, while keeping genuinely different versions (live, acoustic, remix)
-separate. It only reports what it finds and makes no changes.
+separate. For each duplicate group it marks one copy to keep and the rest to
+remove:
+
+```
+1. Black Sabbath - Paranoid
+   keep  id 8816871    Paranoid  [Greatest Hits]
+   drop  id 386614187  Paranoid  [Paranoid]
+```
+
+Which copy is kept is chosen by `--keep <strategy>` (default `first-added`, i.e.
+the first one added). More strategies (highest quality, oldest/newest release)
+are planned. The tool only reports the plan and makes no changes yet.
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 

@@ -12,9 +12,10 @@
  *       Build a playlist from the given artists' top tracks. Artist names may
  *       also be piped on stdin, one per line.
  *
- *   qobuz-helper deduplicate (--playlist <id> | --favourites)
+ *   qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>]
  *       Report duplicate tracks (including remasters and same-song-different-
- *       album) in a playlist or in your favourites. Reports only; changes nothing.
+ *       album) in a playlist or in your favourites, marking which copy to keep
+ *       (--keep, default first-added). Reports only; changes nothing.
  *
  * With no command, `check` runs.
  */
@@ -25,7 +26,8 @@ import { parseDedupeArgs, parsePlaylistArgs } from "./cli/args.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import {
   deduplicateTracks,
-  formatDuplicateReport,
+  formatResolutionReport,
+  resolveDuplicateGroups,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
@@ -134,7 +136,7 @@ function planPlaylistFromArtists(
 function planDeduplicate(
   argv: string[],
 ): (client: QobuzClient) => Promise<void> {
-  const source = parseDedupeArgs(argv);
+  const { source, keep } = parseDedupeArgs(argv);
 
   return async (client: QobuzClient): Promise<void> => {
     const where =
@@ -149,14 +151,9 @@ function planDeduplicate(
     console.log(`  ${tracks.length} tracks fetched`);
 
     const groups = deduplicateTracks(tracks);
-    const duplicateCount = groups.reduce(
-      (sum, group) => sum + (group.length - 1),
-      0,
-    );
-    console.log(
-      `  ${duplicateCount} redundant track${duplicateCount === 1 ? "" : "s"} across ${groups.length} group${groups.length === 1 ? "" : "s"}\n`,
-    );
-    console.log(formatDuplicateReport(groups));
+    const resolved = resolveDuplicateGroups(groups, keep);
+    console.log(`  keeping the ${keep} copy of each duplicate\n`);
+    console.log(formatResolutionReport(resolved));
   };
 }
 
@@ -181,7 +178,7 @@ function printUsage(): void {
       "Usage:",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
-      "  qobuz-helper deduplicate (--playlist <id> | --favourites)",
+      "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep first-added]",
       "",
       "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
     ].join("\n"),

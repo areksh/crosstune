@@ -2,6 +2,8 @@
  * Argument parsing for CLI commands.
  */
 
+import type { KeepStrategy } from "../features/deduplicate.js";
+
 export interface PlaylistArgs {
   playlistName: string;
   artists: string[];
@@ -14,17 +16,28 @@ export type DedupeSource =
   | { type: "playlist"; playlistId: number }
   | { type: "favourites" };
 
+export interface DedupeOptions {
+  source: DedupeSource;
+  keep: KeepStrategy;
+}
+
+/** Keep strategies the CLI currently accepts. */
+const SUPPORTED_KEEP: readonly KeepStrategy[] = ["first-added"];
+const DEFAULT_KEEP: KeepStrategy = "first-added";
+
 /**
  * Parse the arguments for the `deduplicate` command.
  *
  * Exactly one source must be given: `--playlist <id>` or `--favourites`
- * (`--favorites` is accepted too).
+ * (`--favorites` is accepted too). `--keep <strategy>` chooses which copy to
+ * keep (default `first-added`).
  *
- * @throws {Error} if neither or both sources are given, or the id is invalid.
+ * @throws {Error} if the source or the keep strategy is missing/invalid.
  */
-export function parseDedupeArgs(argv: readonly string[]): DedupeSource {
+export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
   let playlistId: number | undefined;
   let favourites = false;
+  let keep: KeepStrategy = DEFAULT_KEEP;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -38,6 +51,15 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeSource {
       playlistId = value;
     } else if (arg === "--favourites" || arg === "--favorites") {
       favourites = true;
+    } else if (arg === "--keep") {
+      const raw = argv[i + 1];
+      i += 1;
+      if (!isSupportedKeep(raw)) {
+        throw new Error(
+          `--keep must be one of: ${SUPPORTED_KEEP.join(", ")} (got "${raw}")`,
+        );
+      }
+      keep = raw;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -46,13 +68,22 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeSource {
   if (playlistId !== undefined && favourites) {
     throw new Error("Give only one of --playlist or --favourites");
   }
-  if (playlistId !== undefined) {
-    return { type: "playlist", playlistId };
-  }
-  if (favourites) {
-    return { type: "favourites" };
-  }
-  throw new Error("A source is required: --playlist <id> or --favourites");
+  const source: DedupeSource =
+    playlistId !== undefined
+      ? { type: "playlist", playlistId }
+      : favourites
+        ? { type: "favourites" }
+        : (() => {
+            throw new Error(
+              "A source is required: --playlist <id> or --favourites",
+            );
+          })();
+
+  return { source, keep };
+}
+
+function isSupportedKeep(value: string | undefined): value is KeepStrategy {
+  return value !== undefined && (SUPPORTED_KEEP as readonly string[]).includes(value);
 }
 
 /**

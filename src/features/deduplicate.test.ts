@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   deduplicateTracks,
   findDuplicateGroups,
-  formatDuplicateReport,
+  formatResolutionReport,
   normalise,
+  removedTracks,
+  resolveDuplicateGroups,
+  selectKeeper,
   toDedupTrack,
   trackSignature,
   type DedupTrack,
@@ -138,21 +141,64 @@ describe("deduplicateTracks", () => {
   });
 });
 
-describe("formatDuplicateReport", () => {
-  it("reports a friendly message when there are no duplicates", () => {
-    expect(formatDuplicateReport([])).toBe("No duplicates found.");
+describe("selectKeeper", () => {
+  it("keeps the first-added track (fetch order)", () => {
+    const group: DedupTrack[] = [
+      { id: 100, title: "So What", artist: "Miles Davis" },
+      { id: 200, title: "So What (2015 Remaster)", artist: "Miles Davis" },
+    ];
+    expect(selectKeeper(group, "first-added")).toBe(100);
   });
 
-  it("lists each group with its members", () => {
-    const report = formatDuplicateReport([
+  it("throws on an empty group", () => {
+    expect(() => selectKeeper([], "first-added")).toThrow();
+  });
+});
+
+describe("resolveDuplicateGroups / removedTracks", () => {
+  it("produces a plan keeping the first track and removing the rest", () => {
+    const groups: DedupTrack[][] = [
       [
-        { id: 100, title: "So What", artist: "Miles Davis", album: "Kind of Blue" },
+        { id: 100, title: "So What", artist: "Miles Davis" },
         { id: 200, title: "So What (2015 Remaster)", artist: "Miles Davis" },
+        { id: 300, title: "So What", artist: "Miles Davis" },
       ],
+    ];
+    const [resolved] = resolveDuplicateGroups(groups, "first-added");
+    expect(resolved?.keepId).toBe(100);
+    expect(removedTracks(resolved!).map((t) => t.id)).toEqual([200, 300]);
+  });
+
+  it("respects a user-overridden keepId when computing removals", () => {
+    const resolved = {
+      keepId: 200,
+      tracks: [
+        { id: 100, title: "A", artist: "X" },
+        { id: 200, title: "A", artist: "X" },
+      ],
+    };
+    expect(removedTracks(resolved).map((t) => t.id)).toEqual([100]);
+  });
+});
+
+describe("formatResolutionReport", () => {
+  it("reports a friendly message when there are no duplicates", () => {
+    expect(formatResolutionReport([])).toBe("No duplicates found.");
+  });
+
+  it("marks the kept and dropped tracks in each group", () => {
+    const report = formatResolutionReport([
+      {
+        keepId: 100,
+        tracks: [
+          { id: 100, title: "So What", artist: "Miles Davis", album: "Kind of Blue" },
+          { id: 200, title: "So What (2015 Remaster)", artist: "Miles Davis" },
+        ],
+      },
     ]);
-    expect(report).toContain("Found 1 duplicate group");
-    expect(report).toContain("Miles Davis - So What (2 copies)");
-    expect(report).toContain("id 100: So What  [Kind of Blue]");
-    expect(report).toContain("id 200: So What (2015 Remaster)");
+    expect(report).toContain("Found 1 duplicate group; keeping 1 each, 1 to remove:");
+    expect(report).toContain("Miles Davis - So What");
+    expect(report).toContain("keep  id 100: So What  [Kind of Blue]");
+    expect(report).toContain("drop  id 200: So What (2015 Remaster)");
   });
 });
