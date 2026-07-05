@@ -8,25 +8,26 @@
  * The web UI and the actual tools build on top of this.
  *
  * Usage:
- *   QOBUZ_EMAIL=you@example.com QOBUZ_PASSWORD=... npm run dev
+ *   npm run dev                       # prompts for email and password
+ *   QOBUZ_EMAIL=you@example.com npm run dev   # prompts for password only
+ *
+ * Prompting is recommended: it keeps the password out of the shell, which
+ * otherwise mangles special characters (e.g. zsh expands `$` in double quotes).
  */
 
+import { resolveCredentials } from "./cli/credentials.js";
+import { createTerminalPrompter } from "./cli/prompt.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
 
-function readCredentials(): { email: string; password: string } {
-  const email = process.env["QOBUZ_EMAIL"];
-  const password = process.env["QOBUZ_PASSWORD"];
-  if (!email || !password) {
-    console.error(
-      "Set QOBUZ_EMAIL and QOBUZ_PASSWORD in the environment to run the slice.",
-    );
-    process.exit(2);
-  }
-  return { email, password };
-}
-
 async function main(): Promise<void> {
-  const { email, password } = readCredentials();
+  const prompter = createTerminalPrompter();
+  let email: string;
+  let password: string;
+  try {
+    ({ email, password } = await resolveCredentials(process.env, prompter));
+  } finally {
+    prompter.close();
+  }
   const client = new QobuzClient();
 
   console.log("Extracting Qobuz bundle tokens...");
