@@ -2,25 +2,54 @@
 /**
  * CLI entry point.
  *
- * For now this is the vertical-slice smoke test: it extracts the Qobuz bundle
- * tokens, signs in through the browser OAuth flow, and makes one authenticated
- * request, proving the whole plumbing works against live Qobuz. The web UI and
- * the actual tools build on top of this.
+ * Signs in through the browser OAuth flow, then runs a command:
  *
- * Usage:
- *   npm run dev
+ *   qobuz-helper check
+ *       Vertical-slice smoke test (extraction -> sign-in -> one API call).
  *
- * A browser window opens on Qobuz's sign-in page; after you sign in, Qobuz
- * redirects back to a local address and the session is established. No password
- * is ever handled by this program.
+ *   qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] \
+ *       "Artist One" "Artist Two" ...
+ *       Build a playlist from the given artists' top tracks. Artist names may
+ *       also be piped on stdin, one per line.
+ *
+ * With no command, `check` runs.
  */
 
+import { readFileSync } from "node:fs";
+
+import { parsePlaylistArgs } from "./cli/args.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
+import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
 
 async function main(): Promise<void> {
-  const client = new QobuzClient();
+  const args = process.argv.slice(2);
+  const command = args[0] ?? "check";
+  if (command === "--help" || command === "-h") {
+    printUsage();
+    return;
+  }
 
+  // Resolve the command and validate its arguments *before* any network or
+  // sign-in, so bad input fails fast without opening a browser.
+  let run: (client: QobuzClient) => Promise<void>;
+  switch (command) {
+    case "check":
+      run = runCheck;
+      break;
+    case "playlist-from-artists": {
+      const plan = planPlaylistFromArtists(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    default:
+      console.error(`Unknown command: ${command}`);
+      printUsage();
+      process.exitCode = 2;
+      return;
+  }
+
+  const client = new QobuzClient();
   console.log("Extracting Qobuz bundle tokens...");
   await client.init();
   console.log(`  app id: ${client.appId}`);
@@ -32,13 +61,84 @@ async function main(): Promise<void> {
     `  signed in as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
+  await run(client);
+}
+
+async function runCheck(client: QobuzClient): Promise<void> {
   console.log("Fetching favourite tracks...");
   const favorites = (await client.getUserFavorites("tracks")) as {
     tracks?: { total?: number };
   };
   console.log(`  favourite tracks: ${favorites.tracks?.total ?? "unknown"}`);
+  console.log("\nOK: extraction -> OAuth sign-in -> authenticated call.");
+}
 
-  console.log("\nVertical slice OK: extraction -> OAuth sign-in -> authenticated call.");
+/**
+ * Validate the playlist command's arguments (and read any piped artist names)
+ * up front, returning an executor to run once the client is signed in.
+ */
+function planPlaylistFromArtists(
+  argv: string[],
+): (client: QobuzClient) => Promise<void> {
+  const parsed = parsePlaylistArgs(argv);
+  const artists =
+    parsed.artists.length > 0 ? parsed.artists : readArtistsFromStdin();
+  if (artists.length === 0) {
+    throw new Error(
+      "No artists given. Pass them as arguments or pipe them on stdin.",
+    );
+  }
+
+  return async (client: QobuzClient): Promise<void> => {
+    console.log(
+      `Building playlist "${parsed.playlistName}" from ${artists.length} artists...`,
+    );
+    const result = await buildPlaylistFromArtists(client, {
+      artists,
+      playlistName: parsed.playlistName,
+      isPublic: parsed.isPublic,
+      ...(parsed.tracksPerArtist !== undefined && {
+        tracksPerArtist: parsed.tracksPerArtist,
+      }),
+    });
+
+    console.log(
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
+    );
+    for (const resolved of result.resolvedArtists) {
+      console.log(`  ${resolved.artist.name}: ${resolved.trackCount} tracks`);
+    }
+    if (result.unresolvedArtists.length > 0) {
+      console.log(`  not found: ${result.unresolvedArtists.join(", ")}`);
+    }
+  };
+}
+
+/** Read artist names from piped stdin (one per line); empty when stdin is a TTY. */
+function readArtistsFromStdin(): string[] {
+  if (process.stdin.isTTY) {
+    return [];
+  }
+  try {
+    return readFileSync(0, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function printUsage(): void {
+  console.log(
+    [
+      "Usage:",
+      "  qobuz-helper check",
+      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
+      "",
+      "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
+    ].join("\n"),
+  );
 }
 
 main().catch((error: unknown) => {

@@ -17,11 +17,15 @@ API that the Qobuz web player uses. That makes the integration inherently
 unofficial and subject to breakage when Qobuz changes their web bundle. See
 [docs/adr/](docs/adr/) for the architectural decisions behind the project.
 
-## Planned tools
+## Tools
+
+- **Playlist from artists** -- build a playlist from just a list of artists,
+  using each artist's top tracks. Available now (see below).
+
+Planned:
 
 - **Advanced deduplicator** -- find duplicate tracks in your library, including
   remasters and the same song appearing on different albums.
-- **Playlist from artists** -- build a playlist from just a list of artists.
 
 More to follow.
 
@@ -44,6 +48,23 @@ authenticate there, Qobuz redirects back to a temporary local address and the
 session is established. Your password is entered only on Qobuz's site and is
 never handled by this program (email/password sign-in against the API is no
 longer supported by Qobuz).
+
+### Commands
+
+```sh
+# Vertical-slice smoke test (sign in and make one API call)
+npm run dev -- check
+
+# Build a playlist from a list of artists' top tracks
+npm run dev -- playlist-from-artists --name "Road Trip" --tracks 5 \
+  "Portishead" "Massive Attack" "Tricky"
+
+# Artist names can also be piped in, one per line
+cat artists.txt | npm run dev -- playlist-from-artists --name "Road Trip"
+```
+
+Options for `playlist-from-artists`: `--name` (required), `--tracks N` (top
+tracks per artist, default 10), `--public` (make the playlist public).
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 

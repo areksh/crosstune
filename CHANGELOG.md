@@ -13,3 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conventions (see ADR-0001).
 - Qobuz client vertical slice: bundle-token extraction, request signing,
   browser OAuth sign-in, and a first authenticated request.
+- Playlist-from-artists tool: resolve a list of artist names to their top
+  tracks and build a playlist from them (`qobuz-helper playlist-from-artists`).
+  Adds client methods for artist search, artist top tracks, playlist create,
+  and add-tracks.
