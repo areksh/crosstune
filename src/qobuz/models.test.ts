@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArtists, parsePlaylist, parseTracks } from "./models.js";
+import {
+  parseArtists,
+  parsePlaylist,
+  parseTracks,
+  parseTracksPage,
+} from "./models.js";
 
 describe("parseArtists", () => {
   it("extracts id and name from the artists.items list", () => {
@@ -51,6 +56,45 @@ describe("parseTracks", () => {
   it("skips malformed track entries", () => {
     const json = { tracks: { items: [{ id: 10, title: "Ok" }, { id: 11 }] } };
     expect(parseTracks(json)).toEqual([{ id: 10, title: "Ok" }]);
+  });
+
+  it("pulls artist, isrc and album when present", () => {
+    const json = {
+      tracks: {
+        items: [
+          {
+            id: 10,
+            title: "So What",
+            isrc: "USSM15900001",
+            performer: { name: "Miles Davis" },
+            album: { title: "Kind of Blue" },
+          },
+        ],
+      },
+    };
+    expect(parseTracks(json)).toEqual([
+      {
+        id: 10,
+        title: "So What",
+        artist: "Miles Davis",
+        isrc: "USSM15900001",
+        album: "Kind of Blue",
+      },
+    ]);
+  });
+});
+
+describe("parseTracksPage", () => {
+  it("returns the tracks and the total for pagination", () => {
+    const json = { tracks: { items: [{ id: 1, title: "A" }], total: 137 } };
+    expect(parseTracksPage(json)).toEqual({
+      tracks: [{ id: 1, title: "A" }],
+      total: 137,
+    });
+  });
+
+  it("defaults total to zero when absent", () => {
+    expect(parseTracksPage({}).total).toBe(0);
   });
 });
 

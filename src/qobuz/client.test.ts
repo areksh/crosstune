@@ -295,3 +295,40 @@ describe("QobuzClient.addTracksToPlaylist", () => {
     ).toBe(false);
   });
 });
+
+describe("QobuzClient.getPlaylistTracks", () => {
+  it("pages through all tracks until the total is reached", async () => {
+    // 3 tracks total, served 2 then 1 across two pages.
+    const pages = [
+      { tracks: { items: [{ id: 1, title: "A" }, { id: 2, title: "B" }], total: 3 } },
+      { tracks: { items: [{ id: 3, title: "C" }], total: 3 } },
+    ];
+    let call = 0;
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/playlist/get")) {
+        const body = pages[call] ?? pages[pages.length - 1];
+        call += 1;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+
+    const tracks = await client.getPlaylistTracks(555);
+
+    expect(tracks.map((t) => t.id)).toEqual([1, 2, 3]);
+    expect(call).toBe(2);
+  });
+});
+
+describe("QobuzClient.getFavoriteTracks", () => {
+  it("returns parsed favourite tracks and requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.getFavoriteTracks()).rejects.toBeInstanceOf(QobuzError);
+  });
+});

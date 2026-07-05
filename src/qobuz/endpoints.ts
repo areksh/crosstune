@@ -14,6 +14,7 @@ export const paths = {
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
   artistSearch: "/artist/search",
   artistGet: "/artist/get",
+  playlistGet: "/playlist/get",
   playlistCreate: "/playlist/create",
   playlistAddTracks: "/playlist/addTracks",
 } as const;

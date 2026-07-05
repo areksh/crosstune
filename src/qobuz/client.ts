@@ -15,9 +15,11 @@ import {
   parseArtists,
   parsePlaylist,
   parseTracks,
+  parseTracksPage,
   type Artist,
   type Playlist,
   type Track,
+  type TracksPage,
 } from "./models.js";
 import { signGetFileUrl, signRequest, signSearch } from "./signing.js";
 
@@ -298,6 +300,84 @@ export class QobuzClient {
         "api-response",
         `playlist/addTracks failed with HTTP ${response.status}`,
       );
+    }
+  }
+
+  /**
+   * Fetch all of the signed-in user's favourite tracks (all pages).
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async getFavoriteTracks(): Promise<Track[]> {
+    const session = this.#requireSession();
+    return this.#collectAllTracks(async (limit, offset) => {
+      const timestamp = this.#now();
+      const signature = signRequest(
+        "favoritegetUserFavorites",
+        [],
+        timestamp,
+        this.#requireSecret(),
+      );
+      const response = await this.#request(
+        "GET",
+        paths.favoriteGetUserFavorites,
+        {
+          query: {
+            type: "tracks",
+            limit: String(limit),
+            offset: String(offset),
+            request_ts: String(timestamp),
+            request_sig: signature,
+          },
+          headers: {
+            ...this.#appIdHeaders(),
+            "X-User-Auth-Token": session.userAuthToken,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `getUserFavorites failed with HTTP ${response.status}`,
+        );
+      }
+      return parseTracksPage(await response.json());
+    });
+  }
+
+  /** Fetch all tracks of a playlist (all pages). */
+  async getPlaylistTracks(playlistId: number): Promise<Track[]> {
+    return this.#collectAllTracks(async (limit, offset) => {
+      const response = await this.#signedGet("playlistget", paths.playlistGet, [
+        ["playlist_id", String(playlistId)],
+        ["limit", String(limit)],
+        ["offset", String(offset)],
+        ["extra", "tracks"],
+      ]);
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `playlist/get failed with HTTP ${response.status}`,
+        );
+      }
+      return parseTracksPage(await response.json());
+    });
+  }
+
+  /** Page through a track source until every track has been collected. */
+  async #collectAllTracks(
+    fetchPage: (limit: number, offset: number) => Promise<TracksPage>,
+  ): Promise<Track[]> {
+    const pageSize = 500;
+    const all: Track[] = [];
+    let offset = 0;
+    for (;;) {
+      const page = await fetchPage(pageSize, offset);
+      all.push(...page.tracks);
+      offset += page.tracks.length;
+      if (page.tracks.length === 0 || all.length >= page.total) {
+        return all;
+      }
     }
   }
 
