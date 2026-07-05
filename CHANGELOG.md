@@ -11,5 +11,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Project scaffolding: TypeScript, Vitest, and the going-forward engineering
   conventions (see ADR-0001).
-- Qobuz client vertical slice: bundle-token extraction, request signing, sign-in,
-  and a first authenticated request.
+- Qobuz client vertical slice: bundle-token extraction, request signing,
+  browser OAuth sign-in, and a first authenticated request.

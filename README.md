@@ -35,21 +35,17 @@ More to follow.
 ```sh
 npm install
 npm test          # run the test suite
-npm run dev       # run the CLI entry point (prompts for credentials)
+npm run dev       # run the CLI entry point
 ```
 
-By default the CLI prompts for your email and password, with the password
-hidden. This is the recommended path: it keeps the password out of your shell
-history and out of the environment, and avoids the shell mangling special
-characters (for example, zsh expands `$` inside double quotes, silently
-corrupting a password before the program ever sees it).
+Sign-in uses Qobuz's browser OAuth flow -- the same one the official web player
+uses. Running the CLI opens your browser on Qobuz's own sign-in page; after you
+authenticate there, Qobuz redirects back to a temporary local address and the
+session is established. Your password is entered only on Qobuz's site and is
+never handled by this program (email/password sign-in against the API is no
+longer supported by Qobuz).
 
-You can supply either value via an environment variable to skip its prompt; any
-value not supplied is prompted for:
-
-```sh
-QOBUZ_EMAIL=you@example.com npm run dev   # prompts for the password only
-```
+If the browser does not open automatically, the CLI prints the URL to visit.
 
 ## Development
 

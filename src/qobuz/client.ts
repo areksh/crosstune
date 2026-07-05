@@ -65,28 +65,68 @@ export class QobuzClient {
   }
 
   /**
-   * Sign in with email and password.
+   * Complete sign-in with an OAuth authorization code.
    *
-   * @throws {QobuzError} kind `authentication` on invalid credentials, or
+   * Qobuz no longer accepts email/password against `/user/login`; the user
+   * authenticates in a browser on Qobuz's site, which yields an authorization
+   * code (see the `oauth` module and the CLI's browser flow). This exchanges
+   * that code in two steps: `/oauth/callback` returns a user auth token, then a
+   * POST to `/user/login` with that token returns the full session.
+   *
+   * @throws {QobuzError} kind `bundle-extraction` if the bundle carried no OAuth
+   *   private key; `authentication` if the code/token is rejected; or
    *   `ineligible-user` if the account has no active subscription.
    */
-  async login(email: string, password: string): Promise<UserSession> {
-    const response = await this.#get(paths.userLogin, {
-      query: { email, password },
-      headers: this.#appIdHeaders(),
-    });
-
-    if (response.status === 401) {
-      throw new QobuzError("authentication", "Invalid credentials");
-    }
-    if (!response.ok) {
+  async loginWithOAuthCode(code: string): Promise<UserSession> {
+    const tokens = this.#requireTokens();
+    if (tokens.privateKey === undefined) {
       throw new QobuzError(
-        "api-response",
-        `Login failed with HTTP ${response.status}`,
+        "bundle-extraction",
+        "OAuth private key not available in bundle",
       );
     }
 
-    const session = parseLoginResponse(await response.json());
+    // Step 1: exchange the authorization code for a user auth token.
+    const callbackResponse = await this.#request("GET", paths.oauthCallback, {
+      query: {
+        code,
+        private_key: tokens.privateKey,
+        app_id: tokens.appId,
+      },
+      headers: this.#appIdHeaders(),
+    });
+    if (!callbackResponse.ok) {
+      throw new QobuzError(
+        "authentication",
+        `OAuth callback failed with HTTP ${callbackResponse.status}`,
+      );
+    }
+    const callbackJson = (await callbackResponse.json()) as { token?: unknown };
+    if (typeof callbackJson.token !== "string") {
+      throw new QobuzError("authentication", "OAuth callback returned no token");
+    }
+    const token = callbackJson.token;
+
+    // Step 2: exchange the token for a full session.
+    const loginResponse = await this.#request("POST", paths.userLogin, {
+      headers: {
+        ...this.#appIdHeaders(),
+        "X-User-Auth-Token": token,
+        "Content-Type": "text/plain;charset=UTF-8",
+      },
+      body: "extra=partner",
+    });
+    if (loginResponse.status === 401) {
+      throw new QobuzError("authentication", "OAuth token rejected");
+    }
+    if (!loginResponse.ok) {
+      throw new QobuzError(
+        "api-response",
+        `Login failed with HTTP ${loginResponse.status}`,
+      );
+    }
+
+    const session = parseLoginResponse(await loginResponse.json());
     this.#session = session;
     return session;
   }
@@ -111,7 +151,7 @@ export class QobuzClient {
       this.#requireSecret(),
     );
 
-    const response = await this.#get(paths.favoriteGetUserFavorites, {
+    const response = await this.#request("GET", paths.favoriteGetUserFavorites, {
       query: {
         type,
         limit: String(limit),
@@ -144,7 +184,7 @@ export class QobuzClient {
         timestamp,
         secret,
       );
-      const response = await this.#get(paths.trackGetFileUrl, {
+      const response = await this.#request("GET", paths.trackGetFileUrl, {
         query: {
           track_id: String(SECRET_PROBE_TRACK_ID),
           format_id: "5",
@@ -165,18 +205,27 @@ export class QobuzClient {
     );
   }
 
-  async #get(
+  async #request(
+    method: "GET" | "POST",
     path: string,
-    options: { query: Record<string, string>; headers: Record<string, string> },
+    options: {
+      query?: Record<string, string>;
+      headers: Record<string, string>;
+      body?: string;
+    },
   ): Promise<Response> {
     const url = new URL(buildUrl(path));
-    for (const [key, value] of Object.entries(options.query)) {
+    for (const [key, value] of Object.entries(options.query ?? {})) {
       url.searchParams.set(key, value);
     }
-    return this.#fetch(url, {
-      method: "GET",
+    const init: RequestInit = {
+      method,
       headers: { "User-Agent": this.#userAgent, ...options.headers },
-    });
+    };
+    if (options.body !== undefined) {
+      init.body = options.body;
+    }
+    return this.#fetch(url, init);
   }
 
   #appIdHeaders(): Record<string, string> {
