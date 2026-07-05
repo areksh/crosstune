@@ -12,6 +12,7 @@ import { fetchBundleTokens, type BundleTokens } from "./bundle.js";
 import { buildUrl, paths } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
+  parseAlbumReleaseDate,
   parseArtists,
   parsePlaylist,
   parseTracks,
@@ -362,6 +363,74 @@ export class QobuzClient {
       }
       return parseTracksPage(await response.json());
     });
+  }
+
+  /** Look up an album's original release date (YYYY-MM-DD), if Qobuz has one. */
+  async getAlbumReleaseDate(albumId: string): Promise<string | undefined> {
+    const response = await this.#signedGet("albumget", paths.albumGet, [
+      ["album_id", albumId],
+    ]);
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `album/get failed with HTTP ${response.status}`,
+      );
+    }
+    return parseAlbumReleaseDate(await response.json());
+  }
+
+  /**
+   * Remove tracks from a playlist by their playlist-track ids. No-op for an
+   * empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async removeTracksFromPlaylist(
+    playlistId: number,
+    playlistTrackIds: readonly number[],
+  ): Promise<void> {
+    if (playlistTrackIds.length === 0) {
+      return;
+    }
+    const response = await this.#signedGet(
+      "playlistdeleteTracks",
+      paths.playlistDeleteTracks,
+      [
+        ["playlist_id", String(playlistId)],
+        ["playlist_track_ids", playlistTrackIds.join(",")],
+      ],
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/deleteTracks failed with HTTP ${response.status}`,
+      );
+    }
+  }
+
+  /**
+   * Remove tracks from the user's favourites by track id. No-op for an empty
+   * list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async removeFavoriteTracks(trackIds: readonly number[]): Promise<void> {
+    if (trackIds.length === 0) {
+      return;
+    }
+    const response = await this.#signedGet(
+      "favoritedelete",
+      paths.favoriteDelete,
+      [["track_ids", trackIds.join(",")]],
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `favorite/delete failed with HTTP ${response.status}`,
+      );
+    }
   }
 
   /** Page through a track source until every track has been collected. */

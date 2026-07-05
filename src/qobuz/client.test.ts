@@ -34,6 +34,7 @@ interface FetchOptions {
   artistSearch?: unknown;
   artistTracks?: unknown;
   playlist?: unknown;
+  album?: unknown;
 }
 
 /**
@@ -95,6 +96,15 @@ function makeFetch(options: FetchOptions): typeof fetch {
       });
     }
     if (path.endsWith("/playlist/addTracks")) {
+      return new Response(JSON.stringify({ status: "success" }), { status: 200 });
+    }
+    if (path.endsWith("/album/get")) {
+      return new Response(JSON.stringify(options.album ?? {}), { status: 200 });
+    }
+    if (
+      path.endsWith("/playlist/deleteTracks") ||
+      path.endsWith("/favorite/delete")
+    ) {
       return new Response(JSON.stringify({ status: "success" }), { status: 200 });
     }
     return new Response("not found", { status: 404 });
@@ -330,5 +340,72 @@ describe("QobuzClient.getFavoriteTracks", () => {
   it("returns parsed favourite tracks and requires sign-in", async () => {
     const { client } = await initedClient({});
     await expect(client.getFavoriteTracks()).rejects.toBeInstanceOf(QobuzError);
+  });
+});
+
+describe("QobuzClient.getAlbumReleaseDate", () => {
+  it("returns the album's original release date", async () => {
+    const { client } = await initedClient({
+      album: { id: "a", release_date_original: "1973-03-01" },
+    });
+    await expect(client.getAlbumReleaseDate("a")).resolves.toBe("1973-03-01");
+  });
+});
+
+describe("QobuzClient removal methods", () => {
+  it("removes playlist tracks by playlist-track id with the user token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.removeTracksFromPlaylist(555, [11, 22]);
+
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/playlist/deleteTracks"),
+    );
+    expect(request?.url.searchParams.get("playlist_id")).toBe("555");
+    expect(request?.url.searchParams.get("playlist_track_ids")).toBe("11,22");
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("removes favourite tracks by track id", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.removeFavoriteTracks([1, 2, 3]);
+
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/favorite/delete"),
+    );
+    expect(request?.url.searchParams.get("track_ids")).toBe("1,2,3");
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("is a no-op for empty removal lists (no request sent)", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.removeTracksFromPlaylist(555, []);
+    await client.removeFavoriteTracks([]);
+
+    expect(
+      recorded.some(
+        (r) =>
+          r.url.pathname.endsWith("/playlist/deleteTracks") ||
+          r.url.pathname.endsWith("/favorite/delete"),
+      ),
+    ).toBe(false);
+  });
+
+  it("requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.removeFavoriteTracks([1])).rejects.toBeInstanceOf(
+      QobuzError,
+    );
   });
 });

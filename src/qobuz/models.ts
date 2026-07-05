@@ -22,6 +22,18 @@ export interface Track {
   isrc?: string;
   /** Album title the track appears on, when present. */
   album?: string;
+  /** Album id, used to look up release dates. */
+  albumId?: string;
+  /** Id of this track *within a playlist*, needed to remove it from that playlist. */
+  playlistTrackId?: number;
+  /** Maximum bit depth (e.g. 16, 24), a quality signal. */
+  bitDepth?: number;
+  /** Maximum sampling rate in kHz (e.g. 44.1, 96), a quality signal. */
+  samplingRate?: number;
+  /** Whether the track is hi-res. */
+  hires?: boolean;
+  /** Original release date (YYYY-MM-DD) when available on the embedded album. */
+  releaseDate?: string;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -96,10 +108,49 @@ function parseTrack(item: unknown): Track | undefined {
     track.isrc = item["isrc"];
   }
   const album = item["album"];
-  if (isRecord(album) && typeof album["title"] === "string") {
-    track.album = album["title"];
+  if (isRecord(album)) {
+    if (typeof album["title"] === "string") {
+      track.album = album["title"];
+    }
+    if (typeof album["id"] === "string") {
+      track.albumId = album["id"];
+    }
+    const embeddedDate = releaseDateOf(album);
+    if (embeddedDate !== undefined) {
+      track.releaseDate = embeddedDate;
+    }
+  }
+  if (typeof item["playlist_track_id"] === "number") {
+    track.playlistTrackId = item["playlist_track_id"];
+  }
+  if (typeof item["maximum_bit_depth"] === "number") {
+    track.bitDepth = item["maximum_bit_depth"];
+  }
+  if (typeof item["maximum_sampling_rate"] === "number") {
+    track.samplingRate = item["maximum_sampling_rate"];
+  }
+  if (typeof item["hires"] === "boolean") {
+    track.hires = item["hires"];
   }
   return track;
+}
+
+/** Read a release date (YYYY-MM-DD) from an album object, if present. */
+function releaseDateOf(album: Record<string, unknown>): string | undefined {
+  const original = album["release_date_original"];
+  if (typeof original === "string" && original.length > 0) {
+    return original.slice(0, 10);
+  }
+  const releasedAt = album["released_at"];
+  if (typeof releasedAt === "number") {
+    return new Date(releasedAt * 1000).toISOString().slice(0, 10);
+  }
+  return undefined;
+}
+
+/** Parse an album/get response for its original release date (YYYY-MM-DD). */
+export function parseAlbumReleaseDate(response: unknown): string | undefined {
+  return isRecord(response) ? releaseDateOf(response) : undefined;
 }
 
 /**

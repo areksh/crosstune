@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseAlbumReleaseDate,
   parseArtists,
   parsePlaylist,
   parseTracks,
@@ -58,7 +59,7 @@ describe("parseTracks", () => {
     expect(parseTracks(json)).toEqual([{ id: 10, title: "Ok" }]);
   });
 
-  it("pulls artist, isrc and album when present", () => {
+  it("pulls artist, isrc, album, quality, ids and release date when present", () => {
     const json = {
       tracks: {
         items: [
@@ -67,7 +68,15 @@ describe("parseTracks", () => {
             title: "So What",
             isrc: "USSM15900001",
             performer: { name: "Miles Davis" },
-            album: { title: "Kind of Blue" },
+            album: {
+              id: "abc123",
+              title: "Kind of Blue",
+              release_date_original: "1959-08-17",
+            },
+            playlist_track_id: 555,
+            maximum_bit_depth: 24,
+            maximum_sampling_rate: 96,
+            hires: true,
           },
         ],
       },
@@ -79,8 +88,38 @@ describe("parseTracks", () => {
         artist: "Miles Davis",
         isrc: "USSM15900001",
         album: "Kind of Blue",
+        albumId: "abc123",
+        releaseDate: "1959-08-17",
+        playlistTrackId: 555,
+        bitDepth: 24,
+        samplingRate: 96,
+        hires: true,
       },
     ]);
+  });
+
+  it("derives a release date from a released_at timestamp", () => {
+    const json = {
+      tracks: {
+        items: [
+          { id: 1, title: "T", album: { released_at: 0 } },
+        ],
+      },
+    };
+    expect(parseTracks(json)[0]?.releaseDate).toBe("1970-01-01");
+  });
+});
+
+describe("parseAlbumReleaseDate", () => {
+  it("reads the original release date from an album/get response", () => {
+    expect(
+      parseAlbumReleaseDate({ id: "x", release_date_original: "2011-09-26" }),
+    ).toBe("2011-09-26");
+  });
+
+  it("returns undefined when no date is present", () => {
+    expect(parseAlbumReleaseDate({ id: "x" })).toBeUndefined();
+    expect(parseAlbumReleaseDate(null)).toBeUndefined();
   });
 });
 

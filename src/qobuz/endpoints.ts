@@ -14,9 +14,12 @@ export const paths = {
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
   artistSearch: "/artist/search",
   artistGet: "/artist/get",
+  albumGet: "/album/get",
   playlistGet: "/playlist/get",
   playlistCreate: "/playlist/create",
   playlistAddTracks: "/playlist/addTracks",
+  playlistDeleteTracks: "/playlist/deleteTracks",
+  favoriteDelete: "/favorite/delete",
 } as const;
 
 /** Build the full URL for an endpoint path. */
