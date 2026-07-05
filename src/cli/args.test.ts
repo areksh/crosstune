@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePlaylistArgs } from "./args.js";
+import { parseDedupeArgs, parsePlaylistArgs } from "./args.js";
 
 describe("parsePlaylistArgs", () => {
   it("parses the name, artists, track count and public flag", () => {
@@ -39,5 +39,33 @@ describe("parsePlaylistArgs", () => {
     expect(() =>
       parsePlaylistArgs(["--name", "x", "--tracks", "0", "A"]),
     ).toThrow(/tracks/i);
+  });
+});
+
+describe("parseDedupeArgs", () => {
+  it("parses a playlist source", () => {
+    expect(parseDedupeArgs(["--playlist", "555"])).toEqual({
+      type: "playlist",
+      playlistId: 555,
+    });
+  });
+
+  it("parses a favourites source (both spellings)", () => {
+    expect(parseDedupeArgs(["--favourites"])).toEqual({ type: "favourites" });
+    expect(parseDedupeArgs(["--favorites"])).toEqual({ type: "favourites" });
+  });
+
+  it("throws when no source is given", () => {
+    expect(() => parseDedupeArgs([])).toThrow(/source/i);
+  });
+
+  it("throws when both sources are given", () => {
+    expect(() =>
+      parseDedupeArgs(["--playlist", "1", "--favourites"]),
+    ).toThrow(/only one/i);
+  });
+
+  it("throws on a non-numeric playlist id", () => {
+    expect(() => parseDedupeArgs(["--playlist", "abc"])).toThrow(/playlist/i);
   });
 });

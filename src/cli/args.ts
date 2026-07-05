@@ -9,6 +9,52 @@ export interface PlaylistArgs {
   isPublic: boolean;
 }
 
+/** Where the deduplicator should look for tracks. */
+export type DedupeSource =
+  | { type: "playlist"; playlistId: number }
+  | { type: "favourites" };
+
+/**
+ * Parse the arguments for the `deduplicate` command.
+ *
+ * Exactly one source must be given: `--playlist <id>` or `--favourites`
+ * (`--favorites` is accepted too).
+ *
+ * @throws {Error} if neither or both sources are given, or the id is invalid.
+ */
+export function parseDedupeArgs(argv: readonly string[]): DedupeSource {
+  let playlistId: number | undefined;
+  let favourites = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--playlist") {
+      const raw = argv[i + 1];
+      i += 1;
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`--playlist must be a numeric id, got "${raw}"`);
+      }
+      playlistId = value;
+    } else if (arg === "--favourites" || arg === "--favorites") {
+      favourites = true;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (playlistId !== undefined && favourites) {
+    throw new Error("Give only one of --playlist or --favourites");
+  }
+  if (playlistId !== undefined) {
+    return { type: "playlist", playlistId };
+  }
+  if (favourites) {
+    return { type: "favourites" };
+  }
+  throw new Error("A source is required: --playlist <id> or --favourites");
+}
+
 /**
  * Parse the arguments for the `playlist-from-artists` command.
  *

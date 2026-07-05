@@ -12,13 +12,21 @@
  *       Build a playlist from the given artists' top tracks. Artist names may
  *       also be piped on stdin, one per line.
  *
+ *   qobuz-helper deduplicate (--playlist <id> | --favourites)
+ *       Report duplicate tracks (including remasters and same-song-different-
+ *       album) in a playlist or in your favourites. Reports only; changes nothing.
+ *
  * With no command, `check` runs.
  */
 
 import { readFileSync } from "node:fs";
 
-import { parsePlaylistArgs } from "./cli/args.js";
+import { parseDedupeArgs, parsePlaylistArgs } from "./cli/args.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
+import {
+  deduplicateTracks,
+  formatDuplicateReport,
+} from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
 
@@ -39,6 +47,11 @@ async function main(): Promise<void> {
       break;
     case "playlist-from-artists": {
       const plan = planPlaylistFromArtists(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "deduplicate": {
+      const plan = planDeduplicate(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -114,6 +127,39 @@ function planPlaylistFromArtists(
   };
 }
 
+/**
+ * Validate the deduplicate command's source up front, returning an executor to
+ * run once the client is signed in.
+ */
+function planDeduplicate(
+  argv: string[],
+): (client: QobuzClient) => Promise<void> {
+  const source = parseDedupeArgs(argv);
+
+  return async (client: QobuzClient): Promise<void> => {
+    const where =
+      source.type === "playlist"
+        ? `playlist ${source.playlistId}`
+        : "your favourites";
+    console.log(`Fetching tracks from ${where}...`);
+    const tracks =
+      source.type === "playlist"
+        ? await client.getPlaylistTracks(source.playlistId)
+        : await client.getFavoriteTracks();
+    console.log(`  ${tracks.length} tracks fetched`);
+
+    const groups = deduplicateTracks(tracks);
+    const duplicateCount = groups.reduce(
+      (sum, group) => sum + (group.length - 1),
+      0,
+    );
+    console.log(
+      `  ${duplicateCount} redundant track${duplicateCount === 1 ? "" : "s"} across ${groups.length} group${groups.length === 1 ? "" : "s"}\n`,
+    );
+    console.log(formatDuplicateReport(groups));
+  };
+}
+
 /** Read artist names from piped stdin (one per line); empty when stdin is a TTY. */
 function readArtistsFromStdin(): string[] {
   if (process.stdin.isTTY) {
@@ -135,6 +181,7 @@ function printUsage(): void {
       "Usage:",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
+      "  qobuz-helper deduplicate (--playlist <id> | --favourites)",
       "",
       "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
     ].join("\n"),

@@ -17,3 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracks and build a playlist from them (`qobuz-helper playlist-from-artists`).
   Adds client methods for artist search, artist top tracks, playlist create,
   and add-tracks.
+- Deduplicator tool (`qobuz-helper deduplicate`): report duplicate tracks in a
+  playlist or your favourites, matching by ISRC or a normalised artist+title
+  signature that catches remasters and same-song-different-album while keeping
+  live/acoustic/remix versions separate. Reports only; makes no changes. Adds
+  paginated fetching of playlist and favourite tracks (with ISRC/artist/album).

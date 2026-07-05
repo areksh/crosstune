@@ -21,11 +21,9 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 
 - **Playlist from artists** -- build a playlist from just a list of artists,
   using each artist's top tracks. Available now (see below).
-
-Planned:
-
-- **Advanced deduplicator** -- find duplicate tracks in your library, including
-  remasters and the same song appearing on different albums.
+- **Deduplicator** -- report duplicate tracks in a playlist or your favourites,
+  including remasters and the same song on different albums. Available now (see
+  below).
 
 More to follow.
 
@@ -65,6 +63,17 @@ cat artists.txt | npm run dev -- playlist-from-artists --name "Road Trip"
 
 Options for `playlist-from-artists`: `--name` (required), `--tracks N` (top
 tracks per artist, default 10), `--public` (make the playlist public).
+
+```sh
+# Report duplicate tracks in a playlist, or across your favourites
+npm run dev -- deduplicate --playlist 12345678
+npm run dev -- deduplicate --favourites
+```
+
+The deduplicator matches tracks by ISRC or by a normalised artist+title
+signature: it treats remasters and the same song on different albums as
+duplicates, while keeping genuinely different versions (live, acoustic, remix)
+separate. It only reports what it finds and makes no changes.
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 
