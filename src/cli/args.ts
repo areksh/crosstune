@@ -2,7 +2,7 @@
  * Argument parsing for CLI commands.
  */
 
-import type { KeepStrategy } from "../features/deduplicate.js";
+import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
 
 export interface PlaylistArgs {
   playlistName: string;
@@ -19,10 +19,10 @@ export type DedupeSource =
 export interface DedupeOptions {
   source: DedupeSource;
   keep: KeepStrategy;
+  /** Whether to actually remove duplicates (otherwise report only). */
+  apply: boolean;
 }
 
-/** Keep strategies the CLI currently accepts. */
-const SUPPORTED_KEEP: readonly KeepStrategy[] = ["first-added"];
 const DEFAULT_KEEP: KeepStrategy = "first-added";
 
 /**
@@ -30,7 +30,8 @@ const DEFAULT_KEEP: KeepStrategy = "first-added";
  *
  * Exactly one source must be given: `--playlist <id>` or `--favourites`
  * (`--favorites` is accepted too). `--keep <strategy>` chooses which copy to
- * keep (default `first-added`).
+ * keep (default `first-added`). `--apply` performs the removal; without it the
+ * command only reports.
  *
  * @throws {Error} if the source or the keep strategy is missing/invalid.
  */
@@ -38,6 +39,7 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
   let playlistId: number | undefined;
   let favourites = false;
   let keep: KeepStrategy = DEFAULT_KEEP;
+  let apply = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -54,12 +56,14 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
     } else if (arg === "--keep") {
       const raw = argv[i + 1];
       i += 1;
-      if (!isSupportedKeep(raw)) {
+      if (!isKeepStrategy(raw)) {
         throw new Error(
-          `--keep must be one of: ${SUPPORTED_KEEP.join(", ")} (got "${raw}")`,
+          `--keep must be one of: ${KEEP_STRATEGIES.join(", ")} (got "${raw}")`,
         );
       }
       keep = raw;
+    } else if (arg === "--apply") {
+      apply = true;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -79,11 +83,11 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
             );
           })();
 
-  return { source, keep };
+  return { source, keep, apply };
 }
 
-function isSupportedKeep(value: string | undefined): value is KeepStrategy {
-  return value !== undefined && (SUPPORTED_KEEP as readonly string[]).includes(value);
+function isKeepStrategy(value: string | undefined): value is KeepStrategy {
+  return value !== undefined && (KEEP_STRATEGIES as readonly string[]).includes(value);
 }
 
 /**

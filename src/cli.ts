@@ -12,22 +12,33 @@
  *       Build a playlist from the given artists' top tracks. Artist names may
  *       also be piped on stdin, one per line.
  *
- *   qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>]
+ *   qobuz-helper deduplicate (--playlist <id> | --favourites)
+ *                            [--keep <strategy>] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
- *       album) in a playlist or in your favourites, marking which copy to keep
- *       (--keep, default first-added). Reports only; changes nothing.
+ *       album) in a playlist or in your favourites, marking which copy to keep.
+ *       --keep: first-added (default), last-added, highest-quality, oldest,
+ *       newest. Without --apply it only reports; with --apply it removes the
+ *       tracks marked "drop".
  *
  * With no command, `check` runs.
  */
 
 import { readFileSync } from "node:fs";
 
-import { parseDedupeArgs, parsePlaylistArgs } from "./cli/args.js";
+import {
+  parseDedupeArgs,
+  parsePlaylistArgs,
+  type DedupeSource,
+} from "./cli/args.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import {
   deduplicateTracks,
+  enrichReleaseDates,
   formatResolutionReport,
   resolveDuplicateGroups,
+  strategyNeedsReleaseDates,
+  tracksToRemove,
+  type DedupTrack,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
@@ -136,7 +147,7 @@ function planPlaylistFromArtists(
 function planDeduplicate(
   argv: string[],
 ): (client: QobuzClient) => Promise<void> {
-  const { source, keep } = parseDedupeArgs(argv);
+  const { source, keep, apply } = parseDedupeArgs(argv);
 
   return async (client: QobuzClient): Promise<void> => {
     const where =
@@ -150,11 +161,55 @@ function planDeduplicate(
         : await client.getFavoriteTracks();
     console.log(`  ${tracks.length} tracks fetched`);
 
-    const groups = deduplicateTracks(tracks);
+    let groups = deduplicateTracks(tracks);
+    if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
+      console.log("  looking up release dates...");
+      groups = await enrichReleaseDates(groups, (albumId) =>
+        client.getAlbumReleaseDate(albumId),
+      );
+    }
+
     const resolved = resolveDuplicateGroups(groups, keep);
     console.log(`  keeping the ${keep} copy of each duplicate\n`);
     console.log(formatResolutionReport(resolved));
+
+    const removals = tracksToRemove(resolved);
+    if (!apply) {
+      if (removals.length > 0) {
+        console.log(
+          `\n(dry run -- pass --apply to remove the ${removals.length} 'drop' track${removals.length === 1 ? "" : "s"})`,
+        );
+      }
+      return;
+    }
+    await applyRemovals(client, source, removals);
   };
+}
+
+/** Execute the removals for an --apply run, using the id each source needs. */
+async function applyRemovals(
+  client: QobuzClient,
+  source: DedupeSource,
+  removals: readonly DedupTrack[],
+): Promise<void> {
+  if (removals.length === 0) {
+    console.log("\nNothing to remove.");
+    return;
+  }
+  console.log(`\nRemoving ${removals.length} track(s)...`);
+  if (source.type === "playlist") {
+    const ids = removals
+      .map((track) => track.playlistTrackId)
+      .filter((id): id is number => id !== undefined);
+    const skipped = removals.length - ids.length;
+    if (skipped > 0) {
+      console.log(`  skipped ${skipped} track(s) with no playlist-track id`);
+    }
+    await client.removeTracksFromPlaylist(source.playlistId, ids);
+  } else {
+    await client.removeFavoriteTracks(removals.map((track) => track.id));
+  }
+  console.log("  done.");
 }
 
 /** Read artist names from piped stdin (one per line); empty when stdin is a TTY. */
@@ -178,9 +233,11 @@ function printUsage(): void {
       "Usage:",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
-      "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep first-added]",
+      "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "",
       "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
+      "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
+      "deduplicate reports only unless --apply is given.",
     ].join("\n"),
   );
 }

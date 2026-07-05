@@ -43,10 +43,11 @@ describe("parsePlaylistArgs", () => {
 });
 
 describe("parseDedupeArgs", () => {
-  it("parses a playlist source with the default keep strategy", () => {
+  it("parses a playlist source with defaults (first-added, report-only)", () => {
     expect(parseDedupeArgs(["--playlist", "555"])).toEqual({
       source: { type: "playlist", playlistId: 555 },
       keep: "first-added",
+      apply: false,
     });
   });
 
@@ -59,15 +60,25 @@ describe("parseDedupeArgs", () => {
     });
   });
 
-  it("parses an explicit --keep strategy", () => {
-    expect(parseDedupeArgs(["--favourites", "--keep", "first-added"]).keep).toBe(
+  it("parses the supported --keep strategies", () => {
+    for (const keep of [
       "first-added",
-    );
+      "last-added",
+      "highest-quality",
+      "oldest",
+      "newest",
+    ] as const) {
+      expect(parseDedupeArgs(["--favourites", "--keep", keep]).keep).toBe(keep);
+    }
+  });
+
+  it("parses --apply", () => {
+    expect(parseDedupeArgs(["--favourites", "--apply"]).apply).toBe(true);
   });
 
   it("throws on an unsupported --keep strategy", () => {
     expect(() =>
-      parseDedupeArgs(["--favourites", "--keep", "highest-quality"]),
+      parseDedupeArgs(["--favourites", "--keep", "cheapest"]),
     ).toThrow(/keep/i);
   });
 

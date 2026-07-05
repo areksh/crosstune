@@ -68,6 +68,9 @@ tracks per artist, default 10), `--public` (make the playlist public).
 # Report duplicate tracks in a playlist, or across your favourites
 npm run dev -- deduplicate --playlist 12345678
 npm run dev -- deduplicate --favourites
+
+# Choose which copy to keep, then actually remove the rest
+npm run dev -- deduplicate --playlist 12345678 --keep highest-quality --apply
 ```
 
 The deduplicator matches tracks by ISRC or by a normalised artist+title
@@ -82,9 +85,18 @@ remove:
    drop  id 386614187  Paranoid  [Paranoid]
 ```
 
-Which copy is kept is chosen by `--keep <strategy>` (default `first-added`, i.e.
-the first one added). More strategies (highest quality, oldest/newest release)
-are planned. The tool only reports the plan and makes no changes yet.
+Which copy is kept is chosen by `--keep <strategy>`:
+
+| Strategy          | Keeps                                             |
+| ----------------- | ------------------------------------------------- |
+| `first-added`     | the first copy in the source (default)            |
+| `last-added`      | the last copy in the source                       |
+| `highest-quality` | the highest bit-depth / sample-rate copy          |
+| `oldest`          | the earliest release (looks up album dates)       |
+| `newest`          | the latest release (looks up album dates)         |
+
+By default the command only **reports** the plan. Add `--apply` to actually
+remove the tracks marked `drop` (from the playlist, or from your favourites).
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 

@@ -25,4 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deduplicator keep/remove plan: each duplicate group marks one copy to keep and
   the rest to remove, chosen by `--keep <strategy>` (default `first-added`). The
   plan is a structured resolution whose kept choice can be overridden before a
-  future removal step consumes it.
+  removal step consumes it.
+- Deduplicator keep strategies: `last-added`, `highest-quality` (bit depth then
+  sample rate), and `oldest`/`newest` by release date (looked up per album when
+  not inline). Enriches tracks with album id, quality, playlist-track id and
+  release date.
+- Deduplicator `--apply`: actually remove the tracks marked to drop, from a
+  playlist (`playlist/deleteTracks`) or from favourites (`favorite/delete`).
+  Without `--apply` the command still only reports.
