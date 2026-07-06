@@ -34,6 +34,7 @@ interface FetchOptions {
   artistSearch?: unknown;
   artistTracks?: unknown;
   playlist?: unknown;
+  userPlaylists?: unknown;
   album?: unknown;
 }
 
@@ -87,6 +88,11 @@ function makeFetch(options: FetchOptions): typeof fetch {
     }
     if (path.endsWith("/artist/get")) {
       return new Response(JSON.stringify(options.artistTracks ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/playlist/getUserPlaylists")) {
+      return new Response(JSON.stringify(options.userPlaylists ?? {}), {
         status: 200,
       });
     }
@@ -377,6 +383,35 @@ describe("QobuzClient.addTracksToPlaylist", () => {
     expect(
       recorded.some((r) => r.url.pathname.endsWith("/playlist/addTracks")),
     ).toBe(false);
+  });
+});
+
+describe("QobuzClient.getUserPlaylists", () => {
+  it("returns the signed-in user's playlists with the user token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+      userPlaylists: {
+        playlists: {
+          items: [{ id: 1, name: "Road Trip", tracks_count: 12 }],
+          total: 1,
+        },
+      },
+    });
+    await client.loginWithOAuthCode("code");
+
+    const playlists = await client.getUserPlaylists();
+
+    expect(playlists).toEqual([{ id: 1, name: "Road Trip", trackCount: 12 }]);
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/playlist/getUserPlaylists"),
+    );
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.getUserPlaylists()).rejects.toBeInstanceOf(QobuzError);
   });
 });
 

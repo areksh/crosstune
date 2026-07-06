@@ -4,6 +4,8 @@ import {
   parseAlbumReleaseDate,
   parseArtists,
   parsePlaylist,
+  parsePlaylists,
+  parsePlaylistsPage,
   parseTracks,
   parseTracksPage,
 } from "./models.js";
@@ -145,7 +147,56 @@ describe("parsePlaylist", () => {
     });
   });
 
+  it("includes the track count when present", () => {
+    expect(parsePlaylist({ id: 1, name: "P", tracks_count: 42 })).toEqual({
+      id: 1,
+      name: "P",
+      trackCount: 42,
+    });
+  });
+
   it("throws when the response has no numeric id", () => {
     expect(() => parsePlaylist({ name: "no id" })).toThrow();
+  });
+});
+
+describe("parsePlaylists", () => {
+  it("extracts the playlists.items list with track counts", () => {
+    const json = {
+      playlists: {
+        items: [
+          { id: 1, name: "Road Trip", tracks_count: 12 },
+          { id: 2, name: "Focus" },
+        ],
+      },
+    };
+    expect(parsePlaylists(json)).toEqual([
+      { id: 1, name: "Road Trip", trackCount: 12 },
+      { id: 2, name: "Focus" },
+    ]);
+  });
+
+  it("skips malformed entries and tolerates an unexpected shape", () => {
+    expect(parsePlaylists({ playlists: { items: [{ name: "no id" }] } })).toEqual(
+      [],
+    );
+    expect(parsePlaylists({})).toEqual([]);
+    expect(parsePlaylists(null)).toEqual([]);
+  });
+});
+
+describe("parsePlaylistsPage", () => {
+  it("returns the playlists and the total for pagination", () => {
+    const json = {
+      playlists: { items: [{ id: 1, name: "A" }], total: 9 },
+    };
+    expect(parsePlaylistsPage(json)).toEqual({
+      playlists: [{ id: 1, name: "A" }],
+      total: 9,
+    });
+  });
+
+  it("defaults total to zero when absent", () => {
+    expect(parsePlaylistsPage({}).total).toBe(0);
   });
 });

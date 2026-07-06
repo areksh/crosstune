@@ -15,6 +15,7 @@ import {
   parseAlbumReleaseDate,
   parseArtists,
   parsePlaylist,
+  parsePlaylistsPage,
   parseTracks,
   parseTracksPage,
   type Artist,
@@ -407,6 +408,40 @@ export class QobuzClient {
       }
       return parseTracksPage(await response.json());
     });
+  }
+
+  /**
+   * Fetch all playlists owned by the signed-in user (all pages).
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async getUserPlaylists(): Promise<Playlist[]> {
+    const pageSize = 500;
+    const all: Playlist[] = [];
+    let offset = 0;
+    for (;;) {
+      const response = await this.#signedGet(
+        "playlistgetUserPlaylists",
+        paths.playlistGetUserPlaylists,
+        [
+          ["limit", String(pageSize)],
+          ["offset", String(offset)],
+        ],
+        { requireAuth: true },
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `playlist/getUserPlaylists failed with HTTP ${response.status}`,
+        );
+      }
+      const page = parsePlaylistsPage(await response.json());
+      all.push(...page.playlists);
+      offset += page.playlists.length;
+      if (page.playlists.length === 0 || all.length >= page.total) {
+        return all;
+      }
+    }
   }
 
   /** Fetch all tracks of a playlist (all pages). */

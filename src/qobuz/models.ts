@@ -45,6 +45,14 @@ export interface TracksPage {
 export interface Playlist {
   id: number;
   name: string;
+  /** Number of tracks in the playlist, when the response carries it. */
+  trackCount?: number;
+}
+
+/** A page of playlists plus the total available, for paginated fetches. */
+export interface PlaylistsPage {
+  playlists: Playlist[];
+  total: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -162,6 +170,40 @@ export function parsePlaylist(response: unknown): Playlist {
   if (!isRecord(response) || typeof response["id"] !== "number") {
     throw new QobuzError("api-response", "Playlist response has no id");
   }
-  const name = typeof response["name"] === "string" ? response["name"] : "";
-  return { id: response["id"], name };
+  return toPlaylist(response) as Playlist;
+}
+
+/** Parse a single playlist object, or undefined if it lacks a numeric id. */
+function toPlaylist(item: unknown): Playlist | undefined {
+  if (!isRecord(item) || typeof item["id"] !== "number") {
+    return undefined;
+  }
+  const name = typeof item["name"] === "string" ? item["name"] : "";
+  const playlist: Playlist = { id: item["id"], name };
+  if (typeof item["tracks_count"] === "number") {
+    playlist.trackCount = item["tracks_count"];
+  }
+  return playlist;
+}
+
+/** Parse the `playlists.items` list of a getUserPlaylists response. */
+export function parsePlaylists(response: unknown): Playlist[] {
+  const playlists: Playlist[] = [];
+  for (const item of itemsOf(response, "playlists")) {
+    const playlist = toPlaylist(item);
+    if (playlist !== undefined) {
+      playlists.push(playlist);
+    }
+  }
+  return playlists;
+}
+
+/** Parse a playlists container into its playlists plus the total (for pagination). */
+export function parsePlaylistsPage(response: unknown): PlaylistsPage {
+  const container =
+    isRecord(response) && isRecord(response["playlists"])
+      ? response["playlists"]
+      : {};
+  const total = typeof container["total"] === "number" ? container["total"] : 0;
+  return { playlists: parsePlaylists(response), total };
 }

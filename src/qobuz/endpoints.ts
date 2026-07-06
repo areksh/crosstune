@@ -16,6 +16,7 @@ export const paths = {
   artistGet: "/artist/get",
   albumGet: "/album/get",
   playlistGet: "/playlist/get",
+  playlistGetUserPlaylists: "/playlist/getUserPlaylists",
   playlistCreate: "/playlist/create",
   playlistAddTracks: "/playlist/addTracks",
   playlistDeleteTracks: "/playlist/deleteTracks",
