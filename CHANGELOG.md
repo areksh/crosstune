@@ -33,3 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deduplicator `--apply`: actually remove the tracks marked to drop, from a
   playlist (`playlist/deleteTracks`) or from favourites (`favorite/delete`).
   Without `--apply` the command still only reports.
+- Session persistence: the session is saved locally after sign-in and resumed
+  automatically on later runs (via a token re-login), falling back to the
+  browser only when there is no saved session or it has expired. Adds `login`
+  and `logout` commands and a `loginWithToken` client method. The token is
+  stored owner-only at `$XDG_CONFIG_HOME/qobuz-helper/session.json`.

@@ -47,6 +47,19 @@ session is established. Your password is entered only on Qobuz's site and is
 never handled by this program (email/password sign-in against the API is no
 longer supported by Qobuz).
 
+The session is then saved locally and resumed automatically on later runs, so
+you only sign in through the browser once (until the session expires). Manage it
+with:
+
+```sh
+npm run dev -- login    # sign in (or resume) and save the session
+npm run dev -- logout   # discard the saved session
+```
+
+The token is stored at `$XDG_CONFIG_HOME/qobuz-helper/session.json` (falling back
+to `~/.config`), written owner-only. It stays on your machine -- nothing is sent
+to any server other than Qobuz itself.
+
 ### Commands
 
 ```sh

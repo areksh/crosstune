@@ -2,7 +2,15 @@
 /**
  * CLI entry point.
  *
- * Signs in through the browser OAuth flow, then runs a command:
+ * On first use it signs in through the browser OAuth flow and saves the session
+ * locally; later runs resume that session automatically until it expires or you
+ * sign out. Commands:
+ *
+ *   qobuz-helper login
+ *       Sign in (or resume a saved session) and persist it.
+ *
+ *   qobuz-helper logout
+ *       Discard the saved session.
  *
  *   qobuz-helper check
  *       Vertical-slice smoke test (extraction -> sign-in -> one API call).
@@ -20,7 +28,8 @@
  *       newest. Without --apply it only reports; with --apply it removes the
  *       tracks marked "drop".
  *
- * With no command, `check` runs.
+ * With no command, `check` runs. The session is stored at
+ * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  */
 
 import { readFileSync } from "node:fs";
@@ -31,6 +40,7 @@ import {
   type DedupeSource,
 } from "./cli/args.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
+import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
 import {
   deduplicateTracks,
   enrichReleaseDates,
@@ -51,10 +61,23 @@ async function main(): Promise<void> {
     return;
   }
 
+  // `logout` needs neither the network nor a session: just drop the saved token.
+  if (command === "logout") {
+    const store = fileTokenStore();
+    const hadSession = store.load() !== undefined;
+    store.clear();
+    console.log(hadSession ? "Signed out." : "No saved session to clear.");
+    return;
+  }
+
   // Resolve the command and validate its arguments *before* any network or
-  // sign-in, so bad input fails fast without opening a browser.
+  // sign-in, so bad input fails fast without opening a browser. `login` just
+  // establishes (and persists) a session, so its action is a no-op.
   let run: (client: QobuzClient) => Promise<void>;
   switch (command) {
+    case "login":
+      run = async () => {};
+      break;
     case "check":
       run = runCheck;
       break;
@@ -80,11 +103,14 @@ async function main(): Promise<void> {
   await client.init();
   console.log(`  app id: ${client.appId}`);
 
-  const session = await authenticateViaBrowser(client, {
-    log: (message) => console.log(message),
-  });
+  const { session, restored } = await restoreOrLogin(
+    client,
+    fileTokenStore(),
+    () => authenticateViaBrowser(client, { log: (message) => console.log(message) }),
+    (message) => console.log(message),
+  );
   console.log(
-    `  signed in as ${session.displayName} (${session.subscriptionLabel})`,
+    `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
   await run(client);
@@ -231,10 +257,13 @@ function printUsage(): void {
   console.log(
     [
       "Usage:",
+      "  qobuz-helper login",
+      "  qobuz-helper logout",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "",
+      "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
