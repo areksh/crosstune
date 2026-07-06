@@ -33,6 +33,23 @@ const DEFAULT_USER_AGENT =
 const SECRET_PROBE_TRACK_ID = 5966783;
 
 /**
+ * Maximum number of track ids to send in a single playlist/favourites mutation.
+ * Qobuz rejects a request that carries too many ids at once (the signed GET URL
+ * grows too long), so bulk add/remove operations are split into batches of this
+ * size. Chosen conservatively; the web player batches similarly.
+ */
+const MAX_TRACK_IDS_PER_REQUEST = 50;
+
+/** Split an array into consecutive slices of at most `size` items (size >= 1). */
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
  * The validated credentials a client resolves during {@link QobuzClient.init}:
  * the app id, the single app secret that proved valid, and (when the bundle
  * carries one) the OAuth private key. Small and serialisable so it can be
@@ -359,29 +376,31 @@ export class QobuzClient {
   /**
    * Add tracks to a playlist. A no-op for an empty list.
    *
+   * Large lists are added in batches (see {@link MAX_TRACK_IDS_PER_REQUEST}),
+   * as Qobuz rejects a single request carrying too many ids.
+   *
    * @throws {QobuzError} kind `authentication` if not signed in.
    */
   async addTracksToPlaylist(
     playlistId: number,
     trackIds: readonly number[],
   ): Promise<void> {
-    if (trackIds.length === 0) {
-      return;
-    }
-    const response = await this.#signedGet(
-      "playlistaddTracks",
-      paths.playlistAddTracks,
-      [
-        ["playlist_id", String(playlistId)],
-        ["track_ids", trackIds.join(",")],
-      ],
-      { requireAuth: true },
-    );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/addTracks failed with HTTP ${response.status}`,
+    for (const batch of chunk(trackIds, MAX_TRACK_IDS_PER_REQUEST)) {
+      const response = await this.#signedGet(
+        "playlistaddTracks",
+        paths.playlistAddTracks,
+        [
+          ["playlist_id", String(playlistId)],
+          ["track_ids", batch.join(",")],
+        ],
+        { requireAuth: true },
       );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `playlist/addTracks failed with HTTP ${response.status}`,
+        );
+      }
     }
   }
 
@@ -504,23 +523,22 @@ export class QobuzClient {
     playlistId: number,
     playlistTrackIds: readonly number[],
   ): Promise<void> {
-    if (playlistTrackIds.length === 0) {
-      return;
-    }
-    const response = await this.#signedGet(
-      "playlistdeleteTracks",
-      paths.playlistDeleteTracks,
-      [
-        ["playlist_id", String(playlistId)],
-        ["playlist_track_ids", playlistTrackIds.join(",")],
-      ],
-      { requireAuth: true },
-    );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/deleteTracks failed with HTTP ${response.status}`,
+    for (const batch of chunk(playlistTrackIds, MAX_TRACK_IDS_PER_REQUEST)) {
+      const response = await this.#signedGet(
+        "playlistdeleteTracks",
+        paths.playlistDeleteTracks,
+        [
+          ["playlist_id", String(playlistId)],
+          ["playlist_track_ids", batch.join(",")],
+        ],
+        { requireAuth: true },
       );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `playlist/deleteTracks failed with HTTP ${response.status}`,
+        );
+      }
     }
   }
 
@@ -531,20 +549,19 @@ export class QobuzClient {
    * @throws {QobuzError} kind `authentication` if not signed in.
    */
   async removeFavoriteTracks(trackIds: readonly number[]): Promise<void> {
-    if (trackIds.length === 0) {
-      return;
-    }
-    const response = await this.#signedGet(
-      "favoritedelete",
-      paths.favoriteDelete,
-      [["track_ids", trackIds.join(",")]],
-      { requireAuth: true },
-    );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `favorite/delete failed with HTTP ${response.status}`,
+    for (const batch of chunk(trackIds, MAX_TRACK_IDS_PER_REQUEST)) {
+      const response = await this.#signedGet(
+        "favoritedelete",
+        paths.favoriteDelete,
+        [["track_ids", batch.join(",")]],
+        { requireAuth: true },
       );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `favorite/delete failed with HTTP ${response.status}`,
+        );
+      }
     }
   }
 

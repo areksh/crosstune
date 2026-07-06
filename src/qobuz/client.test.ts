@@ -129,6 +129,20 @@ function validSessionBody(): unknown {
   };
 }
 
+/**
+ * Extract the comma-separated id batches sent to `path` in `param`, in request
+ * order. Used to assert that bulk mutations are split into batches.
+ */
+function idBatches(
+  recorded: RecordedRequest[],
+  path: string,
+  param: string,
+): number[][] {
+  return recorded
+    .filter((r) => r.url.pathname.endsWith(path))
+    .map((r) => (r.url.searchParams.get(param) ?? "").split(",").map(Number));
+}
+
 async function initedClient(options: Omit<FetchOptions, "recorded">) {
   const recorded: RecordedRequest[] = [];
   const client = new QobuzClient({
@@ -411,6 +425,21 @@ describe("QobuzClient.addTracksToPlaylist", () => {
       recorded.some((r) => r.url.pathname.endsWith("/playlist/addTracks")),
     ).toBe(false);
   });
+
+  it("splits a large track list into batches within the per-request cap", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    const ids = Array.from({ length: 130 }, (_, i) => i + 1);
+    await client.addTracksToPlaylist(777, ids);
+
+    const batches = idBatches(recorded, "/playlist/addTracks", "track_ids");
+    expect(batches.length).toBeGreaterThan(1);
+    expect(Math.max(...batches.map((b) => b.length))).toBeLessThanOrEqual(50);
+    expect(batches.flat()).toEqual(ids);
+  });
 });
 
 describe("QobuzClient.getUserPlaylists", () => {
@@ -518,6 +547,32 @@ describe("QobuzClient removal methods", () => {
     );
     expect(request?.url.searchParams.get("track_ids")).toBe("1,2,3");
     expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("splits large removals into batches within the per-request cap", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    const ids = Array.from({ length: 130 }, (_, i) => i + 1);
+    await client.removeTracksFromPlaylist(555, ids);
+    await client.removeFavoriteTracks(ids);
+
+    const playlistBatches = idBatches(
+      recorded,
+      "/playlist/deleteTracks",
+      "playlist_track_ids",
+    );
+    expect(playlistBatches.length).toBeGreaterThan(1);
+    expect(Math.max(...playlistBatches.map((b) => b.length))).toBeLessThanOrEqual(
+      50,
+    );
+    expect(playlistBatches.flat()).toEqual(ids);
+
+    const favouriteBatches = idBatches(recorded, "/favorite/delete", "track_ids");
+    expect(favouriteBatches.length).toBeGreaterThan(1);
+    expect(favouriteBatches.flat()).toEqual(ids);
   });
 
   it("is a no-op for empty removal lists (no request sent)", async () => {
