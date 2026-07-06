@@ -187,6 +187,29 @@ describe("QobuzClient.loginWithOAuthCode", () => {
   });
 });
 
+describe("QobuzClient.loginWithToken", () => {
+  it("restores a session from a saved token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+
+    const session = await client.loginWithToken("saved-token");
+
+    expect(session.userAuthToken).toBe("tok-session");
+    expect(client.isLoggedIn).toBe(true);
+    const login = recorded.find((r) => r.url.pathname.endsWith("/user/login"));
+    expect(login?.method).toBe("POST");
+    expect(login?.headers.get("X-User-Auth-Token")).toBe("saved-token");
+  });
+
+  it("raises an authentication error when the token is rejected", async () => {
+    const { client } = await initedClient({ loginStatus: 401 });
+    await expect(client.loginWithToken("expired")).rejects.toBeInstanceOf(
+      QobuzError,
+    );
+  });
+});
+
 describe("QobuzClient.getUserFavorites", () => {
   it("sends app id, user token and a signature, and returns the payload", async () => {
     const favorites = { tracks: { items: [], total: 0 } };

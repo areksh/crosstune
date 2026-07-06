@@ -116,10 +116,27 @@ export class QobuzClient {
     if (typeof callbackJson.token !== "string") {
       throw new QobuzError("authentication", "OAuth callback returned no token");
     }
-    const token = callbackJson.token;
 
     // Step 2: exchange the token for a full session.
-    const loginResponse = await this.#request("POST", paths.userLogin, {
+    return this.#establishSession(callbackJson.token);
+  }
+
+  /**
+   * Restore a session from a previously saved user auth token.
+   *
+   * Used to resume a persisted login without the browser flow. Qobuz validates
+   * the token; an expired or revoked token raises an `authentication` error so
+   * the caller can fall back to a fresh sign-in.
+   *
+   * @throws {QobuzError} kind `authentication` if the token is rejected.
+   */
+  async loginWithToken(token: string): Promise<UserSession> {
+    return this.#establishSession(token);
+  }
+
+  /** Exchange a user auth token for a full session via POST /user/login. */
+  async #establishSession(token: string): Promise<UserSession> {
+    const response = await this.#request("POST", paths.userLogin, {
       headers: {
         ...this.#appIdHeaders(),
         "X-User-Auth-Token": token,
@@ -127,17 +144,17 @@ export class QobuzClient {
       },
       body: "extra=partner",
     });
-    if (loginResponse.status === 401) {
-      throw new QobuzError("authentication", "OAuth token rejected");
+    if (response.status === 401) {
+      throw new QobuzError("authentication", "Auth token rejected");
     }
-    if (!loginResponse.ok) {
+    if (!response.ok) {
       throw new QobuzError(
         "api-response",
-        `Login failed with HTTP ${loginResponse.status}`,
+        `Login failed with HTTP ${response.status}`,
       );
     }
 
-    const session = parseLoginResponse(await loginResponse.json());
+    const session = parseLoginResponse(await response.json());
     this.#session = session;
     return session;
   }
