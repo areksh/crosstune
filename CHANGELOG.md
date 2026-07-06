@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Web UI deduplicator and multi-tool shell: the web UI now has a sidebar and a
+  home page introducing each tool, and hosts the deduplicator alongside the
+  playlist tool. The deduplicator lets you scan a playlist or your favourites,
+  review each duplicate group (kept copy in green, the rest in red), change
+  which copy is kept per group (or keep a whole group), and remove the rest.
+  Adds `POST /api/deduplicate/scan` and `/api/deduplicate/apply`.
 - Web UI (`qobuz-helper ui`): a local web server plus browser frontend for the
   playlist-from-artists tool. Paste artists (one per line), choose top tracks
   per artist, preview the tracks grouped by artist and untick any you do not

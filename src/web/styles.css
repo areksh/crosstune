@@ -301,3 +301,57 @@ button:disabled {
 .target-fields {
   margin: 0 0 0.5rem 1.5rem;
 }
+
+/* Deduplicator: duplicate groups */
+
+.dedup-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dedup-track {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+
+.dedup-track.keep {
+  border-left-color: var(--keep);
+  background: rgba(87, 211, 140, 0.08);
+}
+
+.dedup-track.drop {
+  border-left-color: var(--drop);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.dedup-track .title {
+  font-weight: 500;
+}
+
+.dedup-track.drop .title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.dedup-track .meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-left: auto;
+  text-align: right;
+}
+
+.keep-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}

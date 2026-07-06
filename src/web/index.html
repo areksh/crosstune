@@ -16,6 +16,9 @@
           <a class="nav-link" data-view="playlist" href="#/playlist">
             Playlist from artists
           </a>
+          <a class="nav-link" data-view="deduplicate" href="#/deduplicate">
+            Deduplicator
+          </a>
         </nav>
         <div class="sidebar-footer">
           <span class="session-label">Signed in as</span>
@@ -39,6 +42,15 @@
                 Give a list of artists and build a playlist from each one's most
                 popular tracks. Preview and edit the selection before creating a
                 new playlist or adding to an existing one.
+              </p>
+              <span class="card-cta">Open tool -&gt;</span>
+            </a>
+            <a class="card" href="#/deduplicate">
+              <h3>Deduplicator</h3>
+              <p>
+                Find duplicate tracks in a playlist or your favourites --
+                including remasters and the same song on different albums --
+                choose which copy to keep, and remove the rest.
               </p>
               <span class="card-cta">Open tool -&gt;</span>
             </a>
@@ -117,6 +129,65 @@
             </div>
             <p id="commit-error" class="error" hidden></p>
             <p id="commit-result" class="result" hidden></p>
+          </section>
+        </section>
+
+        <!-- Deduplicator -->
+        <section id="view-deduplicate" class="view" hidden>
+          <header class="view-header">
+            <h1>Deduplicator</h1>
+            <p class="lede">
+              Find duplicate tracks (including remasters and the same song on
+              different albums), choose which copy to keep, and remove the rest.
+            </p>
+          </header>
+
+          <section class="panel">
+            <div class="destination">
+              <label class="radio">
+                <input type="radio" name="dedup-source" value="favourites" checked />
+                Your favourite tracks
+              </label>
+              <label class="radio">
+                <input type="radio" name="dedup-source" value="playlist" />
+                A playlist
+              </label>
+              <div id="dedup-playlist-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Playlist</span>
+                  <select id="dedup-playlist-select">
+                    <option value="">Loading...</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <label class="field field-inline">
+              <span>Keep the</span>
+              <select id="dedup-keep">
+                <option value="first-added">first added</option>
+                <option value="last-added">last added</option>
+                <option value="highest-quality">highest quality</option>
+                <option value="oldest">oldest release</option>
+                <option value="newest">newest release</option>
+              </select>
+              <span>copy of each duplicate</span>
+            </label>
+
+            <div class="actions">
+              <button id="dedup-scan" type="button">Scan for duplicates</button>
+            </div>
+            <p id="dedup-scan-error" class="error" hidden></p>
+          </section>
+
+          <section id="dedup-results" class="panel" hidden>
+            <p id="dedup-summary" class="hint"></p>
+            <div id="dedup-groups"></div>
+            <div class="actions">
+              <button id="dedup-apply" type="button" hidden>Remove tracks</button>
+            </div>
+            <p id="dedup-apply-error" class="error" hidden></p>
+            <p id="dedup-apply-result" class="result" hidden></p>
           </section>
         </section>
       </main>
