@@ -86,7 +86,7 @@ function makeFetch(options: FetchOptions): typeof fetch {
         status: 200,
       });
     }
-    if (path.endsWith("/artist/get")) {
+    if (path.endsWith("/artist/page")) {
       return new Response(JSON.stringify(options.artistTracks ?? {}), {
         status: 200,
       });
@@ -316,18 +316,26 @@ describe("QobuzClient.searchArtists", () => {
 });
 
 describe("QobuzClient.getArtistTopTracks", () => {
-  it("requests artist/get with extra=tracks and returns parsed tracks", async () => {
+  it("requests artist/page and returns popularity-ordered tracks capped at limit", async () => {
     const { client, recorded } = await initedClient({
-      artistTracks: { tracks: { items: [{ id: 1, title: "Roads" }] } },
+      artistTracks: {
+        top_tracks: [
+          { id: 1, title: "Glory Box" },
+          { id: 2, title: "Sour Times" },
+          { id: 3, title: "Roads" },
+        ],
+      },
     });
 
-    const tracks = await client.getArtistTopTracks(42, 3);
+    const tracks = await client.getArtistTopTracks(42, 2);
 
-    expect(tracks).toEqual([{ id: 1, title: "Roads" }]);
-    const request = recorded.find((r) => r.url.pathname.endsWith("/artist/get"));
+    // Top two, in the order Qobuz ranks them (not truncated by the API).
+    expect(tracks).toEqual([
+      { id: 1, title: "Glory Box" },
+      { id: 2, title: "Sour Times" },
+    ]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/artist/page"));
     expect(request?.url.searchParams.get("artist_id")).toBe("42");
-    expect(request?.url.searchParams.get("extra")).toBe("tracks");
-    expect(request?.url.searchParams.get("limit")).toBe("3");
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
   });
 });

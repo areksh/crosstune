@@ -93,6 +93,66 @@ export function parseTracks(response: unknown): Track[] {
   return tracks;
 }
 
+/**
+ * Parse the `top_tracks` of an `/artist/page` response.
+ *
+ * These are ordered by popularity (the "Popular tracks" the Qobuz web player
+ * shows), which is what the playlist tool wants. Their JSON differs from the
+ * `artist/get` track shape: the performer is nested under `artist.name.display`
+ * and quality lives in `audio_info`.
+ */
+export function parseArtistPageTracks(response: unknown): Track[] {
+  if (!isRecord(response) || !Array.isArray(response["top_tracks"])) {
+    return [];
+  }
+  const tracks: Track[] = [];
+  for (const item of response["top_tracks"]) {
+    const track = parseArtistPageTrack(item);
+    if (track !== undefined) {
+      tracks.push(track);
+    }
+  }
+  return tracks;
+}
+
+/** Parse a single `/artist/page` top track. */
+function parseArtistPageTrack(item: unknown): Track | undefined {
+  if (!isRecord(item) || typeof item["id"] !== "number" || typeof item["title"] !== "string") {
+    return undefined;
+  }
+  const track: Track = { id: item["id"], title: item["title"] };
+
+  const artist = item["artist"];
+  if (isRecord(artist)) {
+    const name = artist["name"];
+    if (isRecord(name) && typeof name["display"] === "string") {
+      track.artist = name["display"];
+    }
+  }
+  if (typeof item["isrc"] === "string") {
+    track.isrc = item["isrc"];
+  }
+  const album = item["album"];
+  if (isRecord(album)) {
+    if (typeof album["title"] === "string") {
+      track.album = album["title"];
+    }
+    if (typeof album["id"] === "string") {
+      track.albumId = album["id"];
+    }
+  }
+  const audio = item["audio_info"];
+  if (isRecord(audio)) {
+    if (typeof audio["maximum_bit_depth"] === "number") {
+      track.bitDepth = audio["maximum_bit_depth"];
+    }
+    if (typeof audio["maximum_sampling_rate"] === "number") {
+      track.samplingRate = audio["maximum_sampling_rate"];
+    }
+  }
+  return track;
+}
+
 /** Parse a tracks container into its tracks plus the total count (for pagination). */
 export function parseTracksPage(response: unknown): TracksPage {
   const container =

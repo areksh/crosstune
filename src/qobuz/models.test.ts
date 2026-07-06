@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAlbumReleaseDate,
+  parseArtistPageTracks,
   parseArtists,
   parsePlaylist,
   parsePlaylists,
@@ -109,6 +110,46 @@ describe("parseTracks", () => {
       },
     };
     expect(parseTracks(json)[0]?.releaseDate).toBe("1970-01-01");
+  });
+});
+
+describe("parseArtistPageTracks", () => {
+  it("parses the popularity-ordered top_tracks of an artist/page response", () => {
+    // Shape mirrors the live /artist/page response: artist name nested under
+    // artist.name.display, quality under audio_info, album id a string.
+    const json = {
+      top_tracks: [
+        {
+          id: 627460,
+          title: "Glory Box",
+          version: "Album Version",
+          isrc: "GBAQT9400066",
+          artist: { id: 41259, name: { display: "Portishead" } },
+          album: { id: "0004228285532", title: "Dummy" },
+          audio_info: { maximum_bit_depth: 16, maximum_sampling_rate: 44.1 },
+        },
+        { id: 627451, title: "Sour Times" },
+      ],
+    };
+    expect(parseArtistPageTracks(json)).toEqual([
+      {
+        id: 627460,
+        title: "Glory Box",
+        artist: "Portishead",
+        isrc: "GBAQT9400066",
+        album: "Dummy",
+        albumId: "0004228285532",
+        bitDepth: 16,
+        samplingRate: 44.1,
+      },
+      { id: 627451, title: "Sour Times" },
+    ]);
+  });
+
+  it("skips malformed entries and tolerates an unexpected shape", () => {
+    expect(parseArtistPageTracks({ top_tracks: [{ title: "no id" }] })).toEqual([]);
+    expect(parseArtistPageTracks({})).toEqual([]);
+    expect(parseArtistPageTracks(null)).toEqual([]);
   });
 });
 

@@ -13,7 +13,7 @@ export const paths = {
   trackGetFileUrl: "/track/getFileUrl",
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
   artistSearch: "/artist/search",
-  artistGet: "/artist/get",
+  artistPage: "/artist/page",
   albumGet: "/album/get",
   playlistGet: "/playlist/get",
   playlistGetUserPlaylists: "/playlist/getUserPlaylists",

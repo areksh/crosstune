@@ -13,6 +13,7 @@ import { buildUrl, paths } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
   parseAlbumReleaseDate,
+  parseArtistPageTracks,
   parseArtists,
   parsePlaylist,
   parsePlaylistsPage,
@@ -287,25 +288,28 @@ export class QobuzClient {
   }
 
   /**
-   * Fetch an artist's top tracks.
+   * Fetch an artist's most popular tracks.
+   *
+   * Uses `/artist/page`, whose `top_tracks` are ordered by popularity (the same
+   * "Popular tracks" the Qobuz web player shows) rather than by release date.
+   * The endpoint returns a fixed set, so the requested `limit` is applied
+   * client-side.
    *
    * @param artistId The Qobuz artist id.
-   * @param limit Maximum tracks (default 10).
+   * @param limit Maximum tracks to return, taken from the top (default 10).
    */
   async getArtistTopTracks(artistId: number, limit = 10): Promise<Track[]> {
-    const response = await this.#signedGet("artistget", paths.artistGet, [
+    const response = await this.#signedGet("artistpage", paths.artistPage, [
       ["artist_id", String(artistId)],
-      ["extra", "tracks"],
-      ["limit", String(limit)],
-      ["offset", "0"],
     ]);
     if (!response.ok) {
       throw new QobuzError(
         "api-response",
-        `artist/get failed with HTTP ${response.status}`,
+        `artist/page failed with HTTP ${response.status}`,
       );
     }
-    return parseTracks(await response.json());
+    const tracks = parseArtistPageTracks(await response.json());
+    return tracks.slice(0, limit);
   }
 
   /**
