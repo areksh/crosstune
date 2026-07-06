@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
 import {
+  addTracksToExistingPlaylist,
   buildPlaylistFromArtists,
+  collectTrackIds,
+  createPlaylistWithTracks,
+  resolveArtistTracks,
   type PlaylistBuilderClient,
 } from "./playlist-from-artists.js";
 
@@ -134,5 +138,90 @@ describe("buildPlaylistFromArtists", () => {
     await expect(
       buildPlaylistFromArtists(client, { artists: [], playlistName: "Empty" }),
     ).rejects.toThrow(/artist/i);
+  });
+});
+
+describe("resolveArtistTracks", () => {
+  it("returns each resolved artist with its tracks, preserving overlaps", async () => {
+    const client = stubClient({
+      artistsByQuery: {
+        A: [{ id: 1, name: "A" }],
+        B: [{ id: 2, name: "B" }],
+      },
+      tracksByArtist: {
+        1: [{ id: 100, title: "Shared" }, { id: 101, title: "OnlyA" }],
+        2: [{ id: 100, title: "Shared" }, { id: 102, title: "OnlyB" }],
+      },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A", "B"],
+      tracksPerArtist: 5,
+    });
+
+    expect(result.unresolvedArtists).toEqual([]);
+    expect(result.resolvedArtists.map((r) => r.tracks.map((t) => t.id))).toEqual([
+      [100, 101],
+      [100, 102],
+    ]);
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, 5);
+  });
+
+  it("records unresolved names and continues", async () => {
+    const client = stubClient({
+      artistsByQuery: { Real: [{ id: 5, name: "Real" }] },
+      tracksByArtist: { 5: [{ id: 100, title: "Song" }] },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["Real", "Ghost Band"],
+    });
+
+    expect(result.unresolvedArtists).toEqual(["Ghost Band"]);
+    expect(result.resolvedArtists).toHaveLength(1);
+  });
+});
+
+describe("collectTrackIds", () => {
+  it("flattens to unique ids keeping first occurrence order", () => {
+    const ids = collectTrackIds([
+      { query: "A", artist: { id: 1, name: "A" }, tracks: [{ id: 100, title: "x" }, { id: 101, title: "y" }] },
+      { query: "B", artist: { id: 2, name: "B" }, tracks: [{ id: 100, title: "x" }, { id: 102, title: "z" }] },
+    ]);
+    expect(ids).toEqual([100, 101, 102]);
+  });
+});
+
+describe("createPlaylistWithTracks", () => {
+  it("creates the playlist then adds the tracks", async () => {
+    const client = stubClient({ playlist: { id: 9, name: "New" } });
+
+    const playlist = await createPlaylistWithTracks(client, {
+      name: "New",
+      trackIds: [1, 2],
+      isPublic: true,
+    });
+
+    expect(playlist).toEqual({ id: 9, name: "New" });
+    expect(client.createPlaylist).toHaveBeenCalledWith("New", { isPublic: true });
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(9, [1, 2]);
+  });
+});
+
+describe("addTracksToExistingPlaylist", () => {
+  it("adds only tracks not already present, skipping duplicates", async () => {
+    const client = {
+      getPlaylistTracks: vi.fn(async () => [{ id: 100, title: "present" }] as Track[]),
+      addTracksToPlaylist: vi.fn(async () => {}),
+    };
+
+    const result = await addTracksToExistingPlaylist(client, {
+      playlistId: 55,
+      trackIds: [100, 101, 101, 102],
+    });
+
+    expect(result.added).toEqual([101, 102]);
+    expect(result.skipped).toEqual([100, 101]);
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(55, [101, 102]);
   });
 });

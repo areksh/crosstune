@@ -1,21 +1,29 @@
 /**
  * Build a playlist from a list of artist names.
  *
- * Each name is resolved to a Qobuz artist, the artist's top tracks are
- * collected, and a new playlist is created and filled with those tracks
- * (de-duplicated). Names that cannot be resolved are reported rather than
- * failing the whole operation.
+ * The work splits into two phases so a caller can review and edit between them
+ * (the web UI does exactly this):
  *
- * The builder depends only on the small {@link PlaylistBuilderClient} surface,
- * so it can be unit-tested against a stub; QobuzClient satisfies it structurally.
+ *   1. *Resolve* -- turn each name into a Qobuz artist and gather that artist's
+ *      top tracks. Names that cannot be resolved are reported, not fatal.
+ *   2. *Commit* -- create a new playlist from chosen tracks, or add them to an
+ *      existing one (skipping tracks already present).
+ *
+ * {@link buildPlaylistFromArtists} composes both phases in one call for the CLI.
+ * Each function depends only on the small client surface it needs, so all are
+ * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
 
-/** The subset of the Qobuz client this feature needs. */
-export interface PlaylistBuilderClient {
+/** The client surface needed to resolve artists to their top tracks. */
+export interface ArtistResolverClient {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
+}
+
+/** The client surface needed to create a playlist and add tracks to it. */
+export interface PlaylistWriterClient {
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
@@ -24,6 +32,37 @@ export interface PlaylistBuilderClient {
     playlistId: number,
     trackIds: readonly number[],
   ): Promise<void>;
+}
+
+/** The client surface needed to add tracks to an existing playlist. */
+export interface ExistingPlaylistClient {
+  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  addTracksToPlaylist(
+    playlistId: number,
+    trackIds: readonly number[],
+  ): Promise<void>;
+}
+
+/** The full surface {@link buildPlaylistFromArtists} depends on. */
+export type PlaylistBuilderClient = ArtistResolverClient & PlaylistWriterClient;
+
+/** A resolved artist together with the top tracks fetched for it. */
+export interface ResolvedArtistTracks {
+  query: string;
+  artist: Artist;
+  tracks: Track[];
+}
+
+export interface ResolveArtistsResult {
+  resolvedArtists: ResolvedArtistTracks[];
+  unresolvedArtists: string[];
+}
+
+export interface ResolveArtistsOptions {
+  /** Artist names to resolve. */
+  artists: string[];
+  /** Top tracks to take per artist (default 10). */
+  tracksPerArtist?: number;
 }
 
 export interface BuildPlaylistOptions {
@@ -58,7 +97,105 @@ const ARTIST_SEARCH_LIMIT = 5;
 const DEFAULT_TRACKS_PER_ARTIST = 10;
 
 /**
- * Resolve artists, then create and fill a playlist with their top tracks.
+ * Resolve each artist name to its top tracks (phase 1).
+ *
+ * The per-artist track lists are returned as fetched, without de-duplicating
+ * across artists, so a caller can present them grouped by artist for review.
+ */
+export async function resolveArtistTracks(
+  client: ArtistResolverClient,
+  options: ResolveArtistsOptions,
+): Promise<ResolveArtistsResult> {
+  const tracksPerArtist = options.tracksPerArtist ?? DEFAULT_TRACKS_PER_ARTIST;
+  const resolvedArtists: ResolvedArtistTracks[] = [];
+  const unresolvedArtists: string[] = [];
+
+  for (const query of options.artists) {
+    const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
+    const artist = pickArtist(candidates, query);
+    if (artist === undefined) {
+      unresolvedArtists.push(query);
+      continue;
+    }
+    const tracks = await client.getArtistTopTracks(artist.id, tracksPerArtist);
+    resolvedArtists.push({ query, artist, tracks });
+  }
+
+  return { resolvedArtists, unresolvedArtists };
+}
+
+/**
+ * Flatten resolved artists to an ordered list of unique track ids, keeping the
+ * first occurrence of any id shared across artists.
+ */
+export function collectTrackIds(
+  resolvedArtists: readonly ResolvedArtistTracks[],
+): number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const resolved of resolvedArtists) {
+    for (const track of resolved.tracks) {
+      if (!seen.has(track.id)) {
+        seen.add(track.id);
+        ids.push(track.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Create a new playlist and fill it with the given tracks (phase 2). */
+export async function createPlaylistWithTracks(
+  client: PlaylistWriterClient,
+  options: {
+    name: string;
+    trackIds: readonly number[];
+    description?: string;
+    isPublic?: boolean;
+  },
+): Promise<Playlist> {
+  const playlist = await client.createPlaylist(options.name, {
+    ...(options.description !== undefined && { description: options.description }),
+    isPublic: options.isPublic ?? false,
+  });
+  await client.addTracksToPlaylist(playlist.id, options.trackIds);
+  return playlist;
+}
+
+export interface AddToExistingResult {
+  /** Track ids actually added (not already present, de-duplicated). */
+  added: number[];
+  /** Track ids skipped because they were already in the playlist or repeated. */
+  skipped: number[];
+}
+
+/**
+ * Add tracks to an existing playlist (phase 2), skipping any already present in
+ * it and any repeated within the request.
+ */
+export async function addTracksToExistingPlaylist(
+  client: ExistingPlaylistClient,
+  options: { playlistId: number; trackIds: readonly number[] },
+): Promise<AddToExistingResult> {
+  const existing = await client.getPlaylistTracks(options.playlistId);
+  const present = new Set(existing.map((track) => track.id));
+  const added: number[] = [];
+  const skipped: number[] = [];
+  const seen = new Set<number>();
+  for (const id of options.trackIds) {
+    if (present.has(id) || seen.has(id)) {
+      skipped.push(id);
+      continue;
+    }
+    seen.add(id);
+    added.push(id);
+  }
+  await client.addTracksToPlaylist(options.playlistId, added);
+  return { added, skipped };
+}
+
+/**
+ * Resolve artists, then create and fill a new playlist with their top tracks.
  *
  * @throws {Error} if no artist names are given.
  */
@@ -69,42 +206,40 @@ export async function buildPlaylistFromArtists(
   if (options.artists.length === 0) {
     throw new Error("At least one artist is required");
   }
-  const tracksPerArtist = options.tracksPerArtist ?? DEFAULT_TRACKS_PER_ARTIST;
 
-  const resolvedArtists: ResolvedArtist[] = [];
-  const unresolvedArtists: string[] = [];
+  const { resolvedArtists, unresolvedArtists } = await resolveArtistTracks(client, {
+    artists: options.artists,
+    ...(options.tracksPerArtist !== undefined && {
+      tracksPerArtist: options.tracksPerArtist,
+    }),
+  });
+
+  // De-duplicate across artists, counting how many each contributed.
   const trackIds: number[] = [];
   const seen = new Set<number>();
-
-  for (const query of options.artists) {
-    const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
-    const artist = pickArtist(candidates, query);
-    if (artist === undefined) {
-      unresolvedArtists.push(query);
-      continue;
-    }
-
-    const tracks = await client.getArtistTopTracks(artist.id, tracksPerArtist);
+  const summaries: ResolvedArtist[] = [];
+  for (const resolved of resolvedArtists) {
     let added = 0;
-    for (const track of tracks) {
+    for (const track of resolved.tracks) {
       if (!seen.has(track.id)) {
         seen.add(track.id);
         trackIds.push(track.id);
         added += 1;
       }
     }
-    resolvedArtists.push({ query, artist, trackCount: added });
+    summaries.push({ query: resolved.query, artist: resolved.artist, trackCount: added });
   }
 
-  const playlist = await client.createPlaylist(options.playlistName, {
+  const playlist = await createPlaylistWithTracks(client, {
+    name: options.playlistName,
+    trackIds,
     ...(options.description !== undefined && { description: options.description }),
     isPublic: options.isPublic ?? false,
   });
-  await client.addTracksToPlaylist(playlist.id, trackIds);
 
   return {
     playlist,
-    resolvedArtists,
+    resolvedArtists: summaries,
     unresolvedArtists,
     trackCount: trackIds.length,
   };
