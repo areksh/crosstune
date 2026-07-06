@@ -146,6 +146,25 @@ describe("QobuzClient.init", () => {
   });
 });
 
+describe("QobuzClient request logging", () => {
+  it("emits a debug line per request with method, path and status only", async () => {
+    const recorded: RecordedRequest[] = [];
+    const lines: string[] = [];
+    const client = new QobuzClient({
+      fetchImpl: makeFetch({ recorded }),
+      now: () => 1700000000,
+      logger: { debug: (message) => lines.push(message) },
+    });
+
+    await client.init();
+
+    // init fetches the bundle then probes a secret against track/getFileUrl.
+    expect(lines).toContain("GET /track/getFileUrl -> 200");
+    // The query (with request_sig and request_ts) must never reach the log.
+    expect(lines.every((line) => !line.includes("request_sig"))).toBe(true);
+  });
+});
+
 describe("QobuzClient credentials caching", () => {
   it("exposes the resolved credentials after init", async () => {
     const { client } = await initedClient({});

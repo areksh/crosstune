@@ -33,17 +33,22 @@
  *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
+ *
+ * A global `--loglevel <silent|error|warn|info|debug>` option (default `info`)
+ * controls how much is logged; it may appear anywhere in the arguments.
  */
 
 import { readFileSync } from "node:fs";
 
 import {
+  extractLogLevel,
   parseDedupeArgs,
   parsePlaylistArgs,
   type DedupeSource,
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
+import { createLogger, DEFAULT_LOG_LEVEL, type Logger } from "./cli/logger.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import { openInBrowser } from "./cli/open-browser.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
@@ -66,8 +71,16 @@ import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
  */
 let usedCachedCredentials = false;
 
+/**
+ * Active logger. Replaced in {@link main} once `--loglevel` is parsed; the
+ * default-level instance covers the top-level error handler when parsing the
+ * level itself fails.
+ */
+let logger: Logger = createLogger(DEFAULT_LOG_LEVEL);
+
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const { level, rest: args } = extractLogLevel(process.argv.slice(2));
+  logger = createLogger(level);
   const command = args[0] ?? "check";
   if (command === "--help" || command === "-h") {
     printUsage();
@@ -79,7 +92,7 @@ async function main(): Promise<void> {
     const store = fileTokenStore();
     const hadSession = store.load() !== undefined;
     store.clear();
-    console.log(hadSession ? "Signed out." : "No saved session to clear.");
+    logger.info(hadSession ? "Signed out." : "No saved session to clear.");
     return;
   }
 
@@ -108,16 +121,16 @@ async function main(): Promise<void> {
       break;
     }
     default:
-      console.error(`Unknown command: ${command}`);
+      logger.error(`Unknown command: ${command}`);
       printUsage();
       process.exitCode = 2;
       return;
   }
 
-  const client = new QobuzClient();
+  const client = new QobuzClient({ logger });
   const { fromCache } = await initClientWithCache(client, fileCredentialStore());
   usedCachedCredentials = fromCache;
-  console.log(
+  logger.info(
     fromCache
       ? `Using cached Qobuz credentials (app id ${client.appId}).`
       : `Extracted Qobuz bundle tokens (app id ${client.appId}).`,
@@ -126,10 +139,10 @@ async function main(): Promise<void> {
   const { session, restored } = await restoreOrLogin(
     client,
     fileTokenStore(),
-    () => authenticateViaBrowser(client, { log: (message) => console.log(message) }),
-    (message) => console.log(message),
+    () => authenticateViaBrowser(client, { log: (message) => logger.info(message) }),
+    (message) => logger.info(message),
   );
-  console.log(
+  logger.info(
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
@@ -148,12 +161,12 @@ async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
       subscriptionLabel: session.subscriptionLabel,
     },
   });
-  console.log(`\nWeb UI running at ${server.url}`);
-  console.log("Open it in your browser (it should open automatically).");
-  console.log("Press Ctrl-C to stop.");
+  logger.info(`\nWeb UI running at ${server.url}`);
+  logger.info("Open it in your browser (it should open automatically).");
+  logger.info("Press Ctrl-C to stop.");
   openInBrowser(server.url);
   await waitForInterrupt();
-  console.log("\nStopping...");
+  logger.info("\nStopping...");
   await server.close();
 }
 
@@ -166,12 +179,12 @@ function waitForInterrupt(): Promise<void> {
 }
 
 async function runCheck(client: QobuzClient): Promise<void> {
-  console.log("Fetching favourite tracks...");
+  logger.info("Fetching favourite tracks...");
   const favorites = (await client.getUserFavorites("tracks")) as {
     tracks?: { total?: number };
   };
-  console.log(`  favourite tracks: ${favorites.tracks?.total ?? "unknown"}`);
-  console.log("\nOK: extraction -> OAuth sign-in -> authenticated call.");
+  logger.info(`  favourite tracks: ${favorites.tracks?.total ?? "unknown"}`);
+  logger.info("\nOK: extraction -> OAuth sign-in -> authenticated call.");
 }
 
 /**
@@ -191,7 +204,7 @@ function planPlaylistFromArtists(
   }
 
   return async (client: QobuzClient): Promise<void> => {
-    console.log(
+    logger.info(
       `Building playlist "${parsed.playlistName}" from ${artists.length} artists...`,
     );
     const result = await buildPlaylistFromArtists(client, {
@@ -203,14 +216,14 @@ function planPlaylistFromArtists(
       }),
     });
 
-    console.log(
+    logger.info(
       `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
     );
     for (const resolved of result.resolvedArtists) {
-      console.log(`  ${resolved.artist.name}: ${resolved.trackCount} tracks`);
+      logger.info(`  ${resolved.artist.name}: ${resolved.trackCount} tracks`);
     }
     if (result.unresolvedArtists.length > 0) {
-      console.log(`  not found: ${result.unresolvedArtists.join(", ")}`);
+      logger.warn(`not found: ${result.unresolvedArtists.join(", ")}`);
     }
   };
 }
@@ -229,29 +242,29 @@ function planDeduplicate(
       source.type === "playlist"
         ? `playlist ${source.playlistId}`
         : "your favourites";
-    console.log(`Fetching tracks from ${where}...`);
+    logger.info(`Fetching tracks from ${where}...`);
     const tracks =
       source.type === "playlist"
         ? await client.getPlaylistTracks(source.playlistId)
         : await client.getFavoriteTracks();
-    console.log(`  ${tracks.length} tracks fetched`);
+    logger.info(`  ${tracks.length} tracks fetched`);
 
     let groups = deduplicateTracks(tracks);
     if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
-      console.log("  looking up release dates...");
+      logger.info("  looking up release dates...");
       groups = await enrichReleaseDates(groups, (albumId) =>
         client.getAlbumReleaseDate(albumId),
       );
     }
 
     const resolved = resolveDuplicateGroups(groups, keep);
-    console.log(`  keeping the ${keep} copy of each duplicate\n`);
-    console.log(formatResolutionReport(resolved));
+    logger.info(`  keeping the ${keep} copy of each duplicate\n`);
+    logger.info(formatResolutionReport(resolved));
 
     const removals = tracksToRemove(resolved);
     if (!apply) {
       if (removals.length > 0) {
-        console.log(
+        logger.info(
           `\n(dry run -- pass --apply to remove the ${removals.length} 'drop' track${removals.length === 1 ? "" : "s"})`,
         );
       }
@@ -268,23 +281,23 @@ async function applyRemovals(
   removals: readonly DedupTrack[],
 ): Promise<void> {
   if (removals.length === 0) {
-    console.log("\nNothing to remove.");
+    logger.info("\nNothing to remove.");
     return;
   }
-  console.log(`\nRemoving ${removals.length} track(s)...`);
+  logger.info(`\nRemoving ${removals.length} track(s)...`);
   if (source.type === "playlist") {
     const ids = removals
       .map((track) => track.playlistTrackId)
       .filter((id): id is number => id !== undefined);
     const skipped = removals.length - ids.length;
     if (skipped > 0) {
-      console.log(`  skipped ${skipped} track(s) with no playlist-track id`);
+      logger.warn(`skipped ${skipped} track(s) with no playlist-track id`);
     }
     await client.removeTracksFromPlaylist(source.playlistId, ids);
   } else {
     await client.removeFavoriteTracks(removals.map((track) => track.id));
   }
-  console.log("  done.");
+  logger.info("  done.");
 }
 
 /** Read artist names from piped stdin (one per line); empty when stdin is a TTY. */
@@ -303,7 +316,7 @@ function readArtistsFromStdin(): string[] {
 }
 
 function printUsage(): void {
-  console.log(
+  logger.info(
     [
       "Usage:",
       "  qobuz-helper login",
@@ -312,6 +325,9 @@ function printUsage(): void {
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
+      "",
+      "Global options:",
+      "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
       "",
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
@@ -333,14 +349,16 @@ main().catch((error: unknown) => {
       error.kind === "authentication")
   ) {
     clearCredentials();
-    console.error(
+    logger.warn(
       "\nCached Qobuz credentials may be stale; cleared them -- please re-run.",
     );
   }
   if (error instanceof QobuzError) {
-    console.error(`\nQobuz error [${error.kind}]: ${error.message}`);
+    logger.error(`\nQobuz error [${error.kind}]: ${error.message}`);
   } else {
-    console.error("\nError:", error instanceof Error ? error.message : error);
+    logger.error(
+      `\nError: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   process.exitCode = 1;
 });

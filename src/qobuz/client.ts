@@ -44,6 +44,11 @@ export interface ResolvedCredentials {
   privateKey?: string;
 }
 
+/** The debug logging the client needs (satisfied structurally by the CLI logger). */
+export interface RequestLogger {
+  debug(message: string): void;
+}
+
 export interface QobuzClientOptions {
   /** HTTP implementation; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -51,12 +56,19 @@ export interface QobuzClientOptions {
   now?: () => number;
   /** User-Agent header sent on every request. */
   userAgent?: string;
+  /**
+   * Optional logger receiving one `debug` line per HTTP request (method, API
+   * path and response status). Only the path is logged, never the query, so
+   * signed tokens and secrets stay out of the logs.
+   */
+  logger?: RequestLogger;
 }
 
 export class QobuzClient {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
   readonly #userAgent: string;
+  readonly #logger: RequestLogger;
 
   #tokens?: BundleTokens;
   #validatedSecret?: string;
@@ -66,6 +78,7 @@ export class QobuzClient {
     this.#fetch = options.fetchImpl ?? fetch;
     this.#now = options.now ?? (() => Math.floor(Date.now() / 1000));
     this.#userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+    this.#logger = options.logger ?? { debug: () => {} };
   }
 
   /** The extracted app id, once {@link init} has run. */
@@ -647,7 +660,9 @@ export class QobuzClient {
     if (options.body !== undefined) {
       init.body = options.body;
     }
-    return this.#fetch(url, init);
+    const response = await this.#fetch(url, init);
+    this.#logger.debug(`${method} ${path} -> ${response.status}`);
+    return response;
   }
 
   #appIdHeaders(): Record<string, string> {

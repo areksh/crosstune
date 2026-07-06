@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Levelled logging with a global `--loglevel <silent|error|warn|info|debug>`
+  option (default `info`), accepted anywhere in the arguments. Normal progress
+  and results go to stdout, warnings and errors to stderr, and `debug` adds one
+  line per Qobuz API request (method, path and status only -- never the signed
+  query, so tokens stay out of the logs).
 - Web UI deduplicator and multi-tool shell: the web UI now has a sidebar and a
   home page introducing each tool, and hosts the deduplicator alongside the
   playlist tool. The deduplicator lets you scan a playlist or your favourites,

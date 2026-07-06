@@ -121,6 +121,27 @@ remove the tracks marked `drop` (from the playlist, or from your favourites).
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 
+#### Logging
+
+A global `--loglevel <level>` option controls how much any command logs. It may
+appear anywhere in the arguments and defaults to `info`:
+
+```sh
+npm run dev -- --loglevel debug deduplicate --favourites
+```
+
+| Level    | Shows                                                |
+| -------- | ---------------------------------------------------- |
+| `silent` | nothing                                              |
+| `error`  | errors only                                          |
+| `warn`   | errors and warnings                                  |
+| `info`   | the above plus normal progress and results (default) |
+| `debug`  | the above plus one line per Qobuz API request        |
+
+Progress and results go to stdout; warnings and errors go to stderr. Debug lines
+log only the request method, API path and response status -- never the query, so
+signed tokens never reach the logs.
+
 ### Web UI
 
 ```sh

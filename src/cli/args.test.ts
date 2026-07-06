@@ -1,6 +1,37 @@
 import { describe, expect, it } from "vitest";
 
-import { parseDedupeArgs, parsePlaylistArgs } from "./args.js";
+import { extractLogLevel, parseDedupeArgs, parsePlaylistArgs } from "./args.js";
+
+describe("extractLogLevel", () => {
+  it("defaults to info and leaves the arguments untouched", () => {
+    expect(extractLogLevel(["deduplicate", "--favourites"])).toEqual({
+      level: "info",
+      rest: ["deduplicate", "--favourites"],
+    });
+  });
+
+  it("extracts --loglevel and strips it from the rest", () => {
+    expect(
+      extractLogLevel(["--loglevel", "debug", "check"]),
+    ).toEqual({ level: "debug", rest: ["check"] });
+  });
+
+  it("accepts the --loglevel=<level> form anywhere in the arguments", () => {
+    expect(
+      extractLogLevel(["deduplicate", "--loglevel=warn", "--favourites"]),
+    ).toEqual({ level: "warn", rest: ["deduplicate", "--favourites"] });
+  });
+
+  it("throws on an invalid level", () => {
+    expect(() => extractLogLevel(["--loglevel", "verbose"])).toThrow(
+      /loglevel/i,
+    );
+  });
+
+  it("throws when --loglevel has no value", () => {
+    expect(() => extractLogLevel(["check", "--loglevel"])).toThrow(/loglevel/i);
+  });
+});
 
 describe("parsePlaylistArgs", () => {
   it("parses the name, artists, track count and public flag", () => {

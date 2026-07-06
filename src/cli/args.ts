@@ -3,6 +3,46 @@
  */
 
 import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
+import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
+
+export interface ExtractedLogLevel {
+  level: LogLevel;
+  /** The arguments with the `--loglevel` option removed. */
+  rest: string[];
+}
+
+/**
+ * Pull the global `--loglevel <level>` (or `--loglevel=<level>`) option out of
+ * an argument list, returning the chosen level and the remaining arguments.
+ *
+ * The option is global -- it may appear anywhere, before or after the command
+ * and its own options -- so it is stripped here before per-command parsing.
+ * Defaults to `info` when absent.
+ *
+ * @throws {Error} if the value is missing or not a valid level name.
+ */
+export function extractLogLevel(argv: readonly string[]): ExtractedLogLevel {
+  let level: LogLevel = DEFAULT_LOG_LEVEL;
+  const rest: string[] = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--loglevel") {
+      const raw = argv[i + 1];
+      i += 1;
+      if (raw === undefined) {
+        throw new Error("--loglevel requires a value");
+      }
+      level = parseLogLevel(raw);
+    } else if (arg !== undefined && arg.startsWith("--loglevel=")) {
+      level = parseLogLevel(arg.slice("--loglevel=".length));
+    } else if (arg !== undefined) {
+      rest.push(arg);
+    }
+  }
+
+  return { level, rest };
+}
 
 export interface PlaylistArgs {
   playlistName: string;
