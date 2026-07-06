@@ -147,8 +147,7 @@ function renderGroups(groups: ResolvedGroup[]): void {
     return;
   }
 
-  const removeCount = groups.reduce((sum, g) => sum + g.tracks.length - 1, 0);
-  summary.textContent = `Found ${groups.length} duplicate group${groups.length === 1 ? "" : "s"}; ${removeCount} track${removeCount === 1 ? "" : "s"} would be removed. Adjust which copy to keep, then apply.`;
+  summary.textContent = `Found ${groups.length} duplicate group${groups.length === 1 ? "" : "s"}. Ticked copies are kept; the rest are removed when you apply.`;
 
   groups.forEach((group, index) => {
     container.appendChild(renderGroup(group, index));
@@ -168,43 +167,42 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
   keepAll.type = "checkbox";
   keepAll.className = "dedup-keep-all";
   keepAll.addEventListener("change", () => {
-    for (const radio of wrapper.querySelectorAll<HTMLInputElement>(
-      'input[type="radio"]',
+    for (const box of wrapper.querySelectorAll<HTMLInputElement>(
+      ".dedup-keep-box",
     )) {
-      radio.disabled = keepAll.checked;
+      box.disabled = keepAll.checked;
+      if (keepAll.checked) {
+        box.checked = true;
+      }
     }
     updateGroupStyling(wrapper);
     updateApplyButton();
   });
   keepAllLabel.appendChild(keepAll);
-  keepAllLabel.appendChild(document.createTextNode(" Not a duplicate (keep all)"));
+  keepAllLabel.appendChild(document.createTextNode(" Keep all"));
 
   for (const track of group.tracks) {
-    wrapper.appendChild(renderGroupTrack(track, group.keepId, index));
+    wrapper.appendChild(renderGroupTrack(track, group.keepId));
   }
   wrapper.appendChild(keepAllLabel);
   updateGroupStyling(wrapper);
   return wrapper;
 }
 
-function renderGroupTrack(
-  track: DedupTrack,
-  keepId: number,
-  groupIndex: number,
-): HTMLElement {
+function renderGroupTrack(track: DedupTrack, keepId: number): HTMLElement {
   const row = document.createElement("label");
   row.className = "dedup-track";
   row.dataset["trackId"] = String(track.id);
 
-  const radio = document.createElement("input");
-  radio.type = "radio";
-  radio.name = `dedup-keep-${groupIndex}`;
-  radio.value = String(track.id);
-  radio.checked = track.id === keepId;
-  radio.addEventListener("change", () =>
-    updateGroupStyling(row.closest(".dedup-group") as HTMLElement),
-  );
-  row.appendChild(radio);
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "dedup-keep-box";
+  checkbox.checked = track.id === keepId;
+  checkbox.addEventListener("change", () => {
+    updateGroupStyling(row.closest(".dedup-group") as HTMLElement);
+    updateApplyButton();
+  });
+  row.appendChild(checkbox);
 
   const title = document.createElement("span");
   title.className = "title";
@@ -233,21 +231,17 @@ function trackMeta(track: DedupTrack): string {
   return parts.join("  -  ");
 }
 
-/** Mark each track row keep/drop from the group's current radio state. */
+/** Mark each track row keep/drop from its checkbox (green when kept, red when not). */
 function updateGroupStyling(wrapper: HTMLElement): void {
-  const keepAll = wrapper.querySelector<HTMLInputElement>(".dedup-keep-all");
-  const keepingAll = keepAll?.checked ?? false;
-  const checked = wrapper.querySelector<HTMLInputElement>(
-    'input[type="radio"]:checked',
-  );
   for (const row of wrapper.querySelectorAll<HTMLElement>(".dedup-track")) {
-    const isKept = row.dataset["trackId"] === checked?.value;
-    row.classList.toggle("keep", keepingAll || isKept);
-    row.classList.toggle("drop", !keepingAll && !isKept);
+    const box = row.querySelector<HTMLInputElement>(".dedup-keep-box");
+    const kept = box?.checked ?? false;
+    row.classList.toggle("keep", kept);
+    row.classList.toggle("drop", !kept);
   }
 }
 
-/** Track ids to remove, with their playlist-track ids, from the DOM state. */
+/** Track ids to remove (the unticked copies), with their playlist-track ids. */
 function collectRemovals(): Array<{ id: number; playlistTrackId?: number }> {
   const removals: Array<{ id: number; playlistTrackId?: number }> = [];
   document.querySelectorAll<HTMLElement>(".dedup-group").forEach((wrapper) => {
@@ -256,23 +250,19 @@ function collectRemovals(): Array<{ id: number; playlistTrackId?: number }> {
     if (group === undefined) {
       return;
     }
-    const keepAll = wrapper.querySelector<HTMLInputElement>(".dedup-keep-all");
-    if (keepAll?.checked) {
-      return;
-    }
-    const checked = wrapper.querySelector<HTMLInputElement>(
-      'input[type="radio"]:checked',
-    );
-    const keepId = checked === null ? group.keepId : Number(checked.value);
-    for (const track of group.tracks) {
-      if (track.id !== keepId) {
-        removals.push({
-          id: track.id,
-          ...(track.playlistTrackId !== undefined && {
-            playlistTrackId: track.playlistTrackId,
-          }),
-        });
+    for (const row of wrapper.querySelectorAll<HTMLElement>(".dedup-track")) {
+      const box = row.querySelector<HTMLInputElement>(".dedup-keep-box");
+      if (box === null || box.checked) {
+        continue;
       }
+      const id = Number(row.dataset["trackId"]);
+      const track = group.tracks.find((t) => t.id === id);
+      removals.push({
+        id,
+        ...(track?.playlistTrackId !== undefined && {
+          playlistTrackId: track.playlistTrackId,
+        }),
+      });
     }
   });
   return removals;

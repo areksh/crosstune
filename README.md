@@ -142,10 +142,10 @@ tools; a home page introduces each.
 
 1. Choose a source (your favourites or a playlist) and which copy to keep
    (first added, highest quality, oldest release, and so on).
-2. Scan: each duplicate group shows its copies with the kept one in green and
-   the rest in red. Change which copy is kept per group, or mark a group as not
-   a duplicate to keep all of it.
-3. Apply to remove the tracks marked for removal.
+2. Scan: each duplicate group shows its copies, the kept ones in green and the
+   rest in red. Tick the copies you want to keep (you can keep more than one),
+   or use "Keep all" to keep the whole group.
+3. Apply to remove the unticked copies.
 
 The browser only ever talks to the local server, which owns the Qobuz session;
 your Qobuz token is never sent to the page. The server is reachable only from
