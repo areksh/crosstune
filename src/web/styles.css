@@ -1,0 +1,178 @@
+:root {
+  --bg: #12141a;
+  --panel: #1c1f28;
+  --border: #2c3140;
+  --text: #e7e9ee;
+  --muted: #9aa1b1;
+  --accent: #4f8cff;
+  --accent-text: #ffffff;
+  --error: #ff6b6b;
+  --ok: #57d38c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.session {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1rem 0;
+}
+
+.field > span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.field-inline input {
+  width: 6rem;
+}
+
+textarea,
+input[type="text"],
+input[type="number"],
+select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.actions {
+  margin-top: 1rem;
+}
+
+button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.error {
+  color: var(--error);
+  margin: 0.75rem 0 0;
+}
+
+.result {
+  color: var(--ok);
+  margin: 0.75rem 0 0;
+}
+
+.unresolved {
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.artist-group {
+  margin-bottom: 1.25rem;
+}
+
+.artist-group h4 {
+  margin: 0 0 0.4rem;
+}
+
+.artist-group .matched {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 0.85rem;
+}
+
+.track {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.track .title {
+  font-weight: 500;
+}
+
+.track .meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.radio,
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  cursor: pointer;
+}
+
+.target-fields {
+  margin: 0 0 0.5rem 1.5rem;
+}

@@ -1,0 +1,359 @@
+/**
+ * Frontend for the playlist-from-artists tool.
+ *
+ * A thin single-page app that talks only to the local server's JSON API (never
+ * to Qobuz directly). Every request carries the per-run nonce injected into the
+ * page, which the server requires. The flow mirrors the design: resolve artists
+ * to tracks, let the user review and untick tracks, choose a destination, then
+ * commit.
+ *
+ * This is DOM glue and is not unit-tested; the logic it drives (resolving,
+ * committing, validation, security) lives in the tested server modules.
+ */
+
+interface Artist {
+  id: number;
+  name: string;
+}
+
+interface Track {
+  id: number;
+  title: string;
+  artist?: string;
+  album?: string;
+}
+
+interface ResolvedArtist {
+  query: string;
+  artist: Artist;
+  tracks: Track[];
+}
+
+interface ResolveResponse {
+  resolvedArtists: ResolvedArtist[];
+  unresolvedArtists: string[];
+}
+
+interface Playlist {
+  id: number;
+  name: string;
+  trackCount?: number;
+}
+
+const nonce =
+  document.querySelector('meta[name="qobuz-nonce"]')?.getAttribute("content") ??
+  "";
+
+function el<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (node === null) {
+    throw new Error(`missing element #${id}`);
+  }
+  return node as T;
+}
+
+async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { "X-Qobuz-Nonce": nonce };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(path, {
+    method,
+    headers,
+    ...(body !== undefined && { body: JSON.stringify(body) }),
+  });
+  const data: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      isRecord(data) && typeof data["error"] === "string"
+        ? data["error"]
+        : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return data as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function showError(node: HTMLElement, message: string | undefined): void {
+  if (message === undefined) {
+    node.hidden = true;
+    node.textContent = "";
+  } else {
+    node.hidden = false;
+    node.textContent = message;
+  }
+}
+
+/** Show who is signed in, or that the session could not be read. */
+async function loadSession(): Promise<void> {
+  const target = el("session");
+  try {
+    const session = await api<{ displayName: string; subscriptionLabel: string }>(
+      "GET",
+      "/api/session",
+    );
+    target.textContent = `Signed in as ${session.displayName} (${session.subscriptionLabel})`;
+  } catch {
+    target.textContent = "Could not read your Qobuz session.";
+  }
+}
+
+let resolved: ResolvedArtist[] = [];
+
+async function onResolve(): Promise<void> {
+  const button = el<HTMLButtonElement>("resolve");
+  const errorNode = el("resolve-error");
+  showError(errorNode, undefined);
+
+  const artists = el<HTMLTextAreaElement>("artists")
+    .value.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (artists.length === 0) {
+    showError(errorNode, "Enter at least one artist.");
+    return;
+  }
+  const tracksPerArtist = Number(el<HTMLInputElement>("per-artist").value);
+
+  button.disabled = true;
+  button.textContent = "Loading...";
+  try {
+    const result = await api<ResolveResponse>("POST", "/api/resolve", {
+      artists,
+      tracksPerArtist,
+    });
+    resolved = result.resolvedArtists;
+    renderPreview(result);
+  } catch (error) {
+    showError(errorNode, (error as Error).message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Preview tracks";
+  }
+}
+
+function renderPreview(result: ResolveResponse): void {
+  const unresolvedNode = el("unresolved");
+  if (result.unresolvedArtists.length > 0) {
+    unresolvedNode.hidden = false;
+    unresolvedNode.textContent = `Could not find: ${result.unresolvedArtists.join(", ")}`;
+  } else {
+    unresolvedNode.hidden = true;
+  }
+
+  const groups = el("artist-groups");
+  groups.textContent = "";
+  for (const resolvedArtist of result.resolvedArtists) {
+    groups.appendChild(renderArtistGroup(resolvedArtist));
+  }
+
+  el("preview").hidden = false;
+  showError(el("commit-error"), undefined);
+  showError(el("commit-result"), undefined);
+  updateSelectedCount();
+}
+
+function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
+  const group = document.createElement("div");
+  group.className = "artist-group";
+
+  const heading = document.createElement("h4");
+  heading.textContent = resolvedArtist.artist.name;
+  if (resolvedArtist.artist.name.toLowerCase() !== resolvedArtist.query.toLowerCase()) {
+    const matched = document.createElement("span");
+    matched.className = "matched";
+    matched.textContent = ` (matched "${resolvedArtist.query}")`;
+    heading.appendChild(matched);
+  }
+  group.appendChild(heading);
+
+  for (const track of resolvedArtist.tracks) {
+    group.appendChild(renderTrack(track));
+  }
+  return group;
+}
+
+function renderTrack(track: Track): HTMLElement {
+  const row = document.createElement("label");
+  row.className = "track";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+  checkbox.dataset["trackId"] = String(track.id);
+  checkbox.addEventListener("change", updateSelectedCount);
+  row.appendChild(checkbox);
+
+  const title = document.createElement("span");
+  title.className = "title";
+  title.textContent = track.title;
+  row.appendChild(title);
+
+  if (track.album !== undefined) {
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = track.album;
+    row.appendChild(meta);
+  }
+  return row;
+}
+
+/** The unique, ticked track ids in display order. */
+function selectedTrackIds(): number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  const boxes = document.querySelectorAll<HTMLInputElement>(
+    ".track input[type=checkbox]:checked",
+  );
+  boxes.forEach((box) => {
+    const id = Number(box.dataset["trackId"]);
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  });
+  return ids;
+}
+
+function updateSelectedCount(): void {
+  const count = selectedTrackIds().length;
+  el("selected-count").textContent = `${count} track${count === 1 ? "" : "s"} selected.`;
+  el<HTMLButtonElement>("commit").disabled = count === 0;
+}
+
+function onTargetChange(): void {
+  const target = selectedTarget();
+  el("new-fields").hidden = target !== "new";
+  el("existing-fields").hidden = target !== "existing";
+  el<HTMLButtonElement>("commit").textContent =
+    target === "new" ? "Create playlist" : "Add to playlist";
+  if (target === "existing") {
+    void loadPlaylists();
+  }
+}
+
+function selectedTarget(): string {
+  const checked = document.querySelector<HTMLInputElement>(
+    'input[name="target"]:checked',
+  );
+  return checked?.value ?? "new";
+}
+
+let playlistsLoaded = false;
+
+async function loadPlaylists(): Promise<void> {
+  if (playlistsLoaded) {
+    return;
+  }
+  const select = el<HTMLSelectElement>("playlist-select");
+  try {
+    const { playlists } = await api<{ playlists: Playlist[] }>(
+      "GET",
+      "/api/playlists",
+    );
+    select.textContent = "";
+    if (playlists.length === 0) {
+      select.appendChild(new Option("You have no playlists", ""));
+      return;
+    }
+    for (const playlist of playlists) {
+      const label =
+        playlist.trackCount === undefined
+          ? playlist.name
+          : `${playlist.name} (${playlist.trackCount} tracks)`;
+      select.appendChild(new Option(label, String(playlist.id)));
+    }
+    playlistsLoaded = true;
+  } catch (error) {
+    select.textContent = "";
+    select.appendChild(new Option(`Could not load playlists`, ""));
+    showError(el("commit-error"), (error as Error).message);
+  }
+}
+
+async function onCommit(): Promise<void> {
+  const button = el<HTMLButtonElement>("commit");
+  const errorNode = el("commit-error");
+  const resultNode = el("commit-result");
+  showError(errorNode, undefined);
+  showError(resultNode, undefined);
+
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) {
+    showError(errorNode, "Select at least one track.");
+    return;
+  }
+
+  const target = buildTarget();
+  if (target === undefined) {
+    showError(errorNode, "Choose a destination.");
+    return;
+  }
+
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = "Working...";
+  try {
+    const result = await api<{
+      playlist?: Playlist;
+      added: number[];
+      skipped: number[];
+    }>("POST", "/api/commit", { target, trackIds });
+    showResult(resultNode, target, result);
+  } catch (error) {
+    showError(errorNode, (error as Error).message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+type CommitTarget =
+  | { type: "new"; name: string; isPublic: boolean }
+  | { type: "existing"; playlistId: number };
+
+function buildTarget(): CommitTarget | undefined {
+  if (selectedTarget() === "new") {
+    const name = el<HTMLInputElement>("playlist-name").value.trim();
+    if (name.length === 0) {
+      return undefined;
+    }
+    return {
+      type: "new",
+      name,
+      isPublic: el<HTMLInputElement>("playlist-public").checked,
+    };
+  }
+  const value = el<HTMLSelectElement>("playlist-select").value;
+  if (value === "") {
+    return undefined;
+  }
+  return { type: "existing", playlistId: Number(value) };
+}
+
+function showResult(
+  node: HTMLElement,
+  target: CommitTarget,
+  result: { playlist?: Playlist; added: number[]; skipped: number[] },
+): void {
+  node.hidden = false;
+  if (target.type === "new") {
+    node.textContent = `Created "${result.playlist?.name ?? target.name}" with ${result.added.length} tracks.`;
+  } else {
+    const skipped =
+      result.skipped.length > 0
+        ? ` (${result.skipped.length} already present, skipped)`
+        : "";
+    node.textContent = `Added ${result.added.length} tracks to the playlist${skipped}.`;
+  }
+}
+
+el("resolve").addEventListener("click", () => void onResolve());
+el("commit").addEventListener("click", () => void onCommit());
+for (const radio of document.querySelectorAll('input[name="target"]')) {
+  radio.addEventListener("change", onTargetChange);
+}
+void loadSession();

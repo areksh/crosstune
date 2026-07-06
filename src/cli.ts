@@ -12,6 +12,9 @@
  *   qobuz-helper logout
  *       Discard the saved session.
  *
+ *   qobuz-helper ui
+ *       Serve the local web UI and open it in the browser.
+ *
  *   qobuz-helper check
  *       Vertical-slice smoke test (extraction -> sign-in -> one API call).
  *
@@ -42,7 +45,9 @@ import {
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
+import { openInBrowser } from "./cli/open-browser.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
+import { startServer } from "./server/http.js";
 import {
   deduplicateTracks,
   enrichReleaseDates,
@@ -53,7 +58,7 @@ import {
   type DedupTrack,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
-import { QobuzClient, QobuzError } from "./qobuz/index.js";
+import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
  * Whether the current run was primed from cached bundle credentials. Tracked so
@@ -81,13 +86,16 @@ async function main(): Promise<void> {
   // Resolve the command and validate its arguments *before* any network or
   // sign-in, so bad input fails fast without opening a browser. `login` just
   // establishes (and persists) a session, so its action is a no-op.
-  let run: (client: QobuzClient) => Promise<void>;
+  let run: (client: QobuzClient, session: UserSession) => Promise<void>;
   switch (command) {
     case "login":
       run = async () => {};
       break;
     case "check":
       run = runCheck;
+      break;
+    case "ui":
+      run = runUi;
       break;
     case "playlist-from-artists": {
       const plan = planPlaylistFromArtists(args.slice(1));
@@ -125,7 +133,36 @@ async function main(): Promise<void> {
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
-  await run(client);
+  await run(client, session);
+}
+
+/**
+ * Serve the web UI locally and open it in the browser. The client (already
+ * signed in) is the API's Qobuz backend; the server runs until interrupted.
+ */
+async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
+  const server = await startServer({
+    service: client,
+    session: {
+      displayName: session.displayName,
+      subscriptionLabel: session.subscriptionLabel,
+    },
+  });
+  console.log(`\nWeb UI running at ${server.url}`);
+  console.log("Open it in your browser (it should open automatically).");
+  console.log("Press Ctrl-C to stop.");
+  openInBrowser(server.url);
+  await waitForInterrupt();
+  console.log("\nStopping...");
+  await server.close();
+}
+
+/** Resolve when the process receives an interrupt (Ctrl-C). */
+function waitForInterrupt(): Promise<void> {
+  return new Promise((resolve) => {
+    process.once("SIGINT", () => resolve());
+    process.once("SIGTERM", () => resolve());
+  });
 }
 
 async function runCheck(client: QobuzClient): Promise<void> {
@@ -271,6 +308,7 @@ function printUsage(): void {
       "Usage:",
       "  qobuz-helper login",
       "  qobuz-helper logout",
+      "  qobuz-helper ui",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",

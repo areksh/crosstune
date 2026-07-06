@@ -20,12 +20,13 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 ## Tools
 
 - **Playlist from artists** -- build a playlist from just a list of artists,
-  using each artist's top tracks. Available now (see below).
+  using each artist's top tracks. Available on the CLI and in the web UI.
 - **Deduplicator** -- report duplicate tracks in a playlist or your favourites,
   including remasters and the same song on different albums. Available now (see
   below).
 
-More to follow.
+There is also a **local web UI** (`qobuz-helper ui`) for the playlist tool, with
+a preview-and-edit step before anything is created. More to follow.
 
 ## Requirements
 
@@ -120,14 +121,36 @@ remove the tracks marked `drop` (from the playlist, or from your favourites).
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 
+### Web UI
+
+```sh
+npm run ui            # build the frontend, then serve it and open the browser
+```
+
+`qobuz-helper ui` starts a small web server on `127.0.0.1`, opens your browser
+at it, and runs until you stop it with Ctrl-C. The page lets you build a
+playlist from artists visually:
+
+1. Paste one artist per line and choose how many top tracks to take from each.
+2. Preview the tracks grouped by artist, and untick any you do not want.
+3. Choose a destination -- create a new playlist, or add to an existing one
+   (tracks already in it are skipped) -- and commit.
+
+The browser only ever talks to the local server, which owns the Qobuz session;
+your Qobuz token is never sent to the page. The server is reachable only from
+your own machine, and every request must carry a per-run secret that only the
+served page can read (guarding against other local pages acting on your
+account). See [ADR-0002](docs/adr/0002-web-ui-architecture.md) for the design.
+
 ## Development
 
 | Command             | What it does                          |
 | ------------------- | ------------------------------------- |
 | `npm test`          | Run the Vitest suite once             |
 | `npm run test:watch`| Run tests in watch mode               |
-| `npm run typecheck` | Type-check without emitting           |
-| `npm run build`     | Compile TypeScript to `dist/`         |
+| `npm run typecheck` | Type-check the server/CLI and the web UI |
+| `npm run build`     | Compile TypeScript and bundle the web UI into `dist/` |
+| `npm run ui`        | Build, then serve the web UI          |
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 

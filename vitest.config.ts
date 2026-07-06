@@ -7,7 +7,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "src/cli.ts"],
+      // Excluded: DOM/socket/process I/O glue with no meaningful unit under test.
+      exclude: [
+        "src/**/*.test.ts",
+        "src/cli.ts",
+        "src/web/**",
+        "src/server/http.ts",
+        "src/cli/oauth-login.ts",
+        "src/cli/open-browser.ts",
+      ],
     },
   },
 });

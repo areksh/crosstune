@@ -9,12 +9,12 @@
  * pure parts (URL building, code parsing) are tested in the `oauth` module.
  */
 
-import { spawn } from "node:child_process";
 import * as http from "node:http";
 
 import type { UserSession } from "../qobuz/index.js";
 import { QobuzClient } from "../qobuz/index.js";
 import { buildOAuthUrl, parseRedirectCode } from "../qobuz/oauth.js";
+import { openInBrowser } from "./open-browser.js";
 
 const OAUTH_TIMEOUT_MS = 180_000;
 
@@ -97,32 +97,4 @@ function captureAuthorizationCode(
       }
     });
   });
-}
-
-/** Best-effort open of a URL in the platform browser; failures are ignored. */
-function openInBrowser(url: string): void {
-  let command: string;
-  let args: string[];
-  switch (process.platform) {
-    case "darwin":
-      command = "open";
-      args = [url];
-      break;
-    case "win32":
-      command = "cmd";
-      args = ["/c", "start", "", url];
-      break;
-    default:
-      command = "xdg-open";
-      args = [url];
-  }
-  try {
-    const child = spawn(command, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-      // Ignore: the URL was printed for manual opening.
-    });
-    child.unref();
-  } catch {
-    // Ignore: the URL was printed for manual opening.
-  }
 }

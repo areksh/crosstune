@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Web UI (`qobuz-helper ui`): a local web server plus browser frontend for the
+  playlist-from-artists tool. Paste artists (one per line), choose top tracks
+  per artist, preview the tracks grouped by artist and untick any you do not
+  want, then create a new playlist or add to an existing one (skipping tracks
+  already present). The server binds to `127.0.0.1`, keeps the Qobuz session
+  server-side, and authorises each API request by Host, Origin and a per-run
+  nonce. Adds a `getUserPlaylists` client method, a resolve/commit split of the
+  playlist feature, and an esbuild-bundled frontend (see ADR-0002).
 - Bundle-credential caching: the validated app id and app secret scraped from
   the Qobuz web player are cached locally (owner-only, at
   `$XDG_CONFIG_HOME/qobuz-helper/bundle.json`), so later runs skip the web-bundle
