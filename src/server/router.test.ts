@@ -1,19 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { QobuzError, type Artist, type Playlist, type Track } from "../qobuz/index.js";
-import { handleApi, type ApiDeps, type PlaylistService } from "./router.js";
+import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
 const NONCE = "test-nonce";
 const PORT = 4747;
 
-function service(overrides: Partial<PlaylistService> = {}): PlaylistService {
+function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
   return {
     searchArtists: vi.fn(async () => [] as Artist[]),
     getArtistTopTracks: vi.fn(async () => [] as Track[]),
     getUserPlaylists: vi.fn(async () => [] as Playlist[]),
     getPlaylistTracks: vi.fn(async () => [] as Track[]),
+    getFavoriteTracks: vi.fn(async () => [] as Track[]),
+    getAlbumReleaseDate: vi.fn(async () => undefined),
     createPlaylist: vi.fn(async (name: string) => ({ id: 1, name })),
     addTracksToPlaylist: vi.fn(async () => {}),
+    removeTracksFromPlaylist: vi.fn(async () => {}),
+    removeFavoriteTracks: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -171,6 +175,130 @@ describe("POST /api/commit", () => {
   it("rejects an unknown target type", async () => {
     const res = await handleApi(
       request("POST", "/api/commit", { target: { type: "nope" }, trackIds: [1] }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/deduplicate/scan", () => {
+  const dupes: Track[] = [
+    { id: 1, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: 11 },
+    { id: 2, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: 12 },
+    { id: 3, title: "Iron Man", artist: "Black Sabbath" },
+  ];
+
+  it("returns resolved duplicate groups for a playlist", async () => {
+    const svc = service({ getPlaylistTracks: vi.fn(async () => dupes) });
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", {
+        source: { type: "playlist", playlistId: 55 },
+        keep: "first-added",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { groups: Array<{ tracks: Track[]; keepId: number }> };
+    expect(body.groups).toHaveLength(1);
+    expect(body.groups[0]?.keepId).toBe(1);
+    expect(body.groups[0]?.tracks.map((t) => t.id)).toEqual([1, 2]);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(55);
+  });
+
+  it("scans favourites when the source is favourites", async () => {
+    const svc = service({ getFavoriteTracks: vi.fn(async () => dupes) });
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", {
+        source: { type: "favourites" },
+        keep: "first-added",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(svc.getFavoriteTracks).toHaveBeenCalledOnce();
+  });
+
+  it("enriches release dates for date-based strategies", async () => {
+    const withAlbums: Track[] = [
+      { id: 1, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a1" },
+      { id: 2, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a2" },
+    ];
+    const dates: Record<string, string> = { a1: "1970-01-01", a2: "2000-01-01" };
+    const svc = service({
+      getPlaylistTracks: vi.fn(async () => withAlbums),
+      getAlbumReleaseDate: vi.fn(async (id: string) => dates[id]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", {
+        source: { type: "playlist", playlistId: 1 },
+        keep: "oldest",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { groups: Array<{ keepId: number }> };
+    expect(body.groups[0]?.keepId).toBe(1); // a1 is older
+    expect(svc.getAlbumReleaseDate).toHaveBeenCalled();
+  });
+
+  it("rejects an unknown keep strategy", async () => {
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", {
+        source: { type: "favourites" },
+        keep: "cheapest",
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an invalid source", async () => {
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", { source: { type: "album" }, keep: "first-added" }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/deduplicate/apply", () => {
+  it("removes the given playlist-track ids from a playlist", async () => {
+    const svc = service();
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "playlist", playlistId: 55 },
+        removals: [
+          { id: 2, playlistTrackId: 12 },
+          { id: 3, playlistTrackId: 13 },
+        ],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: 2 });
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(55, [12, 13]);
+  });
+
+  it("removes favourite tracks by track id", async () => {
+    const svc = service();
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "favourites" },
+        removals: [{ id: 7 }, { id: 8 }],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: 2 });
+    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([7, 8]);
+  });
+
+  it("rejects an empty removal list", async () => {
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "favourites" },
+        removals: [],
+      }),
       deps(),
     );
     expect(res.status).toBe(400);

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   handleApi,
   type ApiResponse,
-  type PlaylistService,
+  type QobuzApiService,
   type SessionInfo,
 } from "./router.js";
 
@@ -38,7 +38,7 @@ const STATIC_FILES: Record<string, string> = {
 };
 
 export interface StartServerOptions {
-  service: PlaylistService;
+  service: QobuzApiService;
   session: SessionInfo;
   /** Port to bind; 0 (default) picks an ephemeral free port. */
   port?: number;

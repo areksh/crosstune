@@ -14,6 +14,14 @@
 
 import { QobuzError, type Artist, type Playlist, type Track } from "../qobuz/index.js";
 import {
+  deduplicateTracks,
+  enrichReleaseDates,
+  resolveDuplicateGroups,
+  strategyNeedsReleaseDates,
+  KEEP_STRATEGIES,
+  type KeepStrategy,
+} from "../features/deduplicate.js";
+import {
   addTracksToExistingPlaylist,
   createPlaylistWithTracks,
   resolveArtistTracks,
@@ -21,11 +29,13 @@ import {
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
-export interface PlaylistService {
+export interface QobuzApiService {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
   getUserPlaylists(): Promise<Playlist[]>;
   getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getFavoriteTracks(): Promise<Track[]>;
+  getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
@@ -34,6 +44,11 @@ export interface PlaylistService {
     playlistId: number,
     trackIds: readonly number[],
   ): Promise<void>;
+  removeTracksFromPlaylist(
+    playlistId: number,
+    playlistTrackIds: readonly number[],
+  ): Promise<void>;
+  removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
 }
 
 export interface SessionInfo {
@@ -42,7 +57,7 @@ export interface SessionInfo {
 }
 
 export interface ApiDeps {
-  service: PlaylistService;
+  service: QobuzApiService;
   session: SessionInfo;
   nonce: string;
   port: number;
@@ -105,6 +120,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.method === "POST" && req.path === "/api/commit") {
     return commit(req.body, deps);
   }
+  if (req.method === "POST" && req.path === "/api/deduplicate/scan") {
+    return scan(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/deduplicate/apply") {
+    return apply(req.body, deps);
+  }
   return { status: 404, body: { error: "not found" } };
 }
 
@@ -140,6 +161,45 @@ async function commit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     trackIds,
   });
   return { status: 200, body: { playlistId: target.playlistId, added, skipped } };
+}
+
+async function scan(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseScanInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, keep } = input.value;
+  const tracks =
+    source.type === "playlist"
+      ? await deps.service.getPlaylistTracks(source.playlistId)
+      : await deps.service.getFavoriteTracks();
+
+  let groups = deduplicateTracks(tracks);
+  if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
+    groups = await enrichReleaseDates(groups, (albumId) =>
+      deps.service.getAlbumReleaseDate(albumId),
+    );
+  }
+  const resolved = resolveDuplicateGroups(groups, keep);
+  return { status: 200, body: { groups: resolved } };
+}
+
+async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseApplyInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, removals } = input.value;
+  if (source.type === "playlist") {
+    const ids = removals
+      .map((removal) => removal.playlistTrackId)
+      .filter((id): id is number => id !== undefined);
+    await deps.service.removeTracksFromPlaylist(source.playlistId, ids);
+    return { status: 200, body: { removed: ids.length } };
+  }
+  const ids = removals.map((removal) => removal.id);
+  await deps.service.removeFavoriteTracks(ids);
+  return { status: 200, body: { removed: ids.length } };
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -233,6 +293,96 @@ function parseCommitInput(body: unknown): Parsed<CommitInput> {
     };
   }
   return { ok: false, error: "target.type must be 'new' or 'existing'" };
+}
+
+type DedupeSource =
+  | { type: "playlist"; playlistId: number }
+  | { type: "favourites" };
+
+/** Parse the shared source discriminator used by scan and apply. */
+function parseSource(value: unknown): Parsed<DedupeSource> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "source is required" };
+  }
+  if (value["type"] === "favourites") {
+    return { ok: true, value: { type: "favourites" } };
+  }
+  if (value["type"] === "playlist") {
+    if (typeof value["playlistId"] !== "number") {
+      return { ok: false, error: "playlistId is required" };
+    }
+    return { ok: true, value: { type: "playlist", playlistId: value["playlistId"] } };
+  }
+  return { ok: false, error: "source.type must be 'playlist' or 'favourites'" };
+}
+
+interface ScanInput {
+  source: DedupeSource;
+  keep: KeepStrategy;
+}
+
+function parseScanInput(body: unknown): Parsed<ScanInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const source = parseSource(body["source"]);
+  if (!source.ok) {
+    return source;
+  }
+  const rawKeep = body["keep"];
+  const keep = rawKeep === undefined ? "first-added" : rawKeep;
+  if (!isKeepStrategy(keep)) {
+    return {
+      ok: false,
+      error: `keep must be one of: ${KEEP_STRATEGIES.join(", ")}`,
+    };
+  }
+  return { ok: true, value: { source: source.value, keep } };
+}
+
+interface Removal {
+  id: number;
+  playlistTrackId?: number;
+}
+
+interface ApplyInput {
+  source: DedupeSource;
+  removals: Removal[];
+}
+
+function parseApplyInput(body: unknown): Parsed<ApplyInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const source = parseSource(body["source"]);
+  if (!source.ok) {
+    return source;
+  }
+  if (!Array.isArray(body["removals"])) {
+    return { ok: false, error: "removals must be an array" };
+  }
+  const removals: Removal[] = [];
+  for (const item of body["removals"]) {
+    if (!isRecord(item) || typeof item["id"] !== "number") {
+      continue;
+    }
+    const removal: Removal = { id: item["id"] };
+    if (typeof item["playlistTrackId"] === "number") {
+      removal.playlistTrackId = item["playlistTrackId"];
+    }
+    removals.push(removal);
+  }
+  if (removals.length === 0) {
+    return { ok: false, error: "at least one track to remove is required" };
+  }
+  return { ok: true, value: { source: source.value, removals } };
+}
+
+function isKeepStrategy(value: unknown): value is KeepStrategy {
+  return (
+    typeof value === "string" &&
+    (KEEP_STRATEGIES as readonly string[]).includes(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
