@@ -60,6 +60,13 @@ The token is stored at `$XDG_CONFIG_HOME/qobuz-helper/session.json` (falling bac
 to `~/.config`), written owner-only. It stays on your machine -- nothing is sent
 to any server other than Qobuz itself.
 
+To start up quickly, the API credentials scraped from the Qobuz web player (the
+app id and app secret) are also cached next to the session, at
+`$XDG_CONFIG_HOME/qobuz-helper/bundle.json`. This lets later runs skip
+re-downloading and re-validating the web bundle. The cache expires after a week,
+and is discarded automatically if Qobuz rotates its credentials and a run fails
+because of it, so it heals on the next run.
+
 ### Commands
 
 ```sh

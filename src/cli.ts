@@ -39,6 +39,8 @@ import {
   parsePlaylistArgs,
   type DedupeSource,
 } from "./cli/args.js";
+import { clearCredentials } from "./cli/bundle-store.js";
+import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
 import {
@@ -52,6 +54,12 @@ import {
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
 import { QobuzClient, QobuzError } from "./qobuz/index.js";
+
+/**
+ * Whether the current run was primed from cached bundle credentials. Tracked so
+ * the top-level handler can discard a cache that turns out to be stale.
+ */
+let usedCachedCredentials = false;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -99,9 +107,13 @@ async function main(): Promise<void> {
   }
 
   const client = new QobuzClient();
-  console.log("Extracting Qobuz bundle tokens...");
-  await client.init();
-  console.log(`  app id: ${client.appId}`);
+  const { fromCache } = await initClientWithCache(client, fileCredentialStore());
+  usedCachedCredentials = fromCache;
+  console.log(
+    fromCache
+      ? `Using cached Qobuz credentials (app id ${client.appId}).`
+      : `Extracted Qobuz bundle tokens (app id ${client.appId}).`,
+  );
 
   const { session, restored } = await restoreOrLogin(
     client,
@@ -272,6 +284,21 @@ function printUsage(): void {
 }
 
 main().catch((error: unknown) => {
+  // A run primed from cached credentials that then fails on a credential-related
+  // error most likely has a stale cache (Qobuz rotated its app id or secret).
+  // Drop it so the next run refetches, and say so.
+  if (
+    usedCachedCredentials &&
+    error instanceof QobuzError &&
+    (error.kind === "bundle-extraction" ||
+      error.kind === "api-response" ||
+      error.kind === "authentication")
+  ) {
+    clearCredentials();
+    console.error(
+      "\nCached Qobuz credentials may be stale; cleared them -- please re-run.",
+    );
+  }
   if (error instanceof QobuzError) {
     console.error(`\nQobuz error [${error.kind}]: ${error.message}`);
   } else {

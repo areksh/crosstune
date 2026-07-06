@@ -30,6 +30,18 @@ const DEFAULT_USER_AGENT =
 /** A known public track used to probe whether an app secret is valid. */
 const SECRET_PROBE_TRACK_ID = 5966783;
 
+/**
+ * The validated credentials a client resolves during {@link QobuzClient.init}:
+ * the app id, the single app secret that proved valid, and (when the bundle
+ * carries one) the OAuth private key. Small and serialisable so it can be
+ * cached locally and replayed via {@link QobuzClient.initFromCache}.
+ */
+export interface ResolvedCredentials {
+  appId: string;
+  secret: string;
+  privateKey?: string;
+}
+
 export interface QobuzClientOptions {
   /** HTTP implementation; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -73,6 +85,40 @@ export class QobuzClient {
   async init(): Promise<void> {
     this.#tokens = await fetchBundleTokens(this.#fetch);
     this.#validatedSecret = await this.#validateSecret(this.#tokens.secrets);
+  }
+
+  /**
+   * The credentials resolved by {@link init}, ready to be cached.
+   *
+   * @throws {QobuzError} if the client has not been initialised.
+   */
+  get credentials(): ResolvedCredentials {
+    const tokens = this.#requireTokens();
+    const secret = this.#requireSecret();
+    return tokens.privateKey === undefined
+      ? { appId: tokens.appId, secret }
+      : { appId: tokens.appId, secret, privateKey: tokens.privateKey };
+  }
+
+  /**
+   * Prime the client from previously cached {@link ResolvedCredentials},
+   * skipping the bundle fetch and secret-probe that {@link init} performs.
+   *
+   * The cached secret is trusted as-is (it validated when first cached); if
+   * Qobuz has since rotated its credentials the cached values become stale and
+   * later requests will fail, so callers should discard the cache and fall back
+   * to {@link init} on such failures.
+   */
+  initFromCache(credentials: ResolvedCredentials): void {
+    this.#tokens =
+      credentials.privateKey === undefined
+        ? { appId: credentials.appId, secrets: [credentials.secret] }
+        : {
+            appId: credentials.appId,
+            secrets: [credentials.secret],
+            privateKey: credentials.privateKey,
+          };
+    this.#validatedSecret = credentials.secret;
   }
 
   /**

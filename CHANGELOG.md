@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bundle-credential caching: the validated app id and app secret scraped from
+  the Qobuz web player are cached locally (owner-only, at
+  `$XDG_CONFIG_HOME/qobuz-helper/bundle.json`), so later runs skip the web-bundle
+  download and secret probe and start almost instantly. The cache expires after a
+  week and is discarded automatically when a run fails on stale credentials.
+
 - Project scaffolding: TypeScript, Vitest, and the going-forward engineering
   conventions (see ADR-0001).
 - Qobuz client vertical slice: bundle-token extraction, request signing,

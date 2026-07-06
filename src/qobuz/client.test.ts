@@ -140,6 +140,57 @@ describe("QobuzClient.init", () => {
   });
 });
 
+describe("QobuzClient credentials caching", () => {
+  it("exposes the resolved credentials after init", async () => {
+    const { client } = await initedClient({});
+    expect(client.credentials).toEqual({
+      appId: "100200300",
+      secret: "qobuztestsecret001",
+      privateKey: "testPrivKey01",
+    });
+  });
+
+  it("omits the private key when the bundle carries none", async () => {
+    const { client } = await initedClient({ bundleJs: BUNDLE_WITHOUT_KEY });
+    expect(client.credentials).toEqual({
+      appId: "100200300",
+      secret: "qobuztestsecret001",
+    });
+  });
+
+  it("throws when credentials are read before init", () => {
+    const client = new QobuzClient({ fetchImpl: makeFetch({ recorded: [] }) });
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("initFromCache primes the client with no network calls", async () => {
+    const recorded: RecordedRequest[] = [];
+    const client = new QobuzClient({
+      fetchImpl: makeFetch({
+        recorded,
+        artistSearch: { artists: { items: [{ id: 5, name: "Portishead" }] } },
+      }),
+      now: () => 1700000000,
+    });
+
+    client.initFromCache({
+      appId: "999888777",
+      secret: "cachedsecret",
+      privateKey: "cachedKey",
+    });
+
+    // Priming touched the network zero times: no login page, bundle, or probe.
+    expect(recorded).toHaveLength(0);
+    expect(client.appId).toBe("999888777");
+
+    // A signed call then works, carrying the cached app id.
+    const artists = await client.searchArtists("portishead", 5);
+    expect(artists).toEqual([{ id: 5, name: "Portishead" }]);
+    const search = recorded.find((r) => r.url.pathname.endsWith("/artist/search"));
+    expect(search?.headers.get("X-App-Id")).toBe("999888777");
+  });
+});
+
 describe("QobuzClient.loginWithOAuthCode", () => {
   it("exchanges the code for a token, then a session", async () => {
     const { client, recorded } = await initedClient({
