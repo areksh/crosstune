@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   parseAlbumReleaseDate,
   parseAlbums,
+  parseAlbumsPage,
   parseArtistPageTracks,
   parseArtists,
+  parseArtistsPage,
   parsePlaylist,
   parsePlaylists,
   parsePlaylistsPage,
@@ -241,6 +243,35 @@ describe("parseTracksPage", () => {
 
   it("defaults total to zero when absent", () => {
     expect(parseTracksPage({}).total).toBe(0);
+  });
+});
+
+describe("parseAlbumsPage", () => {
+  it("returns the albums and the total for pagination", () => {
+    const json = {
+      albums: { items: [{ id: "a", title: "T", artist: { name: "X" } }], total: 9 },
+    };
+    const page = parseAlbumsPage(json);
+    expect(page.total).toBe(9);
+    expect(page.albums).toEqual([{ id: "a", title: "T", artist: "X" }]);
+  });
+
+  it("defaults total to zero when absent", () => {
+    expect(parseAlbumsPage({}).total).toBe(0);
+  });
+});
+
+describe("parseArtistsPage", () => {
+  it("returns the artists and the total for pagination", () => {
+    const json = { artists: { items: [{ id: 3, name: "Bjork" }], total: 4 } };
+    expect(parseArtistsPage(json)).toEqual({
+      artists: [{ id: 3, name: "Bjork" }],
+      total: 4,
+    });
+  });
+
+  it("defaults total to zero when absent", () => {
+    expect(parseArtistsPage({}).total).toBe(0);
   });
 });
 

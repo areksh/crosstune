@@ -14,8 +14,10 @@ import { QobuzError } from "./errors.js";
 import {
   parseAlbumReleaseDate,
   parseAlbums,
+  parseAlbumsPage,
   parseArtistPageTracks,
   parseArtists,
+  parseArtistsPage,
   parsePlaylist,
   parsePlaylistsPage,
   parseTracks,
@@ -381,6 +383,46 @@ export class QobuzClient {
   }
 
   /**
+   * Search for tracks by name, most relevant first.
+   *
+   * A query combining the artist and track title (e.g. "portishead roads")
+   * gives the best matches; the caller filters the results to the ones it wants.
+   *
+   * @param query The track (and artist) name to search for.
+   * @param limit Maximum results (default 20).
+   * @param offset Result offset (default 0).
+   */
+  async searchTracks(query: string, limit = 20, offset = 0): Promise<Track[]> {
+    const timestamp = this.#now();
+    const signature = signSearch(
+      "tracksearch",
+      query,
+      limit,
+      offset,
+      undefined,
+      timestamp,
+      this.#requireSecret(),
+    );
+    const response = await this.#request("GET", paths.trackSearch, {
+      query: {
+        query,
+        limit: String(limit),
+        offset: String(offset),
+        request_ts: String(timestamp),
+        request_sig: signature,
+      },
+      headers: this.#headers(),
+    });
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `track search failed with HTTP ${response.status}`,
+      );
+    }
+    return parseTracks(await response.json());
+  }
+
+  /**
    * Fetch an artist's most popular tracks.
    *
    * Uses `/artist/page`, whose `top_tracks` are ordered by popularity (the same
@@ -507,6 +549,57 @@ export class QobuzClient {
       }
       return parseTracksPage(await response.json());
     });
+  }
+
+  /**
+   * Fetch all of the signed-in user's favourite albums (all pages).
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async getFavoriteAlbums(): Promise<Album[]> {
+    return this.#collectFavorites("albums", (json) => {
+      const page = parseAlbumsPage(json);
+      return { items: page.albums, total: page.total };
+    });
+  }
+
+  /**
+   * Fetch all of the signed-in user's favourite artists (all pages).
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async getFavoriteArtists(): Promise<Artist[]> {
+    return this.#collectFavorites("artists", (json) => {
+      const page = parseArtistsPage(json);
+      return { items: page.artists, total: page.total };
+    });
+  }
+
+  /**
+   * Add tracks to the user's favourites by track id. No-op for an empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async addFavoriteTracks(trackIds: readonly number[]): Promise<void> {
+    await this.#createFavorites("track_ids", trackIds.map(String));
+  }
+
+  /**
+   * Add albums to the user's favourites by album id. No-op for an empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async addFavoriteAlbums(albumIds: readonly string[]): Promise<void> {
+    await this.#createFavorites("album_ids", [...albumIds]);
+  }
+
+  /**
+   * Add artists to the user's favourites by artist id. No-op for an empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async addFavoriteArtists(artistIds: readonly number[]): Promise<void> {
+    await this.#createFavorites("artist_ids", artistIds.map(String));
   }
 
   /**
@@ -642,6 +735,84 @@ export class QobuzClient {
         throw new QobuzError(
           "api-response",
           `favorite/delete failed with HTTP ${response.status}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Page through a favourites list (albums or artists) until every item has
+   * been collected. Mirrors {@link getFavoriteTracks}' pagination for the item
+   * types whose favourites parse into full domain models.
+   */
+  async #collectFavorites<T>(
+    type: "albums" | "artists",
+    parse: (json: unknown) => { items: T[]; total: number },
+  ): Promise<T[]> {
+    const session = this.#requireSession();
+    const pageSize = 500;
+    const all: T[] = [];
+    let offset = 0;
+    for (;;) {
+      const timestamp = this.#now();
+      const signature = signRequest(
+        "favoritegetUserFavorites",
+        [],
+        timestamp,
+        this.#requireSecret(),
+      );
+      const response = await this.#request(
+        "GET",
+        paths.favoriteGetUserFavorites,
+        {
+          query: {
+            type,
+            limit: String(pageSize),
+            offset: String(offset),
+            request_ts: String(timestamp),
+            request_sig: signature,
+          },
+          headers: {
+            ...this.#appIdHeaders(),
+            "X-User-Auth-Token": session.userAuthToken,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `getUserFavorites failed with HTTP ${response.status}`,
+        );
+      }
+      const page = parse(await response.json());
+      all.push(...page.items);
+      offset += page.items.length;
+      if (page.items.length === 0 || all.length >= page.total) {
+        return all;
+      }
+    }
+  }
+
+  /**
+   * Add favourites of one type via `favorite/create`, batching the ids as
+   * bulk mutations are split (see {@link MAX_TRACK_IDS_PER_REQUEST}). No-op for
+   * an empty list.
+   */
+  async #createFavorites(
+    key: "track_ids" | "album_ids" | "artist_ids",
+    ids: readonly string[],
+  ): Promise<void> {
+    for (const batch of chunk(ids, MAX_TRACK_IDS_PER_REQUEST)) {
+      const response = await this.#signedGet(
+        "favoritecreate",
+        paths.favoriteCreate,
+        [[key, batch.join(",")]],
+        { requireAuth: true },
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `favorite/create failed with HTTP ${response.status}`,
         );
       }
     }

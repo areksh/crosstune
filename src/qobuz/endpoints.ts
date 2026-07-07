@@ -12,6 +12,7 @@ export const paths = {
   oauthCallback: "/oauth/callback",
   trackGetFileUrl: "/track/getFileUrl",
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
+  trackSearch: "/track/search",
   artistSearch: "/artist/search",
   artistPage: "/artist/page",
   albumSearch: "/album/search",
@@ -21,6 +22,7 @@ export const paths = {
   playlistCreate: "/playlist/create",
   playlistAddTracks: "/playlist/addTracks",
   playlistDeleteTracks: "/playlist/deleteTracks",
+  favoriteCreate: "/favorite/create",
   favoriteDelete: "/favorite/delete",
 } as const;
 

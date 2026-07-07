@@ -74,6 +74,18 @@ export interface PlaylistsPage {
   total: number;
 }
 
+/** A page of albums plus the total available, for paginated fetches. */
+export interface AlbumsPage {
+  albums: Album[];
+  total: number;
+}
+
+/** A page of artists plus the total available, for paginated fetches. */
+export interface ArtistsPage {
+  artists: Artist[];
+  total: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -146,6 +158,22 @@ function parseAlbum(item: unknown): Album | undefined {
     album.trackCount = item["tracks_count"];
   }
   return album;
+}
+
+/** Parse an albums container into its albums plus the total (for pagination). */
+export function parseAlbumsPage(response: unknown): AlbumsPage {
+  const container =
+    isRecord(response) && isRecord(response["albums"]) ? response["albums"] : {};
+  const total = typeof container["total"] === "number" ? container["total"] : 0;
+  return { albums: parseAlbums(response), total };
+}
+
+/** Parse an artists container into its artists plus the total (for pagination). */
+export function parseArtistsPage(response: unknown): ArtistsPage {
+  const container =
+    isRecord(response) && isRecord(response["artists"]) ? response["artists"] : {};
+  const total = typeof container["total"] === "number" ? container["total"] : 0;
+  return { artists: parseArtists(response), total };
 }
 
 /** Parse the `tracks.items` list of a tracks container (e.g. artist/get?extra=tracks). */

@@ -34,6 +34,7 @@ interface FetchOptions {
   artistSearch?: unknown;
   artistTracks?: unknown;
   albumSearch?: unknown;
+  trackSearch?: unknown;
   playlist?: unknown;
   userPlaylists?: unknown;
   album?: unknown;
@@ -96,6 +97,14 @@ function makeFetch(options: FetchOptions): typeof fetch {
       return new Response(JSON.stringify(options.albumSearch ?? {}), {
         status: 200,
       });
+    }
+    if (path.endsWith("/track/search")) {
+      return new Response(JSON.stringify(options.trackSearch ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/favorite/create")) {
+      return new Response(JSON.stringify({ status: "success" }), { status: 200 });
     }
     if (path.endsWith("/playlist/getUserPlaylists")) {
       return new Response(JSON.stringify(options.userPlaylists ?? {}), {
@@ -502,6 +511,155 @@ describe("QobuzClient.searchAlbums", () => {
     expect(request?.url.searchParams.get("type")).toBe("album");
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
     expect(request?.headers.get("X-App-Id")).toBe("100200300");
+  });
+});
+
+describe("QobuzClient.searchTracks", () => {
+  it("signs the track search and returns parsed tracks", async () => {
+    const { client, recorded } = await initedClient({
+      trackSearch: {
+        tracks: {
+          items: [
+            {
+              id: 42,
+              title: "Roads",
+              performer: { name: "Portishead" },
+              isrc: "GBAAA0000001",
+            },
+          ],
+        },
+      },
+    });
+
+    const results = await client.searchTracks("portishead roads", 5);
+
+    expect(results).toEqual([
+      { id: 42, title: "Roads", artist: "Portishead", isrc: "GBAAA0000001" },
+    ]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/track/search"));
+    expect(request?.url.searchParams.get("query")).toBe("portishead roads");
+    expect(request?.url.searchParams.get("limit")).toBe("5");
+    expect(request?.url.searchParams.get("type")).toBeNull();
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("QobuzClient favourites of albums and artists", () => {
+  it("pages through favourite albums until the total is reached", async () => {
+    const pages = [
+      {
+        albums: {
+          items: [{ id: "a1", title: "One", artist: { name: "X" } }],
+          total: 2,
+        },
+      },
+      {
+        albums: {
+          items: [{ id: "a2", title: "Two", artist: { name: "Y" } }],
+          total: 2,
+        },
+      },
+    ];
+    let call = 0;
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded, loginBody: validSessionBody() });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/favorite/getUserFavorites")) {
+        recorded.push({
+          url,
+          headers: new Headers(init?.headers),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        const body = pages[call] ?? pages[pages.length - 1];
+        call += 1;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.loginWithOAuthCode("code");
+
+    const albums = await client.getFavoriteAlbums();
+
+    expect(albums.map((a) => a.id)).toEqual(["a1", "a2"]);
+    expect(call).toBe(2);
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/favorite/getUserFavorites"),
+    );
+    expect(request?.url.searchParams.get("type")).toBe("albums");
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("returns parsed favourite artists", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+      favorites: {
+        artists: { items: [{ id: 9, name: "Bjork" }], total: 1 },
+      },
+    });
+    await client.loginWithOAuthCode("code");
+
+    const artists = await client.getFavoriteArtists();
+
+    expect(artists).toEqual([{ id: 9, name: "Bjork" }]);
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/favorite/getUserFavorites"),
+    );
+    expect(request?.url.searchParams.get("type")).toBe("artists");
+  });
+
+  it("requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.getFavoriteAlbums()).rejects.toBeInstanceOf(QobuzError);
+    await expect(client.getFavoriteArtists()).rejects.toBeInstanceOf(QobuzError);
+  });
+});
+
+describe("QobuzClient add-favourite methods", () => {
+  it("adds tracks, albums and artists to their own favourite endpoints", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.addFavoriteTracks([1, 2]);
+    await client.addFavoriteAlbums(["alb-a", "alb-b"]);
+    await client.addFavoriteArtists([55]);
+
+    const creates = recorded.filter((r) =>
+      r.url.pathname.endsWith("/favorite/create"),
+    );
+    expect(creates[0]?.url.searchParams.get("track_ids")).toBe("1,2");
+    expect(creates[1]?.url.searchParams.get("album_ids")).toBe("alb-a,alb-b");
+    expect(creates[2]?.url.searchParams.get("artist_ids")).toBe("55");
+    for (const create of creates) {
+      expect(create.headers.get("X-User-Auth-Token")).toBe("tok-session");
+    }
+  });
+
+  it("batches a large add within the per-request cap and is a no-op when empty", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    const ids = Array.from({ length: 130 }, (_, i) => i + 1);
+    await client.addFavoriteTracks(ids);
+    await client.addFavoriteTracks([]);
+
+    const batches = idBatches(recorded, "/favorite/create", "track_ids");
+    expect(batches.length).toBe(3);
+    expect(Math.max(...batches.map((b) => b.length))).toBeLessThanOrEqual(50);
+    expect(batches.flat()).toEqual(ids);
+  });
+
+  it("requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.addFavoriteTracks([1])).rejects.toBeInstanceOf(QobuzError);
   });
 });
 
