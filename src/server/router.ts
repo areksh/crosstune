@@ -38,6 +38,24 @@ import {
   resolveAlbumVersions,
   type AlbumEntry,
 } from "../features/playlist-from-albums.js";
+import {
+  buildBackup,
+  collectCollection,
+  commitImport,
+  parseBackup,
+  parseCollection,
+  resolveImport,
+  restoreBackup,
+  serializeBackup,
+  serializeCollection,
+  FORMATS,
+  type CollectionKind,
+  type ExportSource,
+  type Format,
+  type ImportPlan,
+  type ImportTarget,
+  type MatchedItem,
+} from "../features/import-export.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -49,7 +67,13 @@ export interface QobuzApiService {
   getFavoriteTracks(): Promise<Track[]>;
   getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
   searchAlbums(query: string, limit?: number): Promise<Album[]>;
+  searchTracks(query: string, limit?: number): Promise<Track[]>;
   getAlbumTracks(albumId: string): Promise<Track[]>;
+  getFavoriteAlbums(): Promise<Album[]>;
+  getFavoriteArtists(): Promise<Artist[]>;
+  addFavoriteTracks(trackIds: readonly number[]): Promise<void>;
+  addFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
+  addFavoriteArtists(artistIds: readonly number[]): Promise<void>;
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
@@ -145,6 +169,18 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/deduplicate/apply") {
     return apply(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/export") {
+    return exportData(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/import/resolve") {
+    return importResolve(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/import/commit") {
+    return importCommit(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/restore") {
+    return restore(req.body, deps);
   }
   return { status: 404, body: { error: "not found" } };
 }
@@ -263,6 +299,100 @@ async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const ids = removals.map((removal) => removal.id);
   await deps.service.removeFavoriteTracks(ids);
   return { status: 200, body: { removed: ids.length } };
+}
+
+/**
+ * Export a collection or a full-account backup, returning the serialised text
+ * and a suggested filename for the browser to download.
+ */
+async function exportData(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseExportInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, format } = input.value;
+  if (source.type === "account") {
+    const backup = await buildBackup(deps.service);
+    return {
+      status: 200,
+      body: {
+        filename: `qobuz-backup-${today()}.json`,
+        content: serializeBackup(backup),
+      },
+    };
+  }
+  const collection = await collectCollection(deps.service, source);
+  if (format === "m3u" && collection.kind !== "tracks") {
+    return { status: 400, body: { error: "M3U can only hold tracks" } };
+  }
+  return {
+    status: 200,
+    body: {
+      filename: `${exportBasename(source)}.${extensionFor(format)}`,
+      content: serializeCollection(collection, format),
+    },
+  };
+}
+
+/** Parse and resolve an import to a plan (phase one), without writing. */
+async function importResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseImportResolveInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  let parsed;
+  try {
+    parsed = parseCollection(input.value.content, input.value.format, input.value.kind);
+  } catch (error) {
+    return {
+      status: 400,
+      body: { error: error instanceof Error ? error.message : "could not parse" },
+    };
+  }
+  const plan = await resolveImport(deps.service, parsed);
+  return { status: 200, body: plan };
+}
+
+/** Write a resolved import plan to its destination (phase two). */
+async function importCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseImportCommitInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  try {
+    const result = await commitImport(
+      deps.service,
+      input.value.plan,
+      input.value.target,
+    );
+    return { status: 200, body: result };
+  } catch (error) {
+    if (error instanceof QobuzError) {
+      throw error;
+    }
+    return {
+      status: 400,
+      body: { error: error instanceof Error ? error.message : "could not import" },
+    };
+  }
+}
+
+/** Restore a full-account backup document. */
+async function restore(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (!isRecord(body) || typeof body["content"] !== "string") {
+    return { status: 400, body: { error: "content must be a string" } };
+  }
+  let backup;
+  try {
+    backup = parseBackup(body["content"]);
+  } catch (error) {
+    return {
+      status: 400,
+      body: { error: error instanceof Error ? error.message : "invalid backup" },
+    };
+  }
+  const result = await restoreBackup(deps.service, backup);
+  return { status: 200, body: result };
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -499,6 +629,192 @@ function parseApplyInput(body: unknown): Parsed<ApplyInput> {
     return { ok: false, error: "at least one track to remove is required" };
   }
   return { ok: true, value: { source: source.value, removals } };
+}
+
+interface ExportInput {
+  source: ExportSource;
+  format: Format;
+}
+
+function parseExportInput(body: unknown): Parsed<ExportInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const source = parseExportSource(body["source"]);
+  if (!source.ok) {
+    return source;
+  }
+  const format = body["format"];
+  if (source.value.type === "account") {
+    // A backup is always JSON; ignore any format sent alongside it.
+    return { ok: true, value: { source: source.value, format: "json" } };
+  }
+  if (!isFormat(format)) {
+    return { ok: false, error: `format must be one of: ${FORMATS.join(", ")}` };
+  }
+  return { ok: true, value: { source: source.value, format } };
+}
+
+function parseExportSource(value: unknown): Parsed<ExportSource> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "source is required" };
+  }
+  switch (value["type"]) {
+    case "favourite-tracks":
+    case "favourite-albums":
+    case "favourite-artists":
+    case "account":
+      return { ok: true, value: { type: value["type"] } };
+    case "playlist":
+      if (typeof value["playlistId"] !== "number") {
+        return { ok: false, error: "playlistId is required" };
+      }
+      return { ok: true, value: { type: "playlist", playlistId: value["playlistId"] } };
+    default:
+      return {
+        ok: false,
+        error:
+          "source.type must be favourite-tracks, favourite-albums, favourite-artists, playlist or account",
+      };
+  }
+}
+
+interface ImportResolveInput {
+  format: Format;
+  content: string;
+  kind: CollectionKind;
+}
+
+function parseImportResolveInput(body: unknown): Parsed<ImportResolveInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  if (!isFormat(body["format"])) {
+    return { ok: false, error: `format must be one of: ${FORMATS.join(", ")}` };
+  }
+  if (typeof body["content"] !== "string" || body["content"].trim().length === 0) {
+    return { ok: false, error: "content must be a non-empty string" };
+  }
+  const kind = body["kind"];
+  if (kind !== "tracks" && kind !== "albums" && kind !== "artists") {
+    return { ok: false, error: "kind must be tracks, albums or artists" };
+  }
+  return { ok: true, value: { format: body["format"], content: body["content"], kind } };
+}
+
+interface ImportCommitInput {
+  plan: ImportPlan;
+  target: ImportTarget;
+}
+
+function parseImportCommitInput(body: unknown): Parsed<ImportCommitInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const plan = parseImportPlan(body["plan"]);
+  if (!plan.ok) {
+    return plan;
+  }
+  const target = parseImportTarget(body["target"]);
+  if (!target.ok) {
+    return target;
+  }
+  return { ok: true, value: { plan: plan.value, target: target.value } };
+}
+
+function parseImportPlan(value: unknown): Parsed<ImportPlan> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "plan is required" };
+  }
+  const kind = value["kind"];
+  if (kind !== "tracks" && kind !== "albums" && kind !== "artists") {
+    return { ok: false, error: "plan.kind must be tracks, albums or artists" };
+  }
+  if (!Array.isArray(value["matched"])) {
+    return { ok: false, error: "plan.matched must be an array" };
+  }
+  const matched: MatchedItem[] = [];
+  for (const item of value["matched"]) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const id = item["id"];
+    // Track and artist ids are numbers; album ids are strings.
+    if (typeof id !== "number" && typeof id !== "string") {
+      continue;
+    }
+    const label = typeof item["label"] === "string" ? item["label"] : String(id);
+    matched.push({ label, id });
+  }
+  if (matched.length === 0) {
+    return { ok: false, error: "at least one matched item is required" };
+  }
+  return { ok: true, value: { kind, matched, unmatched: [] } };
+}
+
+function parseImportTarget(value: unknown): Parsed<ImportTarget> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "target is required" };
+  }
+  switch (value["type"]) {
+    case "favourites":
+      return { ok: true, value: { type: "favourites" } };
+    case "playlist-new": {
+      const name = typeof value["name"] === "string" ? value["name"].trim() : "";
+      if (name.length === 0) {
+        return { ok: false, error: "a playlist name is required" };
+      }
+      const target: ImportTarget = { type: "playlist-new", name };
+      if (typeof value["isPublic"] === "boolean") {
+        target.isPublic = value["isPublic"];
+      }
+      if (typeof value["description"] === "string" && value["description"].length > 0) {
+        target.description = value["description"];
+      }
+      return { ok: true, value: target };
+    }
+    case "playlist-existing":
+      if (typeof value["playlistId"] !== "number") {
+        return { ok: false, error: "playlistId is required" };
+      }
+      return {
+        ok: true,
+        value: { type: "playlist-existing", playlistId: value["playlistId"] },
+      };
+    default:
+      return {
+        ok: false,
+        error: "target.type must be favourites, playlist-new or playlist-existing",
+      };
+  }
+}
+
+function isFormat(value: unknown): value is Format {
+  return typeof value === "string" && (FORMATS as readonly string[]).includes(value);
+}
+
+/** File extension for a format (text is `.txt`). */
+function extensionFor(format: Format): string {
+  return format === "text" ? "txt" : format;
+}
+
+/** A stable, human-readable base filename for an exported collection. */
+function exportBasename(source: Exclude<ExportSource, { type: "account" }>): string {
+  switch (source.type) {
+    case "favourite-tracks":
+      return "qobuz-favourite-tracks";
+    case "favourite-albums":
+      return "qobuz-favourite-albums";
+    case "favourite-artists":
+      return "qobuz-favourite-artists";
+    case "playlist":
+      return `qobuz-playlist-${source.playlistId}`;
+  }
+}
+
+/** Today's date as YYYY-MM-DD, for backup filenames. */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function isKeepStrategy(value: unknown): value is KeepStrategy {

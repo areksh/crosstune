@@ -21,7 +21,13 @@ function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
     getFavoriteTracks: vi.fn(async () => [] as Track[]),
     getAlbumReleaseDate: vi.fn(async () => undefined),
     searchAlbums: vi.fn(async () => [] as Album[]),
+    searchTracks: vi.fn(async () => [] as Track[]),
     getAlbumTracks: vi.fn(async () => [] as Track[]),
+    getFavoriteAlbums: vi.fn(async () => [] as Album[]),
+    getFavoriteArtists: vi.fn(async () => [] as Artist[]),
+    addFavoriteTracks: vi.fn(async () => {}),
+    addFavoriteAlbums: vi.fn(async () => {}),
+    addFavoriteArtists: vi.fn(async () => {}),
     createPlaylist: vi.fn(async (name: string) => ({ id: 1, name })),
     addTracksToPlaylist: vi.fn(async () => {}),
     removeTracksFromPlaylist: vi.fn(async () => {}),
@@ -432,5 +438,191 @@ describe("error handling", () => {
   it("returns 404 for an unknown route", async () => {
     const res = await handleApi(request("GET", "/api/nope"), deps());
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/export", () => {
+  it("exports favourite tracks as CSV with a filename", async () => {
+    const svc = service({
+      getFavoriteTracks: vi.fn(async () => [
+        { id: 1, title: "Roads", artist: "Portishead" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/export", {
+        source: { type: "favourite-tracks" },
+        format: "csv",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ filename: "qobuz-favourite-tracks.csv" });
+    expect((res.body as { content: string }).content).toContain("Roads");
+  });
+
+  it("exports a playlist to M3U", async () => {
+    const svc = service({
+      getPlaylistTracks: vi.fn(async () => [{ id: 9, title: "T", artist: "A" }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/export", {
+        source: { type: "playlist", playlistId: 7 },
+        format: "m3u",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect((res.body as { content: string }).content).toContain("qobuz://track/9");
+    expect(res.body).toMatchObject({ filename: "qobuz-playlist-7.m3u" });
+  });
+
+  it("rejects M3U for a non-track collection", async () => {
+    const res = await handleApi(
+      request("POST", "/api/export", {
+        source: { type: "favourite-albums" },
+        format: "m3u",
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("exports the whole account as a JSON backup", async () => {
+    const svc = service({
+      getFavoriteTracks: vi.fn(async () => [{ id: 1, title: "R" }]),
+      getUserPlaylists: vi.fn(async () => [{ id: 3, name: "P" }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/export", { source: { type: "account" } }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { filename: string; content: string };
+    expect(body.filename).toMatch(/^qobuz-backup-\d{4}-\d\d-\d\d\.json$/);
+    expect(JSON.parse(body.content)).toMatchObject({ formatVersion: 1 });
+  });
+
+  it("rejects an unknown source type", async () => {
+    const res = await handleApi(
+      request("POST", "/api/export", { source: { type: "nope" }, format: "csv" }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/import/resolve", () => {
+  it("resolves text tracks to a plan by search", async () => {
+    const svc = service({
+      searchTracks: vi.fn(async () => [{ id: 1, title: "Roads", artist: "Portishead" }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", {
+        format: "text",
+        kind: "tracks",
+        content: "Portishead - Roads\nNobody - Nothing",
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      kind: "tracks",
+      matched: [{ label: "Portishead - Roads", id: 1 }],
+    });
+  });
+
+  it("rejects an unknown format", async () => {
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", {
+        format: "xml",
+        kind: "tracks",
+        content: "x",
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects malformed JSON content with 400", async () => {
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", {
+        format: "json",
+        kind: "tracks",
+        content: "not json",
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/import/commit", () => {
+  it("adds matched tracks to favourites", async () => {
+    const addFavoriteTracks = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/import/commit", {
+        plan: { kind: "tracks", matched: [{ label: "a", id: 1 }, { label: "b", id: 2 }] },
+        target: { type: "favourites" },
+      }),
+      deps({ service: service({ addFavoriteTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([1, 2]);
+    expect(res.body).toMatchObject({ written: 2 });
+  });
+
+  it("rejects putting an album plan into a playlist with 400", async () => {
+    const res = await handleApi(
+      request("POST", "/api/import/commit", {
+        plan: { kind: "albums", matched: [{ label: "a", id: "x" }] },
+        target: { type: "playlist-new", name: "P" },
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an empty plan", async () => {
+    const res = await handleApi(
+      request("POST", "/api/import/commit", {
+        plan: { kind: "tracks", matched: [] },
+        target: { type: "favourites" },
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/restore", () => {
+  it("restores a backup document", async () => {
+    const addFavoriteTracks = vi.fn(async () => {});
+    const createPlaylist = vi.fn(async (name: string) => ({ id: 5, name }));
+    const backup = {
+      formatVersion: 1,
+      exportedAt: "2026-07-07T00:00:00.000Z",
+      favourites: {
+        tracks: [{ id: 1, title: "a" }],
+        albums: [],
+        artists: [],
+      },
+      playlists: [{ name: "P", tracks: [{ id: 9, title: "c" }] }],
+    };
+    const res = await handleApi(
+      request("POST", "/api/restore", { content: JSON.stringify(backup) }),
+      deps({ service: service({ addFavoriteTracks, createPlaylist }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([1]);
+    expect(createPlaylist).toHaveBeenCalledWith("P", { isPublic: false });
+    expect(res.body).toMatchObject({ favouriteTracks: 1 });
+  });
+
+  it("rejects content that is not a backup", async () => {
+    const res = await handleApi(
+      request("POST", "/api/restore", { content: '{"tracks":[]}' }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
   });
 });
