@@ -4,6 +4,8 @@ import {
   extractLogLevel,
   parseAlbumArgs,
   parseDedupeArgs,
+  parseExportArgs,
+  parseImportArgs,
   parsePlaylistArgs,
 } from "./args.js";
 
@@ -167,5 +169,79 @@ describe("parseDedupeArgs", () => {
 
   it("throws on a non-numeric playlist id", () => {
     expect(() => parseDedupeArgs(["--playlist", "abc"])).toThrow(/playlist/i);
+  });
+});
+
+describe("parseExportArgs", () => {
+  it("parses a favourites source with a format", () => {
+    expect(parseExportArgs(["--favourites", "--format", "csv"])).toEqual({
+      source: { type: "favourite-tracks" },
+      format: "csv",
+    });
+  });
+
+  it("parses a playlist source and an output file", () => {
+    expect(parseExportArgs(["--playlist", "42", "--out", "list.m3u"])).toEqual({
+      source: { type: "playlist", playlistId: 42 },
+      out: "list.m3u",
+    });
+  });
+
+  it("parses an account backup source", () => {
+    expect(parseExportArgs(["--account"])).toEqual({ source: { type: "account" } });
+  });
+
+  it("requires a source", () => {
+    expect(() => parseExportArgs(["--format", "csv"])).toThrow(/source is required/);
+  });
+
+  it("rejects more than one source", () => {
+    expect(() => parseExportArgs(["--favourites", "--account"])).toThrow(/only one/);
+  });
+
+  it("rejects an invalid format and a non-numeric playlist id", () => {
+    expect(() => parseExportArgs(["--favourites", "--format", "xml"])).toThrow(/--format/);
+    expect(() => parseExportArgs(["--playlist", "x"])).toThrow(/numeric id/);
+  });
+});
+
+describe("parseImportArgs", () => {
+  it("parses a favourites target and a file", () => {
+    expect(parseImportArgs(["--favourites", "tracks.csv"])).toEqual({
+      target: { type: "favourites" },
+      file: "tracks.csv",
+      isPublic: false,
+      apply: false,
+    });
+  });
+
+  it("parses a new-playlist target with public and apply", () => {
+    expect(
+      parseImportArgs(["--new-playlist", "Mix", "--public", "--apply", "in.txt"]),
+    ).toEqual({
+      target: { type: "playlist-new", name: "Mix" },
+      file: "in.txt",
+      isPublic: true,
+      apply: true,
+    });
+  });
+
+  it("parses an account restore target", () => {
+    expect(parseImportArgs(["--account", "backup.json"])).toEqual({
+      target: { type: "account" },
+      file: "backup.json",
+      isPublic: false,
+      apply: false,
+    });
+  });
+
+  it("requires a target and exactly one file", () => {
+    expect(() => parseImportArgs(["file.csv"])).toThrow(/target is required/);
+    expect(() => parseImportArgs(["--favourites"])).toThrow(/file to import is required/);
+    expect(() => parseImportArgs(["--favourites", "a.csv", "b.csv"])).toThrow(/only one file/);
+  });
+
+  it("rejects more than one target", () => {
+    expect(() => parseImportArgs(["--favourites", "--account", "f.json"])).toThrow(/only one/);
   });
 });

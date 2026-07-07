@@ -38,6 +38,21 @@
  *       newest. Without --apply it only reports; with --apply it removes the
  *       tracks marked "drop".
  *
+ *   qobuz-helper export (--favourites | --favourite-albums | --favourite-artists
+ *       | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]
+ *       Export favourites or a playlist (or the whole account, with --account)
+ *       to a file or stdout. --account always writes a lossless JSON backup;
+ *       otherwise --format chooses the format (inferred from --out's extension
+ *       when omitted, else JSON).
+ *
+ *   qobuz-helper import (--favourites | --favourite-albums | --favourite-artists
+ *       | --playlist <id> | --new-playlist <name> | --account)
+ *       [--format <json|csv|text|m3u>] [--public] [--apply] <file>
+ *       Import a file into favourites or a playlist, resolving each entry to a
+ *       Qobuz item (by its id when present, else by search). --account restores
+ *       a full backup. Without --apply it resolves and reports only; the format
+ *       is inferred from the filename when --format is omitted.
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -45,14 +60,19 @@
  * controls how much is logged; it may appear anywhere in the arguments.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 import {
   extractLogLevel,
   parseAlbumArgs,
   parseDedupeArgs,
+  parseExportArgs,
+  parseImportArgs,
   parsePlaylistArgs,
   type DedupeSource,
+  type ExportArgs,
+  type ImportArgs,
+  type ImportTargetArg,
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
@@ -71,6 +91,22 @@ import {
   type DedupTrack,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
+import {
+  buildBackup,
+  collectCollection,
+  commitImport,
+  formatFromFilename,
+  looksLikeBackup,
+  parseBackup,
+  parseCollection,
+  resolveImport,
+  restoreBackup,
+  serializeBackup,
+  serializeCollection,
+  type CollectionKind,
+  type Format,
+  type ImportTarget,
+} from "./features/import-export.js";
 import {
   buildPlaylistFromAlbums,
   parseAlbumEntry,
@@ -135,6 +171,16 @@ async function main(): Promise<void> {
     }
     case "deduplicate": {
       const plan = planDeduplicate(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "export": {
+      const plan = planExport(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "import": {
+      const plan = planImport(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -383,6 +429,185 @@ async function applyRemovals(
   logger.info("  done.");
 }
 
+/**
+ * Validate the export command's arguments up front, returning an executor that
+ * reads the chosen source and writes it to a file (`--out`) or stdout.
+ *
+ * When streaming to stdout the content is the only thing written there, so it
+ * pipes cleanly; progress notes are shown only when writing to a file.
+ */
+function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const args = parseExportArgs(argv);
+  const toFile = args.out !== undefined;
+  const note = (message: string): void => {
+    if (toFile) logger.info(message);
+  };
+
+  return async (client: QobuzClient): Promise<void> => {
+    let content: string;
+    if (args.source.type === "account") {
+      note("Backing up your account...");
+      const backup = await buildBackup(client);
+      content = serializeBackup(backup);
+      note(
+        `  ${backup.favourites.tracks.length} favourite tracks, ` +
+          `${backup.favourites.albums.length} albums, ` +
+          `${backup.favourites.artists.length} artists, ` +
+          `${backup.playlists.length} playlists`,
+      );
+    } else {
+      const format = resolveExportFormat(args);
+      const collection = await collectCollection(client, args.source);
+      if (format === "m3u" && collection.kind !== "tracks") {
+        throw new Error("M3U can only hold tracks; choose another format");
+      }
+      content = serializeCollection(collection, format);
+      note(`  ${collection.items.length} ${collection.kind}`);
+    }
+
+    if (args.out !== undefined) {
+      writeFileSync(args.out, content);
+      logger.info(`Wrote ${args.out}`);
+    } else {
+      process.stdout.write(content);
+    }
+  };
+}
+
+/** Format for an export: an explicit `--format`, else inferred from `--out`, else JSON. */
+function resolveExportFormat(args: ExportArgs): Format {
+  if (args.format !== undefined) {
+    return args.format;
+  }
+  if (args.out !== undefined) {
+    const inferred = formatFromFilename(args.out);
+    if (inferred !== undefined) {
+      return inferred;
+    }
+  }
+  return "json";
+}
+
+/**
+ * Validate the import command's arguments and read the file up front, returning
+ * an executor. Resolving to Qobuz ids and (with `--apply`) writing happen once
+ * the client is signed in; without `--apply` it resolves and reports only.
+ */
+function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const args = parseImportArgs(argv);
+  const content = readFileSync(args.file, "utf8");
+
+  if (args.target.type === "account") {
+    return planRestore(content, args.apply);
+  }
+  if (looksLikeBackup(content)) {
+    throw new Error(
+      "This looks like a full-account backup; restore it with `import --account`.",
+    );
+  }
+
+  const format = resolveImportFormat(args);
+  const kind = kindForTarget(args.target);
+  const target = toImportTarget(args.target, args.isPublic);
+
+  return async (client: QobuzClient): Promise<void> => {
+    const parsed = parseCollection(content, format, kind);
+    logger.info(`Resolving ${parsed.items.length} ${kind} from ${args.file}...`);
+    const plan = await resolveImport(client, parsed);
+    logger.info(`  matched ${plan.matched.length} of ${parsed.items.length}`);
+    if (plan.unmatched.length > 0) {
+      logger.warn(`not found: ${plan.unmatched.join(", ")}`);
+    }
+
+    if (!args.apply) {
+      if (plan.matched.length > 0) {
+        logger.info(
+          `\n(dry run -- pass --apply to import the ${plan.matched.length} matched ${kind})`,
+        );
+      }
+      return;
+    }
+    if (plan.matched.length === 0) {
+      logger.info("\nNothing to import.");
+      return;
+    }
+    const result = await commitImport(client, plan, target);
+    if (result.playlist !== undefined) {
+      logger.info(
+        `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.written} tracks.`,
+      );
+    } else {
+      logger.info(`\nImported ${result.written} ${kind}.`);
+    }
+  };
+}
+
+/** Executor for restoring a full-account backup (dry-run unless `apply`). */
+function planRestore(
+  content: string,
+  apply: boolean,
+): (client: QobuzClient) => Promise<void> {
+  const backup = parseBackup(content);
+  return async (client: QobuzClient): Promise<void> => {
+    const counts =
+      `${backup.favourites.tracks.length} favourite tracks, ` +
+      `${backup.favourites.albums.length} albums, ` +
+      `${backup.favourites.artists.length} artists, ` +
+      `${backup.playlists.length} playlists`;
+    if (!apply) {
+      logger.info(`Backup contains ${counts}.`);
+      logger.info("\n(dry run -- pass --apply to restore it)");
+      return;
+    }
+    logger.info(`Restoring ${counts}...`);
+    const result = await restoreBackup(client, backup);
+    logger.info(
+      `\nRestored ${result.favouriteTracks} favourite tracks, ` +
+        `${result.favouriteAlbums} albums, ${result.favouriteArtists} artists, ` +
+        `and recreated ${result.playlists.length} playlists.`,
+    );
+  };
+}
+
+/** Format for an import: an explicit `--format`, else inferred from the filename. */
+function resolveImportFormat(args: ImportArgs): Format {
+  if (args.format !== undefined) {
+    return args.format;
+  }
+  const inferred = formatFromFilename(args.file);
+  if (inferred === undefined) {
+    throw new Error(
+      "Could not infer the format from the filename; pass --format <json|csv|text|m3u>",
+    );
+  }
+  return inferred;
+}
+
+/** Which collection kind a target imports (favourite albums/artists aside, tracks). */
+function kindForTarget(target: ImportTargetArg): CollectionKind {
+  if (target.type === "favourite-albums") return "albums";
+  if (target.type === "favourite-artists") return "artists";
+  return "tracks";
+}
+
+/** Map a CLI import target to the feature module's write target. */
+function toImportTarget(target: ImportTargetArg, isPublic: boolean): ImportTarget {
+  switch (target.type) {
+    case "favourites":
+    case "favourite-albums":
+    case "favourite-artists":
+      // Favourites route by the plan's kind inside commitImport.
+      return { type: "favourites" };
+    case "playlist-existing":
+      return { type: "playlist-existing", playlistId: target.playlistId };
+    case "playlist-new":
+      return { type: "playlist-new", name: target.name, isPublic };
+    case "account":
+      // Restores never reach here (planImport handles account separately).
+      throw new Error("account restore is handled separately");
+  }
+}
+
 /** Read lines from piped stdin (one per line, trimmed); empty when stdin is a TTY. */
 function readLinesFromStdin(): string[] {
   if (process.stdin.isTTY) {
@@ -409,6 +634,8 @@ function printUsage(): void {
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
       '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] "Artist - Album" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
+      "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
+      "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
@@ -418,6 +645,8 @@ function printUsage(): void {
       "Album version preferences: highest-quality (default), newest, oldest.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
+      "export writes to stdout unless --out is given; --account writes a full JSON backup.",
+      "import resolves and reports only unless --apply is given; --account restores a backup.",
     ].join("\n"),
   );
 }
