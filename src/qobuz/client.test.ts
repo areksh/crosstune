@@ -236,6 +236,96 @@ describe("QobuzClient credentials caching", () => {
   });
 });
 
+describe("QobuzClient request retries on HTTP 400", () => {
+  it("retries a throttled 400 with exponential backoff, then succeeds", async () => {
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({
+      recorded,
+      albumSearch: {
+        albums: { items: [{ id: "1", title: "X", artist: { name: "Y" } }] },
+      },
+    });
+    let attempts = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/album/search")) {
+        attempts += 1;
+        if (attempts <= 2) return new Response("throttled", { status: 400 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const delays: number[] = [];
+    const client = new QobuzClient({
+      fetchImpl,
+      now: () => 1700000000,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    });
+    await client.init();
+
+    const albums = await client.searchAlbums("x", 5);
+
+    expect(albums).toEqual([{ id: "1", title: "X", artist: "Y" }]);
+    // Two 400s then a 200: three fetches, backing off between each retry.
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([500, 1000]);
+  });
+
+  it("gives up after five retries and surfaces the error", async () => {
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded });
+    let attempts = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/album/search")) {
+        attempts += 1;
+        return new Response("throttled", { status: 400 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const delays: number[] = [];
+    const client = new QobuzClient({
+      fetchImpl,
+      now: () => 1700000000,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    });
+    await client.init();
+
+    await expect(client.searchAlbums("x", 5)).rejects.toBeInstanceOf(QobuzError);
+    // Initial attempt plus five retries.
+    expect(attempts).toBe(6);
+    expect(delays).toEqual([500, 1000, 2000, 4000, 8000]);
+  });
+
+  it("does not back off on the secret probe's 400 (it rejects a candidate)", async () => {
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/track/getFileUrl")) {
+        return new Response("bad", { status: 400 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const delays: number[] = [];
+    const client = new QobuzClient({
+      fetchImpl,
+      now: () => 1700000000,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    });
+
+    // Every candidate secret is rejected with 400, so init fails - but the probe
+    // must move straight to the next candidate, never backing off and retrying.
+    await expect(client.init()).rejects.toBeInstanceOf(QobuzError);
+    expect(delays).toEqual([]);
+  });
+});
+
 describe("QobuzClient.loginWithOAuthCode", () => {
   it("exchanges the code for a token, then a session", async () => {
     const { client, recorded } = await initedClient({

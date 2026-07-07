@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Qobuz API requests now retry an HTTP 400 with exponential backoff (up to five
+  times: 500ms, 1s, 2s, 4s, 8s) before failing, so a transient throttle no
+  longer stops a run. The secret-probe step is exempt, as it uses a 400 to
+  reject a candidate secret rather than as a throttle signal.
+
 ### Added
 
 - Playlist from albums: build a playlist from a list of albums given as

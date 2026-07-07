@@ -42,6 +42,17 @@ const SECRET_PROBE_TRACK_ID = 5966783;
  */
 const MAX_TRACK_IDS_PER_REQUEST = 50;
 
+/**
+ * How many times a request rejected with HTTP 400 is retried before giving up.
+ * Qobuz throttles bursts of signed requests with a 400, so a short exponential
+ * backoff usually rides it out. Auth/validation 400s that are not throttling
+ * simply exhaust the retries and surface as before.
+ */
+const MAX_RETRIES = 5;
+
+/** Base backoff in milliseconds, doubled each retry (500, 1000, 2000, ...). */
+const RETRY_BASE_MS = 500;
+
 /** Split an array into consecutive slices of at most `size` items (size >= 1). */
 function chunk<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -73,6 +84,11 @@ export interface QobuzClientOptions {
   fetchImpl?: typeof fetch;
   /** Unix-seconds clock; defaults to the real clock. Injectable for tests. */
   now?: () => number;
+  /**
+   * Sleep for the given number of milliseconds; used for retry backoff.
+   * Defaults to a real `setTimeout` delay, injectable so tests need not wait.
+   */
+  sleep?: (ms: number) => Promise<void>;
   /** User-Agent header sent on every request. */
   userAgent?: string;
   /**
@@ -86,6 +102,7 @@ export interface QobuzClientOptions {
 export class QobuzClient {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
+  readonly #sleep: (ms: number) => Promise<void>;
   readonly #userAgent: string;
   readonly #logger: RequestLogger;
 
@@ -96,6 +113,9 @@ export class QobuzClient {
   constructor(options: QobuzClientOptions = {}) {
     this.#fetch = options.fetchImpl ?? fetch;
     this.#now = options.now ?? (() => Math.floor(Date.now() / 1000));
+    this.#sleep =
+      options.sleep ??
+      ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.#logger = options.logger ?? { debug: () => {} };
   }
@@ -707,6 +727,9 @@ export class QobuzClient {
           request_sig: signature,
         },
         headers: this.#appIdHeaders(),
+        // A 400 here means "wrong secret, try the next candidate", not
+        // throttling, so it must not trigger the backoff-and-retry loop.
+        retryOn400: false,
       });
       // A wrong secret is rejected with 400; anything else means it was accepted.
       if (response.status !== 400) {
@@ -726,6 +749,8 @@ export class QobuzClient {
       query?: Record<string, string>;
       headers: Record<string, string>;
       body?: string;
+      /** Retry an HTTP 400 with exponential backoff (default true). */
+      retryOn400?: boolean;
     },
   ): Promise<Response> {
     const url = new URL(buildUrl(path));
@@ -739,9 +764,22 @@ export class QobuzClient {
     if (options.body !== undefined) {
       init.body = options.body;
     }
-    const response = await this.#fetch(url, init);
-    this.#logger.debug(`${method} ${path} -> ${response.status}`);
-    return response;
+
+    const retryOn400 = options.retryOn400 ?? true;
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await this.#fetch(url, init);
+      this.#logger.debug(`${method} ${path} -> ${response.status}`);
+      if (response.status === 400 && retryOn400 && attempt < MAX_RETRIES) {
+        const delay = RETRY_BASE_MS * 2 ** attempt;
+        this.#logger.debug(
+          `${method} ${path} -> 400, backing off ${delay}ms ` +
+            `(retry ${attempt + 1}/${MAX_RETRIES})`,
+        );
+        await this.#sleep(delay);
+        continue;
+      }
+      return response;
+    }
   }
 
   #appIdHeaders(): Record<string, string> {
