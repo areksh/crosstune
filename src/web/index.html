@@ -22,6 +22,9 @@
           <a class="nav-link" data-view="deduplicate" href="#/deduplicate">
             Deduplicator
           </a>
+          <a class="nav-link" data-view="import-export" href="#/import-export">
+            Import &amp; export
+          </a>
         </nav>
         <div class="sidebar-footer">
           <span class="session-label">Signed in as</span>
@@ -63,6 +66,15 @@
                 Find duplicate tracks in a playlist or your favourites --
                 including remasters and the same song on different albums --
                 choose which copy to keep, and remove the rest.
+              </p>
+              <span class="card-cta">Open tool -&gt;</span>
+            </a>
+            <a class="card" href="#/import-export">
+              <h3>Import &amp; export</h3>
+              <p>
+                Export favourites or a playlist as JSON, CSV, plain text or M3U,
+                back up your whole account, and import lists back in -- matching
+                each entry to Qobuz.
               </p>
               <span class="card-cta">Open tool -&gt;</span>
             </a>
@@ -285,6 +297,153 @@
             </div>
             <p id="dedup-apply-error" class="error" hidden></p>
             <p id="dedup-apply-result" class="result" hidden></p>
+          </section>
+        </section>
+
+        <!-- Import & export -->
+        <section id="view-import-export" class="view" hidden>
+          <header class="view-header">
+            <h1>Import &amp; export</h1>
+            <p class="lede">
+              Export favourites or a playlist, back up your whole account, or
+              import a list back into Qobuz.
+            </p>
+          </header>
+
+          <section class="panel">
+            <h2>Export</h2>
+            <div class="destination">
+              <label class="radio">
+                <input type="radio" name="ie-source" value="favourite-tracks" checked />
+                Favourite tracks
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-source" value="favourite-albums" />
+                Favourite albums
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-source" value="favourite-artists" />
+                Favourite artists
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-source" value="playlist" />
+                A playlist
+              </label>
+              <div id="ie-export-playlist-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Playlist</span>
+                  <select id="ie-export-playlist-select">
+                    <option value="">Loading...</option>
+                  </select>
+                </label>
+              </div>
+              <label class="radio">
+                <input type="radio" name="ie-source" value="account" />
+                Whole account (backup)
+              </label>
+            </div>
+
+            <label class="field field-inline">
+              <span>Format</span>
+              <select id="ie-export-format">
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+                <option value="text">Plain text</option>
+                <option value="m3u">M3U</option>
+              </select>
+            </label>
+
+            <div class="actions">
+              <button id="ie-export" type="button">Export &amp; download</button>
+            </div>
+            <p id="ie-export-error" class="error" hidden></p>
+            <p id="ie-export-result" class="result" hidden></p>
+          </section>
+
+          <section class="panel">
+            <h2>Import</h2>
+            <div class="destination">
+              <label class="radio">
+                <input type="radio" name="ie-target" value="favourites" checked />
+                Add to favourite tracks
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-target" value="favourite-albums" />
+                Add to favourite albums
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-target" value="favourite-artists" />
+                Add to favourite artists
+              </label>
+              <label class="radio">
+                <input type="radio" name="ie-target" value="playlist-new" />
+                Create a new playlist
+              </label>
+              <div id="ie-import-new-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Name</span>
+                  <input id="ie-import-playlist-name" type="text" placeholder="Imported" />
+                </label>
+                <label class="checkbox">
+                  <input id="ie-import-playlist-public" type="checkbox" />
+                  Make it public
+                </label>
+              </div>
+              <label class="radio">
+                <input type="radio" name="ie-target" value="playlist-existing" />
+                Add to an existing playlist
+              </label>
+              <div id="ie-import-existing-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Playlist</span>
+                  <select id="ie-import-playlist-select">
+                    <option value="">Loading...</option>
+                  </select>
+                </label>
+              </div>
+              <label class="radio">
+                <input type="radio" name="ie-target" value="account" />
+                Restore a whole-account backup
+              </label>
+            </div>
+
+            <label class="field field-inline">
+              <span>Format</span>
+              <select id="ie-import-format">
+                <option value="auto">Detect from file</option>
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+                <option value="text">Plain text</option>
+                <option value="m3u">M3U</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Paste content, or choose a file</span>
+              <textarea
+                id="ie-import-content"
+                rows="8"
+                placeholder="Portishead - Roads&#10;Massive Attack - Teardrop"
+              ></textarea>
+            </label>
+            <label class="field field-inline">
+              <span>File</span>
+              <input id="ie-import-file" type="file" />
+            </label>
+
+            <div class="actions">
+              <button id="ie-resolve" type="button">Preview import</button>
+            </div>
+            <p id="ie-import-error" class="error" hidden></p>
+
+            <section id="ie-import-preview" class="panel" hidden>
+              <p id="ie-import-summary" class="hint"></p>
+              <div id="ie-import-unmatched" class="unresolved" hidden></div>
+              <div class="actions">
+                <button id="ie-commit" type="button">Import matched items</button>
+              </div>
+              <p id="ie-commit-error" class="error" hidden></p>
+              <p id="ie-commit-result" class="result" hidden></p>
+            </section>
           </section>
         </section>
       </main>
