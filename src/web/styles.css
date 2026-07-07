@@ -302,6 +302,64 @@ button:disabled {
   margin: 0 0 0.5rem 1.5rem;
 }
 
+/* Playlist from albums: version pickers */
+
+.album-group {
+  margin-bottom: 1.25rem;
+}
+
+.album-group h4 {
+  margin: 0 0 0.4rem;
+}
+
+.album-version-select {
+  width: 100%;
+  max-width: 560px;
+}
+
+/* A short status line shown under an album after a commit attempt. */
+.album-status {
+  font-size: 0.82rem;
+  margin-top: 0.3rem;
+  color: var(--muted);
+}
+
+/* Fetched and cached, awaiting the final write: locked and slightly dimmed. */
+.album-group.album-ready {
+  opacity: 0.7;
+}
+
+.album-group.album-ready .album-status {
+  color: var(--ok);
+}
+
+/* Added: locked and dimmed. */
+.album-group.album-added {
+  opacity: 0.55;
+}
+
+.album-group.album-added .album-status {
+  color: var(--ok);
+}
+
+/* Could not fetch, but another version is available to retry. */
+.album-group.album-failed h4 {
+  color: var(--accent);
+}
+
+.album-group.album-failed .album-status {
+  color: var(--accent);
+}
+
+/* Could not fetch and no other version remains. */
+.album-group.album-unavailable {
+  opacity: 0.7;
+}
+
+.album-group.album-unavailable .album-status {
+  color: var(--error);
+}
+
 /* Deduplicator: duplicate groups */
 
 .dedup-group {

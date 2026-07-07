@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Playlist from albums: build a playlist from a list of albums given as
+  "Artist - Album" (one per line), using every track of each. When an album has
+  several Qobuz releases, choose which version to use -- newest, oldest, or
+  highest quality -- per album in the web UI (defaulting to a preference you set
+  up front) or with a single `--prefer` on the CLI. Available as the
+  `playlist-from-albums` command (album lines may also be piped on stdin) and as
+  a web view. Adds `searchAlbums`/`getAlbumTracks` client methods and
+  `POST /api/resolve-albums` and `/api/album-tracks`. An album whose tracks
+  cannot be fetched (a stale id, or a transient Qobuz error) no longer fails the
+  whole playlist: the CLI skips and reports it. The web UI fetches every album's
+  tracks before writing anything, so failures never cause a partial, out-of-order
+  write -- it locks the fetched albums, greys out the version that failed,
+  pre-selects the next-best remaining version for each failed album (keeping it
+  in place), and only creates or adds the playlist once every album has been
+  fetched, in the order the albums were entered.
 - Levelled logging with a global `--loglevel <silent|error|warn|info|debug>`
   option (default `info`), accepted anywhere in the arguments. Normal progress
   and results go to stdout, warnings and errors to stderr, and `debug` adds one

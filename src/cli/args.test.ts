@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { extractLogLevel, parseDedupeArgs, parsePlaylistArgs } from "./args.js";
+import {
+  extractLogLevel,
+  parseAlbumArgs,
+  parseDedupeArgs,
+  parsePlaylistArgs,
+} from "./args.js";
 
 describe("extractLogLevel", () => {
   it("defaults to info and leaves the arguments untouched", () => {
@@ -70,6 +75,43 @@ describe("parsePlaylistArgs", () => {
     expect(() =>
       parsePlaylistArgs(["--name", "x", "--tracks", "0", "A"]),
     ).toThrow(/tracks/i);
+  });
+});
+
+describe("parseAlbumArgs", () => {
+  it("parses the name, album lines, preference and public flag", () => {
+    const parsed = parseAlbumArgs([
+      "--name",
+      "Classics",
+      "--prefer",
+      "oldest",
+      "--public",
+      "Radiohead - OK Computer",
+      "Daft Punk - Discovery",
+    ]);
+    expect(parsed).toEqual({
+      playlistName: "Classics",
+      preference: "oldest",
+      isPublic: true,
+      entries: ["Radiohead - OK Computer", "Daft Punk - Discovery"],
+    });
+  });
+
+  it("defaults preference to highest-quality and isPublic to false", () => {
+    const parsed = parseAlbumArgs(["--name", "Mix", "Wire - Pink Flag"]);
+    expect(parsed.preference).toBe("highest-quality");
+    expect(parsed.isPublic).toBe(false);
+    expect(parsed.entries).toEqual(["Wire - Pink Flag"]);
+  });
+
+  it("throws when --name is missing", () => {
+    expect(() => parseAlbumArgs(["Radiohead - OK Computer"])).toThrow(/name/i);
+  });
+
+  it("throws on an unsupported --prefer value", () => {
+    expect(() =>
+      parseAlbumArgs(["--name", "x", "--prefer", "cheapest", "A - B"]),
+    ).toThrow(/prefer/i);
   });
 });
 

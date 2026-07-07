@@ -23,6 +23,13 @@
  *       Build a playlist from the given artists' top tracks. Artist names may
  *       also be piped on stdin, one per line.
  *
+ *   qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] \
+ *       [--public] "Artist One - Album One" "Artist Two - Album Two" ...
+ *       Build a playlist from whole albums. Each entry is "Artist - Album";
+ *       entries may also be piped on stdin, one per line. When an album has
+ *       several versions, --prefer picks one: highest-quality (default), newest,
+ *       or oldest.
+ *
  *   qobuz-helper deduplicate (--playlist <id> | --favourites)
  *                            [--keep <strategy>] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
@@ -42,6 +49,7 @@ import { readFileSync } from "node:fs";
 
 import {
   extractLogLevel,
+  parseAlbumArgs,
   parseDedupeArgs,
   parsePlaylistArgs,
   type DedupeSource,
@@ -63,6 +71,11 @@ import {
   type DedupTrack,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
+import {
+  buildPlaylistFromAlbums,
+  parseAlbumEntry,
+  type AlbumEntry,
+} from "./features/playlist-from-albums.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -112,6 +125,11 @@ async function main(): Promise<void> {
       break;
     case "playlist-from-artists": {
       const plan = planPlaylistFromArtists(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "playlist-from-albums": {
+      const plan = planPlaylistFromAlbums(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -196,7 +214,7 @@ function planPlaylistFromArtists(
 ): (client: QobuzClient) => Promise<void> {
   const parsed = parsePlaylistArgs(argv);
   const artists =
-    parsed.artists.length > 0 ? parsed.artists : readArtistsFromStdin();
+    parsed.artists.length > 0 ? parsed.artists : readLinesFromStdin();
   if (artists.length === 0) {
     throw new Error(
       "No artists given. Pass them as arguments or pipe them on stdin.",
@@ -224,6 +242,71 @@ function planPlaylistFromArtists(
     }
     if (result.unresolvedArtists.length > 0) {
       logger.warn(`not found: ${result.unresolvedArtists.join(", ")}`);
+    }
+  };
+}
+
+/**
+ * Validate the album command's arguments (and read any piped "Artist - Album"
+ * lines) up front, returning an executor to run once the client is signed in.
+ */
+function planPlaylistFromAlbums(
+  argv: string[],
+): (client: QobuzClient) => Promise<void> {
+  const parsed = parseAlbumArgs(argv);
+  const lines = parsed.entries.length > 0 ? parsed.entries : readLinesFromStdin();
+  if (lines.length === 0) {
+    throw new Error(
+      "No albums given. Pass them as arguments or pipe them on stdin.",
+    );
+  }
+
+  // Split each "Artist - Album" line up front so bad input fails before sign-in.
+  const entries: AlbumEntry[] = [];
+  const malformed: string[] = [];
+  for (const line of lines) {
+    const entry = parseAlbumEntry(line);
+    if (entry === undefined) {
+      malformed.push(line);
+    } else {
+      entries.push(entry);
+    }
+  }
+  if (entries.length === 0) {
+    throw new Error(
+      'No albums in the expected "Artist - Album" format were given.',
+    );
+  }
+
+  return async (client: QobuzClient): Promise<void> => {
+    if (malformed.length > 0) {
+      logger.warn(`ignored (not "Artist - Album"): ${malformed.join(", ")}`);
+    }
+    logger.info(
+      `Building playlist "${parsed.playlistName}" from ${entries.length} albums (preferring ${parsed.preference})...`,
+    );
+    const result = await buildPlaylistFromAlbums(client, {
+      entries,
+      playlistName: parsed.playlistName,
+      preference: parsed.preference,
+      isPublic: parsed.isPublic,
+    });
+
+    logger.info(
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
+    );
+    for (const resolved of result.resolvedAlbums) {
+      const version =
+        resolved.album.version === undefined ? "" : ` [${resolved.album.version}]`;
+      logger.info(
+        `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks`,
+      );
+    }
+    if (result.unresolvedAlbums.length > 0) {
+      logger.warn(`not found: ${result.unresolvedAlbums.join(", ")}`);
+    }
+    if (result.failedAlbums.length > 0) {
+      logger.warn(`could not fetch tracks: ${result.failedAlbums.join(", ")}`);
     }
   };
 }
@@ -300,8 +383,8 @@ async function applyRemovals(
   logger.info("  done.");
 }
 
-/** Read artist names from piped stdin (one per line); empty when stdin is a TTY. */
-function readArtistsFromStdin(): string[] {
+/** Read lines from piped stdin (one per line, trimmed); empty when stdin is a TTY. */
+function readLinesFromStdin(): string[] {
   if (process.stdin.isTTY) {
     return [];
   }
@@ -324,13 +407,15 @@ function printUsage(): void {
       "  qobuz-helper ui",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] "Artist - Album" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
       "",
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
-      "Artist names for playlist-from-artists may also be piped on stdin, one per line.",
+      "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
+      "Album version preferences: highest-quality (default), newest, oldest.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
     ].join("\n"),

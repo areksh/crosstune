@@ -16,6 +16,9 @@
           <a class="nav-link" data-view="playlist" href="#/playlist">
             Playlist from artists
           </a>
+          <a class="nav-link" data-view="albums" href="#/albums">
+            Playlist from albums
+          </a>
           <a class="nav-link" data-view="deduplicate" href="#/deduplicate">
             Deduplicator
           </a>
@@ -42,6 +45,15 @@
                 Give a list of artists and build a playlist from each one's most
                 popular tracks. Preview and edit the selection before creating a
                 new playlist or adding to an existing one.
+              </p>
+              <span class="card-cta">Open tool -&gt;</span>
+            </a>
+            <a class="card" href="#/albums">
+              <h3>Playlist from albums</h3>
+              <p>
+                Give a list of albums as "Artist - Album" and build a playlist
+                from them. When an album has several versions, choose which to
+                use -- newest, oldest, or highest quality.
               </p>
               <span class="card-cta">Open tool -&gt;</span>
             </a>
@@ -129,6 +141,91 @@
             </div>
             <p id="commit-error" class="error" hidden></p>
             <p id="commit-result" class="result" hidden></p>
+          </section>
+        </section>
+
+        <!-- Playlist from albums -->
+        <section id="view-albums" class="view" hidden>
+          <header class="view-header">
+            <h1>Playlist from albums</h1>
+            <p class="lede">
+              One album per line as "Artist - Album". Each album contributes all
+              of its tracks.
+            </p>
+          </header>
+
+          <section class="panel">
+            <label class="field">
+              <span>Albums</span>
+              <textarea
+                id="albums"
+                rows="8"
+                placeholder="Radiohead - OK Computer&#10;Daft Punk - Discovery&#10;Portishead - Dummy"
+              ></textarea>
+            </label>
+            <label class="field field-inline">
+              <span>Prefer version</span>
+              <select id="album-prefer">
+                <option value="highest-quality">highest quality</option>
+                <option value="newest">newest release</option>
+                <option value="oldest">oldest release</option>
+              </select>
+            </label>
+            <div class="actions">
+              <button id="resolve-albums" type="button">Find albums</button>
+            </div>
+            <p id="resolve-albums-error" class="error" hidden></p>
+          </section>
+
+          <section id="albums-preview" class="panel" hidden>
+            <h2>Preview</h2>
+            <p class="hint">
+              Pick which version of each album to use.
+              <span id="albums-selected-count"></span>
+            </p>
+            <div id="albums-unresolved" class="unresolved" hidden></div>
+            <div id="album-groups"></div>
+
+            <h3>Destination</h3>
+            <div class="destination">
+              <label class="radio">
+                <input type="radio" name="album-target" value="new" checked />
+                Create a new playlist
+              </label>
+              <div id="album-new-fields" class="target-fields">
+                <label class="field">
+                  <span>Name</span>
+                  <input
+                    id="album-playlist-name"
+                    type="text"
+                    placeholder="My playlist"
+                  />
+                </label>
+                <label class="checkbox">
+                  <input id="album-playlist-public" type="checkbox" />
+                  Make it public
+                </label>
+              </div>
+
+              <label class="radio">
+                <input type="radio" name="album-target" value="existing" />
+                Add to an existing playlist
+              </label>
+              <div id="album-existing-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Playlist</span>
+                  <select id="album-playlist-select">
+                    <option value="">Loading...</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button id="commit-albums" type="button">Create playlist</button>
+            </div>
+            <p id="commit-albums-error" class="error" hidden></p>
+            <p id="commit-albums-result" class="result" hidden></p>
           </section>
         </section>
 

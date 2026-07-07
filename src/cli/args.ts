@@ -3,6 +3,11 @@
  */
 
 import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
+import {
+  ALBUM_PREFERENCES,
+  DEFAULT_ALBUM_PREFERENCE,
+  type AlbumPreference,
+} from "../features/playlist-from-albums.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
 export interface ExtractedLogLevel {
@@ -48,6 +53,14 @@ export interface PlaylistArgs {
   playlistName: string;
   artists: string[];
   tracksPerArtist?: number;
+  isPublic: boolean;
+}
+
+export interface AlbumPlaylistArgs {
+  playlistName: string;
+  /** Raw "Artist - Album" lines, parsed later into entries. */
+  entries: string[];
+  preference: AlbumPreference;
   isPublic: boolean;
 }
 
@@ -181,4 +194,58 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
     isPublic,
     ...(tracksPerArtist !== undefined && { tracksPerArtist }),
   };
+}
+
+/**
+ * Parse the arguments for the `playlist-from-albums` command.
+ *
+ * Recognised options: `--name <name>` (required), `--prefer <preference>` (which
+ * version to pick when an album has several; default `highest-quality`), and
+ * `--public`. All remaining positional arguments are "Artist - Album" lines.
+ *
+ * @throws {Error} if `--name` is missing or `--prefer` is not a valid preference.
+ */
+export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
+  let playlistName: string | undefined;
+  let preference: AlbumPreference = DEFAULT_ALBUM_PREFERENCE;
+  let isPublic = false;
+  const entries: string[] = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    switch (arg) {
+      case "--name":
+        playlistName = argv[i + 1];
+        i += 1;
+        break;
+      case "--prefer": {
+        const raw = argv[i + 1];
+        i += 1;
+        if (!isAlbumPreference(raw)) {
+          throw new Error(
+            `--prefer must be one of: ${ALBUM_PREFERENCES.join(", ")} (got "${raw}")`,
+          );
+        }
+        preference = raw;
+        break;
+      }
+      case "--public":
+        isPublic = true;
+        break;
+      default:
+        if (arg !== undefined) {
+          entries.push(arg);
+        }
+    }
+  }
+
+  if (playlistName === undefined || playlistName.length === 0) {
+    throw new Error("--name <playlist name> is required");
+  }
+
+  return { playlistName, entries, preference, isPublic };
+}
+
+function isAlbumPreference(value: string | undefined): value is AlbumPreference {
+  return value !== undefined && (ALBUM_PREFERENCES as readonly string[]).includes(value);
 }

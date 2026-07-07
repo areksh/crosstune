@@ -42,6 +42,25 @@ export interface TracksPage {
   total: number;
 }
 
+export interface Album {
+  id: string;
+  title: string;
+  /** Primary artist (performer) name; empty string when the response omits it. */
+  artist: string;
+  /** Release variant label ("2017 Remaster", "Deluxe Edition", ...), when present. */
+  version?: string;
+  /** Original release date (YYYY-MM-DD), when present. */
+  releaseDate?: string;
+  /** Maximum bit depth (e.g. 16, 24), a quality signal. */
+  bitDepth?: number;
+  /** Maximum sampling rate in kHz (e.g. 44.1, 96), a quality signal. */
+  samplingRate?: number;
+  /** Whether the album is hi-res. */
+  hires?: boolean;
+  /** Number of tracks on the album, when the response carries it. */
+  trackCount?: number;
+}
+
 export interface Playlist {
   id: number;
   name: string;
@@ -79,6 +98,54 @@ export function parseArtists(response: unknown): Artist[] {
     }
   }
   return artists;
+}
+
+/** Parse the `albums.items` list of an album search response. */
+export function parseAlbums(response: unknown): Album[] {
+  const albums: Album[] = [];
+  for (const item of itemsOf(response, "albums")) {
+    const album = parseAlbum(item);
+    if (album !== undefined) {
+      albums.push(album);
+    }
+  }
+  return albums;
+}
+
+/** Parse a single album object, pulling artist, version, quality and dates when present. */
+function parseAlbum(item: unknown): Album | undefined {
+  if (!isRecord(item) || typeof item["id"] !== "string" || typeof item["title"] !== "string") {
+    return undefined;
+  }
+  const artistName =
+    isRecord(item["artist"]) && typeof item["artist"]["name"] === "string"
+      ? item["artist"]["name"]
+      : "";
+  const album: Album = { id: item["id"], title: item["title"], artist: artistName };
+
+  if (typeof item["version"] === "string" && item["version"].length > 0) {
+    album.version = item["version"];
+  }
+  const date = releaseDateOf(item);
+  if (date !== undefined) {
+    album.releaseDate = date;
+  }
+  if (typeof item["maximum_bit_depth"] === "number") {
+    album.bitDepth = item["maximum_bit_depth"];
+  }
+  if (typeof item["maximum_sampling_rate"] === "number") {
+    album.samplingRate = item["maximum_sampling_rate"];
+  }
+  // Qobuz labels an album's hi-res status as `hires` or `hires_streamable`.
+  if (typeof item["hires"] === "boolean") {
+    album.hires = item["hires"];
+  } else if (typeof item["hires_streamable"] === "boolean") {
+    album.hires = item["hires_streamable"];
+  }
+  if (typeof item["tracks_count"] === "number") {
+    album.trackCount = item["tracks_count"];
+  }
+  return album;
 }
 
 /** Parse the `tracks.items` list of a tracks container (e.g. artist/get?extra=tracks). */

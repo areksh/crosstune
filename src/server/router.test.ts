@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { QobuzError, type Artist, type Playlist, type Track } from "../qobuz/index.js";
+import {
+  QobuzError,
+  type Album,
+  type Artist,
+  type Playlist,
+  type Track,
+} from "../qobuz/index.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
 const NONCE = "test-nonce";
@@ -14,6 +20,8 @@ function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
     getPlaylistTracks: vi.fn(async () => [] as Track[]),
     getFavoriteTracks: vi.fn(async () => [] as Track[]),
     getAlbumReleaseDate: vi.fn(async () => undefined),
+    searchAlbums: vi.fn(async () => [] as Album[]),
+    getAlbumTracks: vi.fn(async () => [] as Track[]),
     createPlaylist: vi.fn(async (name: string) => ({ id: 1, name })),
     addTracksToPlaylist: vi.fn(async () => {}),
     removeTracksFromPlaylist: vi.fn(async () => {}),
@@ -175,6 +183,110 @@ describe("POST /api/commit", () => {
   it("rejects an unknown target type", async () => {
     const res = await handleApi(
       request("POST", "/api/commit", { target: { type: "nope" }, trackIds: [1] }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/resolve-albums", () => {
+  it("resolves 'Artist - Album' lines to their matching versions", async () => {
+    const svc = service({
+      searchAlbums: vi.fn(async () => [
+        { id: "cd", title: "OK Computer", artist: "Radiohead", bitDepth: 16 },
+        { id: "hr", title: "OK Computer", artist: "Radiohead", bitDepth: 24 },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", { entries: ["Radiohead - OK Computer"] }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      resolvedAlbums: Array<{ query: string; versions: Album[] }>;
+      unresolvedAlbums: string[];
+    };
+    expect(body.resolvedAlbums).toHaveLength(1);
+    expect(body.resolvedAlbums[0]?.versions.map((v) => v.id)).toEqual(["cd", "hr"]);
+    expect(body.unresolvedAlbums).toEqual([]);
+    expect(svc.searchAlbums).toHaveBeenCalledWith("Radiohead OK Computer", 20);
+  });
+
+  it("reports malformed lines as unresolved", async () => {
+    const svc = service({
+      searchAlbums: vi.fn(async () => [
+        { id: "d", title: "Discovery", artist: "Daft Punk" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", {
+        entries: ["Daft Punk - Discovery", "no separator here"],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { unresolvedAlbums: string[] };
+    expect(body.unresolvedAlbums).toEqual(["no separator here"]);
+  });
+
+  it("rejects a body with no parseable album lines", async () => {
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", { entries: ["", "  "] }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/album-tracks", () => {
+  it("returns each album's track ids in request order, fetching without writing", async () => {
+    const svc = service({
+      getAlbumTracks: vi.fn(async (id: string) =>
+        id === "a"
+          ? [{ id: 1, title: "One" }, { id: 2, title: "Two" }]
+          : [{ id: 3, title: "Three" }],
+      ),
+    });
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["a", "b"] }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      fetched: [
+        { albumId: "a", trackIds: [1, 2] },
+        { albumId: "b", trackIds: [3] },
+      ],
+      failedAlbumIds: [],
+    });
+    // Fetching must not write anything to a playlist.
+    expect(svc.createPlaylist).not.toHaveBeenCalled();
+    expect(svc.addTracksToPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("reports albums whose tracks could not be fetched", async () => {
+    const svc = service({
+      getAlbumTracks: vi.fn(async (id: string) => {
+        if (id === "bad") {
+          throw new Error("album/get failed with HTTP 404");
+        }
+        return [{ id: 1, title: "One" }];
+      }),
+    });
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["a", "bad"] }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      fetched: [{ albumId: "a", trackIds: [1] }],
+      failedAlbumIds: ["bad"],
+    });
+  });
+
+  it("rejects an empty album id list", async () => {
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: [] }),
       deps(),
     );
     expect(res.status).toBe(400);

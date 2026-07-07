@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAlbumReleaseDate,
+  parseAlbums,
   parseArtistPageTracks,
   parseArtists,
   parsePlaylist,
@@ -110,6 +111,69 @@ describe("parseTracks", () => {
       },
     };
     expect(parseTracks(json)[0]?.releaseDate).toBe("1970-01-01");
+  });
+});
+
+describe("parseAlbums", () => {
+  it("extracts id, title, artist and metadata from the albums.items list", () => {
+    const json = {
+      albums: {
+        items: [
+          {
+            id: "0724385",
+            title: "OK Computer",
+            version: "2017 Remaster",
+            artist: { id: 41, name: "Radiohead" },
+            release_date_original: "1997-05-21",
+            maximum_bit_depth: 24,
+            maximum_sampling_rate: 96,
+            hires_streamable: true,
+            tracks_count: 12,
+          },
+          { id: "0001", title: "Discovery", artist: { name: "Daft Punk" } },
+        ],
+      },
+    };
+    expect(parseAlbums(json)).toEqual([
+      {
+        id: "0724385",
+        title: "OK Computer",
+        version: "2017 Remaster",
+        artist: "Radiohead",
+        releaseDate: "1997-05-21",
+        bitDepth: 24,
+        samplingRate: 96,
+        hires: true,
+        trackCount: 12,
+      },
+      { id: "0001", title: "Discovery", artist: "Daft Punk" },
+    ]);
+  });
+
+  it("reads hires from a plain hires flag when present", () => {
+    const json = {
+      albums: { items: [{ id: "a", title: "T", artist: { name: "X" }, hires: true }] },
+    };
+    expect(parseAlbums(json)[0]?.hires).toBe(true);
+  });
+
+  it("skips entries without a string id or title", () => {
+    const json = {
+      albums: {
+        items: [
+          { id: "a", title: "Ok", artist: { name: "X" } },
+          { id: 5, title: "numeric id", artist: { name: "X" } },
+          { id: "b" },
+        ],
+      },
+    };
+    expect(parseAlbums(json)).toEqual([{ id: "a", title: "Ok", artist: "X" }]);
+  });
+
+  it("returns an empty array when the shape is unexpected", () => {
+    expect(parseAlbums({})).toEqual([]);
+    expect(parseAlbums({ albums: {} })).toEqual([]);
+    expect(parseAlbums(null)).toEqual([]);
   });
 });
 

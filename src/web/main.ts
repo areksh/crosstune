@@ -9,10 +9,11 @@
 
 import { api } from "./api.js";
 import { el } from "./dom.js";
+import { initAlbumsView } from "./views/albums.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
 import { initPlaylistView } from "./views/playlist.js";
 
-const VIEWS = ["home", "playlist", "deduplicate"] as const;
+const VIEWS = ["home", "playlist", "albums", "deduplicate"] as const;
 type View = (typeof VIEWS)[number];
 
 function isView(value: string): value is View {
@@ -50,6 +51,7 @@ async function loadSession(): Promise<void> {
 }
 
 initPlaylistView();
+initAlbumsView();
 initDeduplicateView();
 window.addEventListener("hashchange", route);
 route();

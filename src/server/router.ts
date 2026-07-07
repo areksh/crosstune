@@ -12,7 +12,13 @@
  * browser); upstream Qobuz failures map to 502 so the UI can surface them.
  */
 
-import { QobuzError, type Artist, type Playlist, type Track } from "../qobuz/index.js";
+import {
+  QobuzError,
+  type Album,
+  type Artist,
+  type Playlist,
+  type Track,
+} from "../qobuz/index.js";
 import {
   deduplicateTracks,
   enrichReleaseDates,
@@ -26,6 +32,12 @@ import {
   createPlaylistWithTracks,
   resolveArtistTracks,
 } from "../features/playlist-from-artists.js";
+import {
+  fetchAlbumTracks,
+  parseAlbumEntry,
+  resolveAlbumVersions,
+  type AlbumEntry,
+} from "../features/playlist-from-albums.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -36,6 +48,8 @@ export interface QobuzApiService {
   getPlaylistTracks(playlistId: number): Promise<Track[]>;
   getFavoriteTracks(): Promise<Track[]>;
   getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
+  searchAlbums(query: string, limit?: number): Promise<Album[]>;
+  getAlbumTracks(albumId: string): Promise<Track[]>;
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
@@ -120,6 +134,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.method === "POST" && req.path === "/api/commit") {
     return commit(req.body, deps);
   }
+  if (req.method === "POST" && req.path === "/api/resolve-albums") {
+    return resolveAlbums(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/album-tracks") {
+    return albumTracks(req.body, deps);
+  }
   if (req.method === "POST" && req.path === "/api/deduplicate/scan") {
     return scan(req.body, deps);
   }
@@ -146,9 +166,52 @@ async function commit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
-  const { target, trackIds } = input.value;
+  return writeTracksToTarget(deps.service, input.value.target, input.value.trackIds);
+}
+
+async function resolveAlbums(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseResolveAlbumsInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const result = await resolveAlbumVersions(deps.service, {
+    entries: input.value.entries,
+  });
+  return {
+    status: 200,
+    body: {
+      resolvedAlbums: result.resolvedAlbums,
+      // Lines that were not in the expected format are surfaced alongside the
+      // ones that matched nothing, so the user sees every entry accounted for.
+      unresolvedAlbums: [...result.unresolvedAlbums, ...input.value.malformed],
+    },
+  };
+}
+
+/**
+ * Fetch the tracks of the given albums without writing anything.
+ *
+ * The album view calls this first and only writes (via `/api/commit`) once every
+ * album has been fetched, so a retried album keeps its place in the user's
+ * order instead of being appended after an earlier partial write.
+ */
+async function albumTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseAlbumTracksInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const result = await fetchAlbumTracks(deps.service, input.value.albumIds);
+  return { status: 200, body: result };
+}
+
+/** Create a new playlist from the tracks, or add them to an existing one. */
+async function writeTracksToTarget(
+  service: QobuzApiService,
+  target: CommitTarget,
+  trackIds: readonly number[],
+): Promise<ApiResponse> {
   if (target.type === "new") {
-    const playlist = await createPlaylistWithTracks(deps.service, {
+    const playlist = await createPlaylistWithTracks(service, {
       name: target.name,
       trackIds,
       isPublic: target.isPublic,
@@ -156,7 +219,7 @@ async function commit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     });
     return { status: 200, body: { playlist, added: trackIds, skipped: [] } };
   }
-  const { added, skipped } = await addTracksToExistingPlaylist(deps.service, {
+  const { added, skipped } = await addTracksToExistingPlaylist(service, {
     playlistId: target.playlistId,
     trackIds,
   });
@@ -265,34 +328,94 @@ function parseCommitInput(body: unknown): Parsed<CommitInput> {
     return { ok: false, error: "at least one track id is required" };
   }
 
-  const target = body["target"];
-  if (!isRecord(target)) {
+  const target = parseCommitTarget(body["target"]);
+  if (!target.ok) {
+    return target;
+  }
+  return { ok: true, value: { target: target.value, trackIds } };
+}
+
+/** Parse the new/existing destination shared by both commit routes. */
+function parseCommitTarget(value: unknown): Parsed<CommitTarget> {
+  if (!isRecord(value)) {
     return { ok: false, error: "target is required" };
   }
-  if (target["type"] === "new") {
-    const name = typeof target["name"] === "string" ? target["name"].trim() : "";
+  if (value["type"] === "new") {
+    const name = typeof value["name"] === "string" ? value["name"].trim() : "";
     if (name.length === 0) {
       return { ok: false, error: "a playlist name is required" };
     }
-    const parsedTarget: CommitTarget = { type: "new", name };
-    if (typeof target["isPublic"] === "boolean") {
-      parsedTarget.isPublic = target["isPublic"];
+    const target: CommitTarget = { type: "new", name };
+    if (typeof value["isPublic"] === "boolean") {
+      target.isPublic = value["isPublic"];
     }
-    if (typeof target["description"] === "string" && target["description"].length > 0) {
-      parsedTarget.description = target["description"];
+    if (typeof value["description"] === "string" && value["description"].length > 0) {
+      target.description = value["description"];
     }
-    return { ok: true, value: { target: parsedTarget, trackIds } };
+    return { ok: true, value: target };
   }
-  if (target["type"] === "existing") {
-    if (typeof target["playlistId"] !== "number") {
+  if (value["type"] === "existing") {
+    if (typeof value["playlistId"] !== "number") {
       return { ok: false, error: "playlistId is required" };
     }
-    return {
-      ok: true,
-      value: { target: { type: "existing", playlistId: target["playlistId"] }, trackIds },
-    };
+    return { ok: true, value: { type: "existing", playlistId: value["playlistId"] } };
   }
   return { ok: false, error: "target.type must be 'new' or 'existing'" };
+}
+
+interface ResolveAlbumsInput {
+  entries: AlbumEntry[];
+  /** Input lines that were not in the "Artist - Album" format. */
+  malformed: string[];
+}
+
+function parseResolveAlbumsInput(body: unknown): Parsed<ResolveAlbumsInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  if (!Array.isArray(body["entries"])) {
+    return { ok: false, error: "entries must be an array" };
+  }
+  const lines = body["entries"]
+    .filter((line): line is string => typeof line === "string")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const entries: AlbumEntry[] = [];
+  const malformed: string[] = [];
+  for (const line of lines) {
+    const entry = parseAlbumEntry(line);
+    if (entry === undefined) {
+      malformed.push(line);
+    } else {
+      entries.push(entry);
+    }
+  }
+  if (entries.length === 0) {
+    return {
+      ok: false,
+      error: "at least one album in 'Artist - Album' format is required",
+    };
+  }
+  return { ok: true, value: { entries, malformed } };
+}
+
+interface AlbumTracksInput {
+  albumIds: string[];
+}
+
+function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const albumIds = Array.isArray(body["albumIds"])
+    ? body["albumIds"].filter(
+        (id): id is string => typeof id === "string" && id.length > 0,
+      )
+    : undefined;
+  if (albumIds === undefined || albumIds.length === 0) {
+    return { ok: false, error: "at least one album id is required" };
+  }
+  return { ok: true, value: { albumIds } };
 }
 
 type DedupeSource =

@@ -21,11 +21,15 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 
 - **Playlist from artists** -- build a playlist from just a list of artists,
   using each artist's top tracks. Available on the CLI and in the web UI.
+- **Playlist from albums** -- build a playlist from a list of albums given as
+  "Artist - Album", using every track of each. When an album has several
+  versions, choose which to use (newest, oldest, or highest quality). Available
+  on the CLI and in the web UI.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
 
-There is also a **local web UI** (`qobuz-helper ui`) hosting both tools, each
+There is also a **local web UI** (`qobuz-helper ui`) hosting these tools, each
 with a preview-and-edit step before anything is changed. More to follow.
 
 ## Requirements
@@ -84,6 +88,21 @@ cat artists.txt | npm run dev -- playlist-from-artists --name "Road Trip"
 
 Options for `playlist-from-artists`: `--name` (required), `--tracks N` (top
 tracks per artist, default 10), `--public` (make the playlist public).
+
+```sh
+# Build a playlist from whole albums, given as "Artist - Album"
+npm run dev -- playlist-from-albums --name "Classics" --prefer highest-quality \
+  "Radiohead - OK Computer" "Daft Punk - Discovery"
+
+# Album lines can also be piped in, one per line
+cat albums.txt | npm run dev -- playlist-from-albums --name "Classics"
+```
+
+Options for `playlist-from-albums`: `--name` (required), `--prefer
+<preference>` (which version to use when an album has several: `highest-quality`
+(default), `newest`, or `oldest`), `--public` (make the playlist public). Each
+entry is one line in `Artist - Album` form, split on the first ` - ` so album
+titles keep any hyphens.
 
 ```sh
 # Report duplicate tracks in a playlist, or across your favourites
@@ -158,6 +177,16 @@ tools; a home page introduces each.
 2. Preview the tracks grouped by artist, and untick any you do not want.
 3. Choose a destination -- create a new playlist, or add to an existing one
    (tracks already in it are skipped) -- and commit.
+
+**Playlist from albums:**
+
+1. Paste one album per line as "Artist - Album", and pick a default version
+   preference (highest quality, newest, or oldest).
+2. Find the albums: each shows a dropdown to choose which version to use when
+   several exist (defaulting to your preference), with the chosen release's
+   quality and date shown alongside.
+3. Choose a destination -- a new playlist, or an existing one (tracks already in
+   it are skipped) -- and commit.
 
 **Deduplicator:**
 

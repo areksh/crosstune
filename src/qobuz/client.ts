@@ -13,12 +13,14 @@ import { buildUrl, paths } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
   parseAlbumReleaseDate,
+  parseAlbums,
   parseArtistPageTracks,
   parseArtists,
   parsePlaylist,
   parsePlaylistsPage,
   parseTracks,
   parseTracksPage,
+  type Album,
   type Artist,
   type Playlist,
   type Track,
@@ -318,6 +320,47 @@ export class QobuzClient {
   }
 
   /**
+   * Search for albums by name, most relevant first.
+   *
+   * A query combining the artist and album name (e.g. "radiohead ok computer")
+   * gives the best matches; the caller filters the results to the ones it wants.
+   *
+   * @param query The album (and artist) name to search for.
+   * @param limit Maximum results (default 20).
+   * @param offset Result offset (default 0).
+   */
+  async searchAlbums(query: string, limit = 20, offset = 0): Promise<Album[]> {
+    const timestamp = this.#now();
+    const signature = signSearch(
+      "albumsearch",
+      query,
+      limit,
+      offset,
+      "album",
+      timestamp,
+      this.#requireSecret(),
+    );
+    const response = await this.#request("GET", paths.albumSearch, {
+      query: {
+        query,
+        limit: String(limit),
+        offset: String(offset),
+        type: "album",
+        request_ts: String(timestamp),
+        request_sig: signature,
+      },
+      headers: this.#headers(),
+    });
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `album search failed with HTTP ${response.status}`,
+      );
+    }
+    return parseAlbums(await response.json());
+  }
+
+  /**
    * Fetch an artist's most popular tracks.
    *
    * Uses `/artist/page`, whose `top_tracks` are ordered by popularity (the same
@@ -511,6 +554,25 @@ export class QobuzClient {
       );
     }
     return parseAlbumReleaseDate(await response.json());
+  }
+
+  /**
+   * Fetch an album's full track list.
+   *
+   * `album/get` embeds the album's tracks under `tracks.items` by default, so no
+   * `extra` parameter is needed (and passing one makes Qobuz reject the request).
+   */
+  async getAlbumTracks(albumId: string): Promise<Track[]> {
+    const response = await this.#signedGet("albumget", paths.albumGet, [
+      ["album_id", albumId],
+    ]);
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `album/get failed with HTTP ${response.status}`,
+      );
+    }
+    return parseTracks(await response.json());
   }
 
   /**

@@ -24,6 +24,18 @@ export interface Track {
   releaseDate?: string;
 }
 
+export interface Album {
+  id: string;
+  title: string;
+  artist: string;
+  version?: string;
+  releaseDate?: string;
+  bitDepth?: number;
+  samplingRate?: number;
+  hires?: boolean;
+  trackCount?: number;
+}
+
 export interface Playlist {
   id: number;
   name: string;

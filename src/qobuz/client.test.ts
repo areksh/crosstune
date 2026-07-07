@@ -33,6 +33,7 @@ interface FetchOptions {
   favorites?: unknown;
   artistSearch?: unknown;
   artistTracks?: unknown;
+  albumSearch?: unknown;
   playlist?: unknown;
   userPlaylists?: unknown;
   album?: unknown;
@@ -88,6 +89,11 @@ function makeFetch(options: FetchOptions): typeof fetch {
     }
     if (path.endsWith("/artist/page")) {
       return new Response(JSON.stringify(options.artistTracks ?? {}), {
+        status: 200,
+      });
+    }
+    if (path.endsWith("/album/search")) {
+      return new Response(JSON.stringify(options.albumSearch ?? {}), {
         status: 200,
       });
     }
@@ -369,6 +375,70 @@ describe("QobuzClient.getArtistTopTracks", () => {
     ]);
     const request = recorded.find((r) => r.url.pathname.endsWith("/artist/page"));
     expect(request?.url.searchParams.get("artist_id")).toBe("42");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("QobuzClient.searchAlbums", () => {
+  it("signs the album search with a type param and returns parsed albums", async () => {
+    const { client, recorded } = await initedClient({
+      albumSearch: {
+        albums: {
+          items: [
+            {
+              id: "0724385",
+              title: "OK Computer",
+              artist: { name: "Radiohead" },
+              maximum_bit_depth: 24,
+            },
+          ],
+        },
+      },
+    });
+
+    const albums = await client.searchAlbums("radiohead ok computer", 5);
+
+    expect(albums).toEqual([
+      {
+        id: "0724385",
+        title: "OK Computer",
+        artist: "Radiohead",
+        bitDepth: 24,
+      },
+    ]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/album/search"));
+    expect(request?.url.searchParams.get("query")).toBe("radiohead ok computer");
+    expect(request?.url.searchParams.get("limit")).toBe("5");
+    expect(request?.url.searchParams.get("type")).toBe("album");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+    expect(request?.headers.get("X-App-Id")).toBe("100200300");
+  });
+});
+
+describe("QobuzClient.getAlbumTracks", () => {
+  it("reads the tracks embedded in an album/get response", async () => {
+    const { client, recorded } = await initedClient({
+      album: {
+        id: "a",
+        tracks: {
+          items: [
+            { id: 1, title: "Airbag" },
+            { id: 2, title: "Paranoid Android" },
+          ],
+        },
+      },
+    });
+
+    const tracks = await client.getAlbumTracks("a");
+
+    expect(tracks).toEqual([
+      { id: 1, title: "Airbag" },
+      { id: 2, title: "Paranoid Android" },
+    ]);
+    const request = recorded.find((r) => r.url.pathname.endsWith("/album/get"));
+    expect(request?.url.searchParams.get("album_id")).toBe("a");
+    // No `extra` param: album/get embeds tracks by default and rejects extras.
+    expect(request?.url.searchParams.get("extra")).toBeNull();
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
   });
 });
