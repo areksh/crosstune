@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Import & export: export favourites (tracks, albums or artists) or a playlist
+  as JSON, CSV, plain text or M3U; back up your whole account (favourites and
+  playlists) to a lossless JSON file; and import a list back in, resolving each
+  entry to a Qobuz item by its id when present (JSON, CSV and M3U can carry one)
+  or otherwise by searching and best-matching, with unmatched entries reported.
+  Available as the `export` and `import` CLI commands (import resolves and
+  reports only unless `--apply` is given; `--account` writes or restores a full
+  backup) and as an "Import & export" web view. Adds `searchTracks`,
+  `getFavoriteAlbums`, `getFavoriteArtists` and `addFavoriteTracks`/`Albums`/
+  `Artists` client methods and the `POST /api/export`, `/api/import/resolve`,
+  `/api/import/commit` and `/api/restore` routes (see ADR-0003).
 - Playlist from albums: build a playlist from a list of albums given as
   "Artist - Album" (one per line), using every track of each. When an album has
   several Qobuz releases, choose which version to use -- newest, oldest, or

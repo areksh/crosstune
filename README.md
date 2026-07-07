@@ -28,6 +28,10 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
+- **Import & export** -- export favourites or a playlist as JSON, CSV, plain
+  text or M3U; back up your whole account (favourites and playlists) to a
+  lossless JSON file; and import a list back in, matching each entry to Qobuz by
+  its id or by search. Available on the CLI and in the web UI.
 
 There is also a **local web UI** (`qobuz-helper ui`) hosting these tools, each
 with a preview-and-edit step before anything is changed. More to follow.
@@ -138,6 +142,50 @@ Which copy is kept is chosen by `--keep <strategy>`:
 By default the command only **reports** the plan. Add `--apply` to actually
 remove the tracks marked `drop` (from the playlist, or from your favourites).
 
+```sh
+# Export favourite tracks as CSV to a file
+npm run dev -- export --favourites --out favourites.csv
+
+# Export a playlist as M3U
+npm run dev -- export --playlist 12345678 --out mix.m3u
+
+# Back up your whole account (favourites and playlists) to a JSON file
+npm run dev -- export --account --out qobuz-backup.json
+
+# Without --out the content goes to stdout; pair it with --loglevel warn so
+# sign-in progress does not end up in the piped file
+npm run dev -- --loglevel warn export --playlist 12345678 --format m3u > mix.m3u
+```
+
+`export` sources are `--favourites`, `--favourite-albums`, `--favourite-artists`,
+`--playlist <id>`, or `--account` (a full backup). `--format` is one of `json`,
+`csv`, `text` or `m3u` (inferred from `--out`'s extension when omitted, else
+`json`); a backup is always JSON. CSV and plain text carry a single collection;
+M3U carries tracks only; JSON is lossless and the only format for a whole-account
+backup.
+
+```sh
+# Preview importing a hand-written track list into favourites (dry run)
+npm run dev -- import --favourites tracks.txt
+
+# Actually add them, matching each "Artist - Title" line to Qobuz
+npm run dev -- import --favourites tracks.txt --apply
+
+# Import a CSV into a new playlist
+npm run dev -- import --new-playlist "From CSV" songs.csv --apply
+
+# Restore a whole-account backup
+npm run dev -- import --account qobuz-backup.json --apply
+```
+
+`import` targets are `--favourites`, `--favourite-albums`, `--favourite-artists`,
+`--playlist <id>` (an existing playlist), `--new-playlist <name>`, or `--account`
+(restore a backup). The format is inferred from the filename unless `--format` is
+given. Each entry is resolved to a Qobuz item by its id when the file carries one
+(JSON always does; CSV and M3U can), otherwise by searching and best-matching;
+entries that match nothing are reported. Like `deduplicate`, `import` only
+resolves and **reports** unless `--apply` is given.
+
 If the browser does not open automatically, the CLI prints the URL to visit.
 
 #### Logging
@@ -196,6 +244,16 @@ tools; a home page introduces each.
    rest in red. Tick the copies you want to keep (you can keep more than one),
    or use "Keep all" to keep the whole group.
 3. Apply to remove the unticked copies.
+
+**Import & export:**
+
+1. *Export:* choose a source (favourite tracks, albums or artists, a playlist,
+   or your whole account) and a format, then download the file. A whole-account
+   backup is always JSON.
+2. *Import:* choose a destination (favourites or a playlist, or restore a
+   backup), paste or upload the content, and preview: the matched entries are
+   counted and any that could not be resolved are listed.
+3. Commit to add the matched items (or restore the backup).
 
 The browser only ever talks to the local server, which owns the Qobuz session;
 your Qobuz token is never sent to the page. The server is reachable only from
