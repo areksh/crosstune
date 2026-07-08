@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Playlist from artists no longer counts covers of an artist's songs by other
+  performers towards that artist's top tracks. Qobuz's artist page mixes in
+  covers (e.g. Johnny Cash's take on a Bob Dylan song surfaces on Dylan's page),
+  which could crowd out the artist's own tracks under the requested limit. Tracks
+  whose main artist differs from the requested one are now dropped before the
+  limit is applied; tracks with no artist id are kept.
 - Resolving a large list in the web UI no longer fails with a "NetworkError"
   while the work actually succeeds. Playlist-from-artists, playlist-from-albums
   and import all resolved their items strictly one at a time, holding a single
@@ -25,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Playlist from artists now reports artists that yield no usable tracks and those
+  that come up short. Artists that match but return no tracks (commonly a
+  regional restriction) are dropped from the preview and called out on their own
+  -- an orange warning box in the web UI, a warning line on the CLI. Artists that
+  return fewer tracks than requested are kept in the list but noted with their
+  count -- a blue info box in the web UI, an info line on the CLI. Previously an
+  empty artist rendered a heading with no tracks under it and no explanation.
 - Import & export: export favourites (tracks, albums or artists) or a playlist
   as JSON, CSV, plain text or M3U; back up your whole account (favourites and
   playlists) to a lossless JSON file; and import a list back in, resolving each
