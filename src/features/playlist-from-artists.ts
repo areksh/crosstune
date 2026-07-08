@@ -97,6 +97,19 @@ const ARTIST_SEARCH_LIMIT = 5;
 const DEFAULT_TRACKS_PER_ARTIST = 10;
 
 /**
+ * How many artists to resolve at once.
+ *
+ * Resolving is two dependent requests per artist, so a strictly sequential pass
+ * over a large list (100+ artists) keeps a single web request open for minutes,
+ * long enough for the browser to abort the fetch even though the server is still
+ * working. A small pool cuts the wall-clock time by this factor. It is kept
+ * modest deliberately: Qobuz throttles bursts of signed requests with a 400, and
+ * the client's own backoff-and-retry rides that out, so flooding it with a large
+ * fan-out would be counter-productive.
+ */
+const RESOLVE_CONCURRENCY = 5;
+
+/**
  * Resolve each artist name to its top tracks (phase 1).
  *
  * The per-artist track lists are returned as fetched, without de-duplicating
@@ -107,21 +120,68 @@ export async function resolveArtistTracks(
   options: ResolveArtistsOptions,
 ): Promise<ResolveArtistsResult> {
   const tracksPerArtist = options.tracksPerArtist ?? DEFAULT_TRACKS_PER_ARTIST;
+
+  // Resolve with a bounded pool, then split the outcomes. Results come back in
+  // input order (see mapWithConcurrency), so the grouped-by-artist preview keeps
+  // the order the user typed regardless of which lookups finished first.
+  const outcomes = await mapWithConcurrency(
+    options.artists,
+    RESOLVE_CONCURRENCY,
+    async (query): Promise<ResolvedArtistTracks | undefined> => {
+      const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
+      const artist = pickArtist(candidates, query);
+      if (artist === undefined) {
+        return undefined;
+      }
+      const tracks = await client.getArtistTopTracks(artist.id, tracksPerArtist);
+      return { query, artist, tracks };
+    },
+  );
+
   const resolvedArtists: ResolvedArtistTracks[] = [];
   const unresolvedArtists: string[] = [];
-
-  for (const query of options.artists) {
-    const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
-    const artist = pickArtist(candidates, query);
-    if (artist === undefined) {
+  options.artists.forEach((query, index) => {
+    const outcome = outcomes[index];
+    if (outcome === undefined) {
       unresolvedArtists.push(query);
-      continue;
+    } else {
+      resolvedArtists.push(outcome);
     }
-    const tracks = await client.getArtistTopTracks(artist.id, tracksPerArtist);
-    resolvedArtists.push({ query, artist, tracks });
-  }
+  });
 
   return { resolvedArtists, unresolvedArtists };
+}
+
+/**
+ * Map over `items` running at most `limit` calls of `worker` concurrently, and
+ * return the results in input order. A bounded pool (rather than `Promise.all`
+ * over the whole list) keeps a large list fast without a fan-out that Qobuz
+ * would throttle. `limit` is assumed to be at least 1.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      for (;;) {
+        // `next++` is atomic between awaits (single-threaded), so each runner
+        // claims a distinct index.
+        const index = next;
+        next += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await worker(items[index]!);
+      }
+    },
+  );
+  await Promise.all(runners);
+  return results;
 }
 
 /**

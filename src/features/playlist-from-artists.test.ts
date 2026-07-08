@@ -167,6 +167,42 @@ describe("resolveArtistTracks", () => {
     expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, 5);
   });
 
+  it("runs artist lookups concurrently and returns them in input order", async () => {
+    // Each search stays pending until released, so we can prove several are in
+    // flight at once and then resolve them out of order.
+    const release = new Map<string, () => void>();
+    const searchArtists = vi.fn(
+      (query: string) =>
+        new Promise<Artist[]>((resolve) => {
+          release.set(query, () => resolve([{ id: query.length, name: query }]));
+        }),
+    );
+    const client = {
+      searchArtists,
+      getArtistTopTracks: vi.fn(async (id: number) => [{ id, title: "t" }]),
+    };
+
+    const promise = resolveArtistTracks(client, {
+      artists: ["aa", "bbb", "cccc"],
+    });
+    await Promise.resolve();
+
+    // A sequential resolve would have called search exactly once by now.
+    expect(searchArtists.mock.calls.length).toBeGreaterThan(1);
+
+    // Release out of input order; the result must still follow input order.
+    release.get("cccc")!();
+    release.get("aa")!();
+    release.get("bbb")!();
+    const result = await promise;
+
+    expect(result.resolvedArtists.map((r) => r.query)).toEqual([
+      "aa",
+      "bbb",
+      "cccc",
+    ]);
+  });
+
   it("records unresolved names and continues", async () => {
     const client = stubClient({
       artistsByQuery: { Real: [{ id: 5, name: "Real" }] },

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Playlist from artists: resolving a large list of artists (100+) no longer fails
+  in the web UI with a "NetworkError" while the work actually succeeds. Artists
+  are now resolved with a small concurrency pool instead of strictly one at a
+  time, so the request completes well within the browser's fetch timeout. Results
+  are still returned in the order the artists were entered.
+
 ### Changed
 
 - Qobuz API requests now retry an HTTP 400 with exponential backoff (up to five
