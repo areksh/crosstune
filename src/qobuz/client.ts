@@ -430,6 +430,12 @@ export class QobuzClient {
    * The endpoint returns a fixed set, so the requested `limit` is applied
    * client-side.
    *
+   * The `top_tracks` also include covers of the artist's songs recorded by
+   * *other* performers (e.g. Johnny Cash's take on Bob Dylan surfaces on
+   * Dylan's page). Those are dropped -- by comparing each track's main artist
+   * id to `artistId` -- before the limit is applied, so covers do not crowd out
+   * the artist's own recordings. Tracks whose artist id is missing are kept.
+   *
    * @param artistId The Qobuz artist id.
    * @param limit Maximum tracks to return, taken from the top (default 10).
    */
@@ -444,7 +450,10 @@ export class QobuzClient {
       );
     }
     const tracks = parseArtistPageTracks(await response.json());
-    return tracks.slice(0, limit);
+    const ownTracks = tracks.filter(
+      (track) => track.artistId === undefined || track.artistId === artistId,
+    );
+    return ownTracks.slice(0, limit);
   }
 
   /**

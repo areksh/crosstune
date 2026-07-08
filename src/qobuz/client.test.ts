@@ -476,6 +476,28 @@ describe("QobuzClient.getArtistTopTracks", () => {
     expect(request?.url.searchParams.get("artist_id")).toBe("42");
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
   });
+
+  it("drops covers by other artists before applying the limit", async () => {
+    // Qobuz lists covers of the artist's songs by other performers among the
+    // top tracks (e.g. Johnny Cash on Bob Dylan's page). They carry a different
+    // artist id and must not count towards, or crowd out, the artist's own top
+    // tracks.
+    const { client } = await initedClient({
+      artistTracks: {
+        top_tracks: [
+          { id: 1, title: "Blowin' in the Wind", artist: { id: 42, name: { display: "Bob Dylan" } } },
+          { id: 2, title: "Girl from the North Country", artist: { id: 99, name: { display: "Johnny Cash" } } },
+          { id: 3, title: "Like a Rolling Stone", artist: { id: 42, name: { display: "Bob Dylan" } } },
+        ],
+      },
+    });
+
+    const tracks = await client.getArtistTopTracks(42, 2);
+
+    // The cover (artist id 99) is filtered out, so the two returned are the
+    // artist's own tracks rather than one own track plus a cover.
+    expect(tracks.map((t) => t.id)).toEqual([1, 3]);
+  });
 });
 
 describe("QobuzClient.searchAlbums", () => {

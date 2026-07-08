@@ -202,6 +202,7 @@ describe("parseArtistPageTracks", () => {
         id: 627460,
         title: "Glory Box",
         artist: "Portishead",
+        artistId: 41259,
         isrc: "GBAQT9400066",
         album: "Dummy",
         albumId: "0004228285532",
