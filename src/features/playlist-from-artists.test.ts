@@ -216,6 +216,55 @@ describe("resolveArtistTracks", () => {
     expect(result.unresolvedArtists).toEqual(["Ghost Band"]);
     expect(result.resolvedArtists).toHaveLength(1);
   });
+
+  it("flags a matched artist with no tracks and drops it from the list", async () => {
+    const client = stubClient({
+      artistsByQuery: {
+        "The Miracles, Smokey Robinson": [
+          { id: 9, name: "Smokey Robinson and the Miracles" },
+        ],
+      },
+      tracksByArtist: { 9: [] },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["The Miracles, Smokey Robinson"],
+      tracksPerArtist: 20,
+    });
+
+    expect(result.resolvedArtists).toEqual([]);
+    expect(result.partialArtists).toEqual([]);
+    expect(result.emptyArtists).toEqual([
+      {
+        query: "The Miracles, Smokey Robinson",
+        artist: { id: 9, name: "Smokey Robinson and the Miracles" },
+        trackCount: 0,
+        requested: 20,
+      },
+    ]);
+  });
+
+  it("flags an artist with fewer tracks than requested but keeps it", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }], B: [{ id: 2, name: "B" }] },
+      tracksByArtist: {
+        1: [{ id: 100, title: "x" }, { id: 101, title: "y" }],
+        2: Array.from({ length: 4 }, (_v, i) => ({ id: 200 + i, title: `t${i}` })),
+      },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A", "B"],
+      tracksPerArtist: 4,
+    });
+
+    // Both are kept (each has at least one track); only the short one is flagged.
+    expect(result.resolvedArtists.map((r) => r.artist.name)).toEqual(["A", "B"]);
+    expect(result.emptyArtists).toEqual([]);
+    expect(result.partialArtists).toEqual([
+      { query: "A", artist: { id: 1, name: "A" }, trackCount: 2, requested: 4 },
+    ]);
+  });
 });
 
 describe("collectTrackIds", () => {

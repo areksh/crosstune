@@ -54,9 +54,31 @@ export interface ResolvedArtistTracks {
   tracks: Track[];
 }
 
+/**
+ * A resolved artist that yielded fewer tracks than requested -- either none at
+ * all (e.g. regional restrictions), or some but short of `tracksPerArtist`.
+ */
+export interface UnderfilledArtist {
+  query: string;
+  artist: Artist;
+  /** Tracks actually fetched (0 when none were available). */
+  trackCount: number;
+  /** Tracks requested per artist (`tracksPerArtist`). */
+  requested: number;
+}
+
 export interface ResolveArtistsResult {
+  /** Artists resolved to at least one track, in input order. */
   resolvedArtists: ResolvedArtistTracks[];
+  /** Input names that matched no artist. */
   unresolvedArtists: string[];
+  /** Resolved artists for which no tracks at all could be fetched. */
+  emptyArtists: UnderfilledArtist[];
+  /**
+   * Resolved artists that yielded at least one track but fewer than requested.
+   * These still appear in `resolvedArtists`; this list is for surfacing a note.
+   */
+  partialArtists: UnderfilledArtist[];
 }
 
 export interface ResolveArtistsOptions {
@@ -90,6 +112,10 @@ export interface BuildPlaylistResult {
   playlist: Playlist;
   resolvedArtists: ResolvedArtist[];
   unresolvedArtists: string[];
+  /** Matched artists that yielded no tracks (excluded from the playlist). */
+  emptyArtists: UnderfilledArtist[];
+  /** Matched artists that yielded fewer tracks than requested. */
+  partialArtists: UnderfilledArtist[];
   trackCount: number;
 }
 
@@ -128,16 +154,38 @@ export async function resolveArtistTracks(
 
   const resolvedArtists: ResolvedArtistTracks[] = [];
   const unresolvedArtists: string[] = [];
+  const emptyArtists: UnderfilledArtist[] = [];
+  const partialArtists: UnderfilledArtist[] = [];
   options.artists.forEach((query, index) => {
     const outcome = outcomes[index];
     if (outcome === undefined) {
       unresolvedArtists.push(query);
-    } else {
-      resolvedArtists.push(outcome);
+      return;
+    }
+    const trackCount = outcome.tracks.length;
+    if (trackCount === 0) {
+      // Matched an artist, but Qobuz returned no tracks (commonly a regional
+      // restriction). Drop it from the list and flag it separately.
+      emptyArtists.push({
+        query,
+        artist: outcome.artist,
+        trackCount,
+        requested: tracksPerArtist,
+      });
+      return;
+    }
+    resolvedArtists.push(outcome);
+    if (trackCount < tracksPerArtist) {
+      partialArtists.push({
+        query,
+        artist: outcome.artist,
+        trackCount,
+        requested: tracksPerArtist,
+      });
     }
   });
 
-  return { resolvedArtists, unresolvedArtists };
+  return { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists };
 }
 
 /**
@@ -223,12 +271,13 @@ export async function buildPlaylistFromArtists(
     throw new Error("At least one artist is required");
   }
 
-  const { resolvedArtists, unresolvedArtists } = await resolveArtistTracks(client, {
-    artists: options.artists,
-    ...(options.tracksPerArtist !== undefined && {
-      tracksPerArtist: options.tracksPerArtist,
-    }),
-  });
+  const { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists } =
+    await resolveArtistTracks(client, {
+      artists: options.artists,
+      ...(options.tracksPerArtist !== undefined && {
+        tracksPerArtist: options.tracksPerArtist,
+      }),
+    });
 
   // De-duplicate across artists, counting how many each contributed.
   const trackIds: number[] = [];
@@ -257,6 +306,8 @@ export async function buildPlaylistFromArtists(
     playlist,
     resolvedArtists: summaries,
     unresolvedArtists,
+    emptyArtists,
+    partialArtists,
     trackCount: trackIds.length,
   };
 }

@@ -222,7 +222,10 @@ tools; a home page introduces each.
 **Playlist from artists:**
 
 1. Paste one artist per line and choose how many top tracks to take from each.
-2. Preview the tracks grouped by artist, and untick any you do not want.
+2. Preview the tracks grouped by artist, and untick any you do not want. Names
+   that matched nothing, artists Qobuz returned no tracks for (skipped from the
+   list), and artists that yielded fewer tracks than requested are each called
+   out above the preview.
 3. Choose a destination -- create a new playlist, or add to an existing one
    (tracks already in it are skipped) -- and commit.
 

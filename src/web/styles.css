@@ -8,6 +8,7 @@
   --accent: #4f8cff;
   --accent-text: #ffffff;
   --error: #ff6b6b;
+  --warn: #f0a020;
   --ok: #57d38c;
   --keep: #57d38c;
   --drop: #ff6b6b;
@@ -249,12 +250,22 @@ button:disabled {
   margin: 0.75rem 0 0;
 }
 
-.unresolved {
+.unresolved,
+.warning,
+.info {
   border: 1px solid var(--error);
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
+}
+
+.warning {
+  border-color: var(--warn);
+}
+
+.info {
+  border-color: var(--accent);
 }
 
 /* Playlist: artist track groups */

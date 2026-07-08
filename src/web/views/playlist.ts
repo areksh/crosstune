@@ -21,9 +21,18 @@ interface ResolvedArtist {
   tracks: Track[];
 }
 
+interface UnderfilledArtist {
+  query: string;
+  artist: Artist;
+  trackCount: number;
+  requested: number;
+}
+
 interface ResolveResponse {
   resolvedArtists: ResolvedArtist[];
   unresolvedArtists: string[];
+  emptyArtists: UnderfilledArtist[];
+  partialArtists: UnderfilledArtist[];
 }
 
 type CommitTarget =
@@ -81,6 +90,26 @@ function renderPreview(result: ResolveResponse): void {
     unresolvedNode.hidden = true;
   }
 
+  const emptyNode = el("empty-artists");
+  if (result.emptyArtists.length > 0) {
+    emptyNode.hidden = false;
+    emptyNode.textContent = `No tracks found (skipped): ${result.emptyArtists
+      .map(artistLabel)
+      .join(", ")}`;
+  } else {
+    emptyNode.hidden = true;
+  }
+
+  const partialNode = el("partial-artists");
+  if (result.partialArtists.length > 0) {
+    partialNode.hidden = false;
+    partialNode.textContent = `Fewer tracks than requested: ${result.partialArtists
+      .map((a) => `${artistLabel(a)} (${a.trackCount} of ${a.requested})`)
+      .join(", ")}`;
+  } else {
+    partialNode.hidden = true;
+  }
+
   const groups = el("artist-groups");
   groups.textContent = "";
   for (const resolvedArtist of result.resolvedArtists) {
@@ -91,6 +120,14 @@ function renderPreview(result: ResolveResponse): void {
   showError(el("commit-error"), undefined);
   showError(el("commit-result"), undefined);
   updateSelectedCount();
+}
+
+/** The artist's name, noting the typed query when it differs from the match. */
+function artistLabel(a: { artist: Artist; query: string }): string {
+  if (a.artist.name.toLowerCase() === a.query.toLowerCase()) {
+    return a.artist.name;
+  }
+  return `${a.artist.name} (matched "${a.query}")`;
 }
 
 function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {

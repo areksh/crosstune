@@ -286,6 +286,18 @@ function planPlaylistFromArtists(
     for (const resolved of result.resolvedArtists) {
       logger.info(`  ${resolved.artist.name}: ${resolved.trackCount} tracks`);
     }
+    for (const partial of result.partialArtists) {
+      logger.info(
+        `  (only ${partial.trackCount} of ${partial.requested} available for ${partial.artist.name})`,
+      );
+    }
+    if (result.emptyArtists.length > 0) {
+      logger.warn(
+        `no tracks available for: ${result.emptyArtists
+          .map((a) => a.artist.name)
+          .join(", ")}`,
+      );
+    }
     if (result.unresolvedArtists.length > 0) {
       logger.warn(`not found: ${result.unresolvedArtists.join(", ")}`);
     }

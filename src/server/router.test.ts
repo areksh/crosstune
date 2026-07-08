@@ -108,8 +108,33 @@ describe("POST /api/resolve", () => {
         { query: "Portishead", artist: { id: 5, name: "Portishead" }, tracks: [{ id: 100, title: "Roads" }] },
       ],
       unresolvedArtists: [],
+      emptyArtists: [],
+      // One of three requested tracks came back, so Portishead is under-filled.
+      partialArtists: [
+        { query: "Portishead", artist: { id: 5, name: "Portishead" }, trackCount: 1, requested: 3 },
+      ],
     });
     expect(svc.getArtistTopTracks).toHaveBeenCalledWith(5, 3);
+  });
+
+  it("flags matched artists that return no tracks and excludes them", async () => {
+    const svc = service({
+      searchArtists: vi.fn(async (q: string) => [{ id: 7, name: q }]),
+      getArtistTopTracks: vi.fn(async () => []),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve", { artists: ["Restricted"], tracksPerArtist: 5 }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      resolvedArtists: [],
+      unresolvedArtists: [],
+      emptyArtists: [
+        { query: "Restricted", artist: { id: 7, name: "Restricted" }, trackCount: 0, requested: 5 },
+      ],
+      partialArtists: [],
+    });
   });
 
   it("trims and drops blank artist lines", async () => {
