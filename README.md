@@ -4,11 +4,7 @@ A collection of local-first utilities for [Qobuz](https://www.qobuz.com/).
 
 `qobuz-helper` runs entirely on your own machine. You sign in with your Qobuz
 account, use the tools, and nothing about you is stored on any server -- the
-session lives only in the running process.
-
-> **Status:** early development. The first milestone is a vertical slice that
-> proves the Qobuz plumbing works end to end (extract API tokens, sign in, make
-> one authenticated request).
+session is saved locally and never leaves your machine.
 
 ## Why this exists
 
