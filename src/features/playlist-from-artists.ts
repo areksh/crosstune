@@ -15,6 +15,7 @@
  */
 
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
+import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
 /** The client surface needed to resolve artists to their top tracks. */
 export interface ArtistResolverClient {
@@ -97,19 +98,6 @@ const ARTIST_SEARCH_LIMIT = 5;
 const DEFAULT_TRACKS_PER_ARTIST = 10;
 
 /**
- * How many artists to resolve at once.
- *
- * Resolving is two dependent requests per artist, so a strictly sequential pass
- * over a large list (100+ artists) keeps a single web request open for minutes,
- * long enough for the browser to abort the fetch even though the server is still
- * working. A small pool cuts the wall-clock time by this factor. It is kept
- * modest deliberately: Qobuz throttles bursts of signed requests with a 400, and
- * the client's own backoff-and-retry rides that out, so flooding it with a large
- * fan-out would be counter-productive.
- */
-const RESOLVE_CONCURRENCY = 5;
-
-/**
  * Resolve each artist name to its top tracks (phase 1).
  *
  * The per-artist track lists are returned as fetched, without de-duplicating
@@ -126,7 +114,7 @@ export async function resolveArtistTracks(
   // the order the user typed regardless of which lookups finished first.
   const outcomes = await mapWithConcurrency(
     options.artists,
-    RESOLVE_CONCURRENCY,
+    DEFAULT_CONCURRENCY,
     async (query): Promise<ResolvedArtistTracks | undefined> => {
       const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
       const artist = pickArtist(candidates, query);
@@ -150,38 +138,6 @@ export async function resolveArtistTracks(
   });
 
   return { resolvedArtists, unresolvedArtists };
-}
-
-/**
- * Map over `items` running at most `limit` calls of `worker` concurrently, and
- * return the results in input order. A bounded pool (rather than `Promise.all`
- * over the whole list) keeps a large list fast without a fan-out that Qobuz
- * would throttle. `limit` is assumed to be at least 1.
- */
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  worker: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const runners = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      for (;;) {
-        // `next++` is atomic between awaits (single-threaded), so each runner
-        // claims a distinct index.
-        const index = next;
-        next += 1;
-        if (index >= items.length) {
-          return;
-        }
-        results[index] = await worker(items[index]!);
-      }
-    },
-  );
-  await Promise.all(runners);
-  return results;
 }
 
 /**

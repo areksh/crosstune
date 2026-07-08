@@ -20,6 +20,7 @@
  */
 
 import type { Album, Playlist, Track } from "../qobuz/index.js";
+import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
 import {
   createPlaylistWithTracks,
@@ -116,11 +117,18 @@ export async function resolveAlbumVersions(
   client: AlbumResolverClient,
   options: ResolveAlbumsOptions,
 ): Promise<ResolveAlbumsResult> {
+  // Resolve entries through a bounded pool (results stay in input order) so a
+  // large list does not hold a single web request open long enough for the
+  // browser to abort the fetch.
+  const outcomes = await mapWithConcurrency(
+    options.entries,
+    DEFAULT_CONCURRENCY,
+    async (entry) => ({ entry, versions: await findAlbumVersions(client, entry) }),
+  );
+
   const resolvedAlbums: ResolvedAlbumVersions[] = [];
   const unresolvedAlbums: string[] = [];
-
-  for (const entry of options.entries) {
-    const versions = await findAlbumVersions(client, entry);
+  for (const { entry, versions } of outcomes) {
     if (versions.length === 0) {
       unresolvedAlbums.push(formatEntry(entry));
       continue;
@@ -314,19 +322,42 @@ export async function fetchAlbumTracks(
   client: AlbumTracksClient,
   albumIds: readonly string[],
 ): Promise<FetchAlbumTracksResult> {
-  const fetched: AlbumTracks[] = [];
-  const failedAlbumIds: string[] = [];
+  // Fetch each unique album once, in request order, through a bounded pool. The
+  // pool keeps a large list fast without holding a single web request open long
+  // enough for the browser to abort the fetch; ordering the unique ids up front
+  // and reassembling in that order keeps the result deterministic.
+  const uniqueAlbumIds: string[] = [];
   const seen = new Set<string>();
   for (const albumId of albumIds) {
-    if (seen.has(albumId)) {
-      continue;
+    if (!seen.has(albumId)) {
+      seen.add(albumId);
+      uniqueAlbumIds.push(albumId);
     }
-    seen.add(albumId);
-    try {
-      const tracks = await client.getAlbumTracks(albumId);
-      fetched.push({ albumId, trackIds: tracks.map((track) => track.id) });
-    } catch {
-      failedAlbumIds.push(albumId);
+  }
+
+  type Outcome =
+    | { albumId: string; trackIds: number[] }
+    | { albumId: string; failed: true };
+  const outcomes = await mapWithConcurrency<string, Outcome>(
+    uniqueAlbumIds,
+    DEFAULT_CONCURRENCY,
+    async (albumId) => {
+      try {
+        const tracks = await client.getAlbumTracks(albumId);
+        return { albumId, trackIds: tracks.map((track) => track.id) };
+      } catch {
+        return { albumId, failed: true };
+      }
+    },
+  );
+
+  const fetched: AlbumTracks[] = [];
+  const failedAlbumIds: string[] = [];
+  for (const outcome of outcomes) {
+    if ("failed" in outcome) {
+      failedAlbumIds.push(outcome.albumId);
+    } else {
+      fetched.push({ albumId: outcome.albumId, trackIds: outcome.trackIds });
     }
   }
   return { fetched, failedAlbumIds };

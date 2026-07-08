@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Playlist from artists: resolving a large list of artists (100+) no longer fails
-  in the web UI with a "NetworkError" while the work actually succeeds. Artists
-  are now resolved with a small concurrency pool instead of strictly one at a
-  time, so the request completes well within the browser's fetch timeout. Results
-  are still returned in the order the artists were entered.
+- Resolving a large list in the web UI no longer fails with a "NetworkError"
+  while the work actually succeeds. Playlist-from-artists, playlist-from-albums
+  and import all resolved their items strictly one at a time, holding a single
+  request open long enough (100+ items) for the browser to abort the fetch. They
+  now resolve through a small concurrency pool, so the request completes well
+  within the browser's fetch timeout. Results are still returned in input order.
 
 ### Changed
 

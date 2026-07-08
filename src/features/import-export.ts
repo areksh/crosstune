@@ -23,6 +23,7 @@
  */
 
 import type { Album, Artist, Playlist, Track } from "../qobuz/index.js";
+import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
 import {
   resolveAlbumVersions,
@@ -474,18 +475,41 @@ export async function resolveImport(
     matched.push({ label, id });
   };
 
+  // Resolve items through a bounded pool (results stay in input order), then run
+  // the order-sensitive `add` reduction over them. A large import therefore does
+  // not hold a single web request open long enough for the browser to abort the
+  // fetch, while the first-occurrence de-duplication and reporting order are
+  // unchanged.
   if (parsed.kind === "tracks") {
-    for (const item of parsed.items) {
-      add(trackLabel(item), await resolveTrackId(client, item));
-    }
+    const resolved = await mapWithConcurrency(
+      parsed.items,
+      DEFAULT_CONCURRENCY,
+      async (item) => ({
+        label: trackLabel(item),
+        id: await resolveTrackId(client, item),
+      }),
+    );
+    for (const { label, id } of resolved) add(label, id);
   } else if (parsed.kind === "albums") {
-    for (const item of parsed.items) {
-      add(albumLabel(item), await resolveAlbumId(client, item));
-    }
+    const resolved = await mapWithConcurrency(
+      parsed.items,
+      DEFAULT_CONCURRENCY,
+      async (item) => ({
+        label: albumLabel(item),
+        id: await resolveAlbumId(client, item),
+      }),
+    );
+    for (const { label, id } of resolved) add(label, id);
   } else {
-    for (const item of parsed.items) {
-      add(item.name ?? "(unknown)", await resolveArtistId(client, item));
-    }
+    const resolved = await mapWithConcurrency(
+      parsed.items,
+      DEFAULT_CONCURRENCY,
+      async (item) => ({
+        label: item.name ?? "(unknown)",
+        id: await resolveArtistId(client, item),
+      }),
+    );
+    for (const { label, id } of resolved) add(label, id);
   }
   return { kind: parsed.kind, matched, unmatched };
 }
