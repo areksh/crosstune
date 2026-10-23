@@ -21,6 +21,10 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   "Artist - Album", using every track of each. When an album has several
   versions, choose which to use (newest, oldest, or highest quality). Available
   on the CLI and in the web UI.
+
+Both playlist tools can **exclude** tracks whose title, or whose album's title,
+matches a term (see [Filters](#filters)), and the album tool can keep only
+chosen discs.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
@@ -87,7 +91,11 @@ cat artists.txt | npm run dev -- playlist-from-artists --name "Road Trip"
 ```
 
 Options for `playlist-from-artists`: `--name` (required), `--tracks N` (top
-tracks per artist, default 10), `--public` (make the playlist public).
+tracks per artist, default 10), `--public` (make the playlist public),
+`--exclude-track <term>` and `--exclude-album <term>` (see [Filters](#filters)).
+An excluded track is replaced by the artist's next most popular one; Qobuz
+lists at most 30 top tracks per artist, so a strict filter can still leave an
+artist short.
 
 ```sh
 # Build a playlist from whole albums, given as "Artist - Album"
@@ -100,9 +108,34 @@ cat albums.txt | npm run dev -- playlist-from-albums --name "Classics"
 
 Options for `playlist-from-albums`: `--name` (required), `--prefer
 <preference>` (which version to use when an album has several: `highest-quality`
-(default), `newest`, or `oldest`), `--public` (make the playlist public). Each
+(default), `newest`, or `oldest`), `--public` (make the playlist public),
+`--discs <list>` (keep only these discs of each album, e.g. `1` or `1,3-4`), and
+`--exclude-track <term>` and `--exclude-album <term>` (see [Filters](#filters)).
+A release whose title or version matches `--exclude-album` is never picked; if
+every release of an album matches, the album is skipped and reported. Each
 entry is one line in `Artist - Album` form, split on the first ` - ` so album
 titles keep any hyphens.
+
+#### Filters
+
+```sh
+# Top tracks, but no live recordings and nothing from compilations
+npm run dev -- playlist-from-artists --name "Studio Only" \
+  --exclude-track live --exclude-album live --exclude-album "greatest hits" \
+  "Nirvana" "Pixies"
+
+# Only the first disc of each album, without demos or instrumental versions
+npm run dev -- playlist-from-albums --name "Disc One" --discs 1 \
+  --exclude-track demo --exclude-track "/instrumental|karaoke/" \
+  "Pink Floyd - The Wall"
+```
+
+A plain term matches as a whole word or phrase, ignoring case: `live` excludes
+"Live at Leeds" and "Karma Police (Live)" but not "Alive". Track terms are
+checked against the title and its version label ("Remastered 2011", "Demo"),
+album terms against the album's title (and version, for album releases). A term
+wrapped in slashes, such as `/remix|edit$/`, is a regular expression, also
+case-insensitive. Repeat a flag to add more terms.
 
 ```sh
 # Report duplicate tracks in a playlist, or across your favourites
@@ -218,22 +251,31 @@ tools; a home page introduces each.
 **Playlist from artists:**
 
 1. Paste one artist per line and choose how many top tracks to take from each.
-2. Preview the tracks grouped by artist, and untick any you do not want. Names
-   that matched nothing, artists Qobuz returned no tracks for (skipped from the
-   list), and artists that yielded fewer tracks than requested are each called
-   out above the preview.
+   Optionally open *Filters* to exclude tracks or albums by term (one per line).
+2. Preview the tracks grouped by artist, and untick any you do not want. Tracks
+   the filters excluded are replaced by the next most popular, and listed
+   unticked with the reason, so you can tick one back on. Names that matched
+   nothing, artists Qobuz returned no tracks for (skipped from the list), and
+   artists that yielded fewer tracks than requested are each called out above
+   the preview.
 3. Choose a destination -- create a new playlist, or add to an existing one
    (tracks already in it are skipped) -- and commit.
 
 **Playlist from albums:**
 
 1. Paste one album per line as "Artist - Album", and pick a default version
-   preference (highest quality, newest, or oldest).
+   preference (highest quality, newest, or oldest). Optionally open *Filters* to
+   exclude releases or tracks by term, or to include only some discs.
 2. Find the albums: each shows a dropdown to choose which version to use when
    several exist (defaulting to your preference), with the chosen release's
-   quality and date shown alongside.
-3. Choose a destination -- a new playlist, or an existing one (tracks already in
-   it are skipped) -- and commit.
+   quality and date shown alongside. Releases matching a release filter are not
+   offered; albums with no release left are called out.
+3. Fetch the tracks: each album lists its tracks (by disc, when it has more
+   than one). Tracks on a disc you did not include, or matching a track filter,
+   start unticked with the reason; tick or untick any. If a version cannot be
+   fetched, the next-best one is selected for you to retry.
+4. Choose a destination -- a new playlist, or an existing one (tracks already in
+   it are skipped) -- and save the ticked tracks.
 
 **Deduplicator:**
 

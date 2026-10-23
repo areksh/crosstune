@@ -28,8 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   times: 500ms, 1s, 2s, 4s, 8s) before failing, so a transient throttle no
   longer stops a run. The secret-probe step is exempt, as it uses a 400 to
   reject a candidate secret rather than as a throttle signal.
+- Playlist from albums in the web UI now has a review step: after choosing
+  versions, "Fetch tracks" lists each album's tracks for ticking and unticking,
+  and a second click saves them. Previously the whole of each album was written
+  without a track list. The destination is no longer locked once tracks have
+  been fetched, since nothing is written until you save.
 
 ### Added
+
+- Playlist filters. Both playlist tools can exclude tracks whose title (or
+  version label) matches a term, and tracks from albums whose title matches a
+  term; the album tool can also keep only chosen discs (e.g. "1" or "1,3-4").
+  Plain terms match whole words ignoring case, so "live" skips "Live at Leeds"
+  but not "Alive"; `/.../` terms are regular expressions. On the CLI these are
+  `--exclude-track`, `--exclude-album` and `--discs`. In the web UI they sit
+  under *Filters*, and excluded tracks are listed unticked with the reason
+  rather than hidden. Playlist from artists replaces an excluded track with the
+  artist's next most popular one; playlist from albums never picks a release
+  that matches an album term.
 
 - Playlist from artists now reports artists that yield no usable tracks and those
   that come up short. Artists that match but return no tracks (commonly a
