@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Artist, Track } from "../qobuz/index.js";
 import {
+  fetchArtistTracks,
   planFromArtists,
   planFromPlaylist,
   resolveSimilarArtists,
   seedsFromPlaylist,
   similarTrackIds,
+  walkFromArtists,
+  walkFromPlaylist,
+  walkSimilarArtists,
   type SimilarArtistsClient,
 } from "./similar-artists.js";
 import { compileTrackFilter } from "./track-filter.js";
@@ -241,6 +245,81 @@ describe("resolveSimilarArtists", () => {
     const result = await promise;
 
     expect(result.similar.map((s) => s.artist.id)).toEqual([10, 20, 30]);
+  });
+});
+
+describe("walkSimilarArtists", () => {
+  it("finds the artists without fetching any tracks", async () => {
+    const client = stubClient({ similar: { 1: [artist(11)], 11: [artist(111)] } });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1)],
+      similarPerArtist: 1,
+      depth: 2,
+    });
+
+    expect(walk.found.map((f) => [f.artist.id, f.via.id, f.level])).toEqual([
+      [11, 1, 1],
+      [111, 11, 2],
+    ]);
+    expect(client.getArtistTopTracks).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchArtistTracks", () => {
+  it("fetches in input order, leaving out empty artists and flagging short ones", async () => {
+    const client = stubClient({
+      similar: {},
+      tracks: { 1: tracksFor(1, 3), 2: [], 3: tracksFor(3, 1) },
+    });
+
+    const result = await fetchArtistTracks(client, [artist(1), artist(2), artist(3)], 2);
+
+    expect(result.fetched.map((f) => [f.artist.id, f.tracks.length])).toEqual([
+      [1, 2],
+      [3, 1],
+    ]);
+    expect(result.emptyArtists.map((a) => a.artist.id)).toEqual([2]);
+    expect(result.partialArtists.map((a) => [a.artist.id, a.trackCount, a.requested])).toEqual([
+      [3, 1, 2],
+    ]);
+  });
+});
+
+describe("walkFromArtists / walkFromPlaylist", () => {
+  it("resolves seeds with their own tracks but leaves similar artists' tracks unfetched", async () => {
+    const client = stubClient({
+      searches: { Nirvana: [artist(1, "Nirvana")] },
+      similar: { 1: [artist(11)] },
+    });
+
+    const walk = await walkFromArtists(client, {
+      artists: ["Nirvana"],
+      tracksPerSeed: 1,
+      similarPerArtist: 1,
+      depth: 1,
+    });
+
+    expect(walk.seeds.map((s) => s.tracks.length)).toEqual([1]);
+    expect(walk.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(client.getArtistTopTracks).not.toHaveBeenCalledWith(11, expect.anything());
+  });
+
+  it("walks from a playlist's artists without fetching tracks", async () => {
+    const client = stubClient({
+      playlist: [{ id: 1, title: "a", artistId: 5, artist: "Five" }],
+      similar: { 5: [artist(50)] },
+    });
+
+    const walk = await walkFromPlaylist(client, {
+      playlistId: 42,
+      maxSeeds: 3,
+      similarPerArtist: 1,
+      depth: 1,
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([50]);
+    expect(client.getArtistTopTracks).not.toHaveBeenCalled();
   });
 });
 

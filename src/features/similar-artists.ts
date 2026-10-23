@@ -100,23 +100,48 @@ export interface ResolveSimilarResult {
   truncated: boolean;
 }
 
-/** A node of the walk before its tracks are fetched. */
-type Found = Omit<SimilarArtist, "tracks" | "excluded">;
+/** An artist found by the walk, before its tracks are fetched. */
+export type FoundArtist = Omit<SimilarArtist, "tracks" | "excluded">;
+
+/** An artist with the top tracks fetched for it. */
+export interface ArtistTracks {
+  artist: Artist;
+  tracks: Track[];
+  excluded: ExcludedTrack[];
+}
 
 /**
  * Walk the similar-artists graph from the seeds, then fetch every found
- * artist's top tracks.
- *
- * Each level looks up the previous level's artists (through a bounded pool, so
- * results stay in input order) and takes, for each, the first
- * `similarPerArtist` candidates not already seen. Seeds and `skipArtistIds`
- * are never suggested.
+ * artist's top tracks: {@link walkSimilarArtists} then {@link fetchArtistTracks}.
  */
 export async function resolveSimilarArtists(
   client: SimilarArtistsClient,
   options: ResolveSimilarOptions,
 ): Promise<ResolveSimilarResult> {
-  const filter = options.filter ?? NO_FILTER;
+  const { found, truncated } = await walkSimilarArtists(client, options);
+  const fetched = await fetchArtistTracks(
+    client,
+    found.map((node) => node.artist),
+    options.tracksPerSimilar,
+    options.filter,
+  );
+  return { ...attachTracks(found, fetched), truncated };
+}
+
+/**
+ * Walk the similar-artists graph breadth-first from the seeds, without
+ * fetching any tracks.
+ *
+ * Each level looks up the previous level's artists (through a bounded pool, so
+ * results stay in input order) and takes, for each, the first
+ * `similarPerArtist` candidates not already seen. Seeds and `skipArtistIds`
+ * are never suggested. The result is grouped by seed (in seed order), level by
+ * level within a seed.
+ */
+export async function walkSimilarArtists(
+  client: Pick<SimilarArtistsClient, "getSimilarArtists">,
+  options: Omit<ResolveSimilarOptions, "tracksPerSimilar" | "filter">,
+): Promise<{ found: FoundArtist[]; truncated: boolean }> {
   const maxArtists = options.maxArtists ?? MAX_SIMILAR_ARTISTS;
   const candidateLimit = Math.min(options.similarPerArtist + SPARE_CANDIDATES, MAX_CANDIDATES);
 
@@ -124,7 +149,7 @@ export async function resolveSimilarArtists(
     ...options.seeds.map((seed) => seed.id),
     ...(options.skipArtistIds ?? []),
   ]);
-  const found: Found[] = [];
+  const found: FoundArtist[] = [];
   let truncated = false;
   let frontier = options.seeds.map((seed) => ({ artist: seed, seed }));
 
@@ -161,32 +186,67 @@ export async function resolveSimilarArtists(
   const ordered = [...found].sort(
     (a, b) => (seedOrder.get(a.seed.id) ?? 0) - (seedOrder.get(b.seed.id) ?? 0),
   );
+  return { found: ordered, truncated };
+}
 
-  const withTracks = await mapWithConcurrency(ordered, DEFAULT_CONCURRENCY, async (node) => ({
-    ...node,
-    ...(await fetchTopTracks(client, node.artist.id, options.tracksPerSimilar, filter)),
+/**
+ * Fetch each artist's top tracks (in input order, through a bounded pool),
+ * leaving out artists Qobuz returned no tracks for and flagging short ones.
+ */
+export async function fetchArtistTracks(
+  client: Pick<SimilarArtistsClient, "getArtistTopTracks">,
+  artists: readonly Artist[],
+  tracksPerArtist: number,
+  filter: TrackFilter = NO_FILTER,
+): Promise<{
+  fetched: ArtistTracks[];
+  emptyArtists: UnderfilledArtist[];
+  partialArtists: UnderfilledArtist[];
+}> {
+  const outcomes = await mapWithConcurrency(artists, DEFAULT_CONCURRENCY, async (artist) => ({
+    artist,
+    ...(await fetchTopTracks(client, artist.id, tracksPerArtist, filter)),
   }));
-
-  const similar: SimilarArtist[] = [];
+  const fetched: ArtistTracks[] = [];
   const emptyArtists: UnderfilledArtist[] = [];
   const partialArtists: UnderfilledArtist[] = [];
-  for (const entry of withTracks) {
+  for (const entry of outcomes) {
     const flag: UnderfilledArtist = {
       query: entry.artist.name,
       artist: entry.artist,
       trackCount: entry.tracks.length,
-      requested: options.tracksPerSimilar,
+      requested: tracksPerArtist,
     };
     if (entry.tracks.length === 0 && entry.excluded.length === 0) {
       emptyArtists.push(flag);
       continue;
     }
-    similar.push(entry);
-    if (entry.tracks.length < options.tracksPerSimilar) {
+    fetched.push(entry);
+    if (entry.tracks.length < tracksPerArtist) {
       partialArtists.push(flag);
     }
   }
-  return { similar, emptyArtists, partialArtists, truncated };
+  return { fetched, emptyArtists, partialArtists };
+}
+
+/** Join walked artists with their fetched tracks, dropping those with none. */
+function attachTracks(
+  found: readonly FoundArtist[],
+  result: Awaited<ReturnType<typeof fetchArtistTracks>>,
+): Omit<ResolveSimilarResult, "truncated"> {
+  const byId = new Map(result.fetched.map((entry) => [entry.artist.id, entry]));
+  const similar: SimilarArtist[] = [];
+  for (const node of found) {
+    const entry = byId.get(node.artist.id);
+    if (entry !== undefined) {
+      similar.push({ ...node, tracks: entry.tracks, excluded: entry.excluded });
+    }
+  }
+  return {
+    similar,
+    emptyArtists: result.emptyArtists,
+    partialArtists: result.partialArtists,
+  };
 }
 
 /**
@@ -260,29 +320,34 @@ export interface WalkOptions {
   filter?: TrackFilter;
 }
 
-/** A reviewable plan: the seeds (with any tracks of their own) and what was found. */
-export interface SimilarPlan {
+/** The walk of a plan: seeds and the artists found, before their tracks are fetched. */
+export interface SimilarWalk {
   /** Seeds in input order; `tracks` is empty when none were wanted or available. */
   seeds: ResolvedArtistTracks[];
-  similar: SimilarArtist[];
+  found: FoundArtist[];
   /** Seed names that matched no artist. */
   unresolvedArtists: string[];
-  /** Seeds and similar artists Qobuz returned no tracks for. */
+  /** Seeds Qobuz returned no tracks for. */
   emptyArtists: UnderfilledArtist[];
-  /** Seeds and similar artists with fewer tracks than requested. */
+  /** Seeds with fewer tracks than requested. */
   partialArtists: UnderfilledArtist[];
   truncated: boolean;
 }
 
+/** A reviewable plan: the seeds (with any tracks of their own) and what was found. */
+export interface SimilarPlan extends Omit<SimilarWalk, "found"> {
+  similar: SimilarArtist[];
+}
+
 /**
- * Plan from typed artist names: resolve them (with `tracksPerSeed` of their own
+ * Walk from typed artist names: resolve them (with `tracksPerSeed` of their own
  * top tracks; 0 for none), then walk their similar artists. A seed with no
  * tracks of its own is flagged but still walked.
  */
-export async function planFromArtists(
+export async function walkFromArtists(
   client: SimilarArtistsClient & ArtistResolverClient,
-  options: WalkOptions & { artists: string[]; tracksPerSeed: number },
-): Promise<SimilarPlan> {
+  options: Omit<WalkOptions, "tracksPerSimilar"> & { artists: string[]; tracksPerSeed: number },
+): Promise<SimilarWalk> {
   const resolved = await resolveArtistTracks(client, {
     artists: options.artists,
     tracksPerArtist: options.tracksPerSeed,
@@ -300,42 +365,83 @@ export async function planFromArtists(
     .map((query) => byQuery.get(query))
     .filter((seed): seed is ResolvedArtistTracks => seed !== undefined);
 
-  const walk = await resolveSimilarArtists(client, {
+  const walk = await walkSimilarArtists(client, {
     ...options,
     seeds: seeds.map((seed) => seed.artist),
   });
   return {
     seeds,
-    similar: walk.similar,
+    found: walk.found,
     unresolvedArtists: resolved.unresolvedArtists,
-    emptyArtists: [...resolved.emptyArtists, ...walk.emptyArtists],
-    partialArtists: [...resolved.partialArtists, ...walk.partialArtists],
+    emptyArtists: resolved.emptyArtists,
+    partialArtists: resolved.partialArtists,
     truncated: walk.truncated,
   };
 }
 
 /**
- * Plan from an existing playlist: seed from its `maxSeeds` most frequent
+ * Walk from an existing playlist: seed from its `maxSeeds` most frequent
  * artists and never suggest an artist already in it. The seeds contribute no
  * tracks (they are already in the playlist).
  */
-export async function planFromPlaylist(
-  client: SimilarArtistsClient & { getPlaylistTracks(playlistId: number): Promise<Track[]> },
-  options: WalkOptions & { playlistId: number; maxSeeds: number },
-): Promise<SimilarPlan> {
+export async function walkFromPlaylist(
+  client: Pick<SimilarArtistsClient, "getSimilarArtists"> & {
+    getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  },
+  options: Omit<WalkOptions, "tracksPerSimilar"> & { playlistId: number; maxSeeds: number },
+): Promise<SimilarWalk> {
   const tracks = await client.getPlaylistTracks(options.playlistId);
   const { seeds, presentIds } = seedsFromPlaylist(tracks, options.maxSeeds);
-  const walk = await resolveSimilarArtists(client, {
+  const walk = await walkSimilarArtists(client, {
     ...options,
     seeds,
     skipArtistIds: presentIds,
   });
   return {
     seeds: seeds.map((artist) => ({ query: artist.name, artist, tracks: [], excluded: [] })),
-    similar: walk.similar,
+    found: walk.found,
     unresolvedArtists: [],
-    emptyArtists: walk.emptyArtists,
-    partialArtists: walk.partialArtists,
+    emptyArtists: [],
+    partialArtists: [],
     truncated: walk.truncated,
+  };
+}
+
+/** {@link walkFromArtists}, then the found artists' tracks: a complete plan. */
+export async function planFromArtists(
+  client: SimilarArtistsClient & ArtistResolverClient,
+  options: WalkOptions & { artists: string[]; tracksPerSeed: number },
+): Promise<SimilarPlan> {
+  return completePlan(client, await walkFromArtists(client, options), options);
+}
+
+/** {@link walkFromPlaylist}, then the found artists' tracks: a complete plan. */
+export async function planFromPlaylist(
+  client: SimilarArtistsClient & { getPlaylistTracks(playlistId: number): Promise<Track[]> },
+  options: WalkOptions & { playlistId: number; maxSeeds: number },
+): Promise<SimilarPlan> {
+  return completePlan(client, await walkFromPlaylist(client, options), options);
+}
+
+async function completePlan(
+  client: SimilarArtistsClient,
+  walk: SimilarWalk,
+  options: WalkOptions,
+): Promise<SimilarPlan> {
+  const result = attachTracks(
+    walk.found,
+    await fetchArtistTracks(
+      client,
+      walk.found.map((node) => node.artist),
+      options.tracksPerSimilar,
+      options.filter,
+    ),
+  );
+  const { found: _found, ...rest } = walk;
+  return {
+    ...rest,
+    similar: result.similar,
+    emptyArtists: [...walk.emptyArtists, ...result.emptyArtists],
+    partialArtists: [...walk.partialArtists, ...result.partialArtists],
   };
 }
