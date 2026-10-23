@@ -39,6 +39,20 @@ export interface SimilarArtistsClient {
  */
 export const MAX_SIMILAR_ARTISTS = 100;
 
+/**
+ * Accepted range and default of each setting, shared by the CLI and the API so
+ * both validate the same way.
+ */
+export const SIMILAR_SETTINGS = {
+  similarPerArtist: { min: 1, max: 20, fallback: 3 },
+  depth: { min: 1, max: 3, fallback: 1 },
+  /** The artist page lists at most 30 top tracks. */
+  tracksPerSimilar: { min: 1, max: 30, fallback: 3 },
+  /** 0 takes no tracks from the seeds themselves. */
+  tracksPerSeed: { min: 0, max: 100, fallback: 5 },
+  maxSeeds: { min: 1, max: 50, fallback: 10 },
+} as const;
+
 /** Spare candidates requested per lookup, to replace ones already used. */
 const SPARE_CANDIDATES = 10;
 

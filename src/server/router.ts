@@ -62,12 +62,19 @@ import {
   type ImportTarget,
   type MatchedItem,
 } from "../features/import-export.js";
+import {
+  planFromArtists,
+  planFromPlaylist,
+  SIMILAR_SETTINGS,
+  type WalkOptions,
+} from "../features/similar-artists.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
 export interface QobuzApiService {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
+  getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
   getUserPlaylists(): Promise<Playlist[]>;
   getPlaylistTracks(playlistId: number): Promise<Track[]>;
   getFavoriteTracks(): Promise<Track[]>;
@@ -170,6 +177,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.method === "POST" && req.path === "/api/album-tracks") {
     return albumTracks(req.body, deps);
   }
+  if (req.method === "POST" && req.path === "/api/similar/resolve") {
+    return resolveSimilar(req.body, deps);
+  }
   if (req.method === "POST" && req.path === "/api/deduplicate/scan") {
     return scan(req.body, deps);
   }
@@ -251,6 +261,31 @@ async function albumTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     input.value.filter,
   );
   return { status: 200, body: result };
+}
+
+/**
+ * Plan a playlist from similar artists, seeded from typed artists or an
+ * existing playlist, without writing. The view commits via `/api/commit`.
+ */
+async function resolveSimilar(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseSimilarInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, walk } = input.value;
+  const plan =
+    source.type === "artists"
+      ? await planFromArtists(deps.service, {
+          ...walk,
+          artists: source.artists,
+          tracksPerSeed: source.tracksPerSeed,
+        })
+      : await planFromPlaylist(deps.service, {
+          ...walk,
+          playlistId: source.playlistId,
+          maxSeeds: source.maxSeeds,
+        });
+  return { status: 200, body: plan };
 }
 
 /** Create a new playlist from the tracks, or add them to an existing one. */
@@ -456,6 +491,122 @@ function parseFilterInput(raw: unknown): Parsed<TrackFilter> {
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
+}
+
+/**
+ * Read an optional integer field, defaulting when absent.
+ * Fails unless it is an integer within [min, max].
+ */
+function intField(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+  bounds: { min: number; max: number; fallback: number },
+): Parsed<number> {
+  const raw = record[key];
+  if (raw === undefined) {
+    return { ok: true, value: bounds.fallback };
+  }
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < bounds.min || raw > bounds.max) {
+    return {
+      ok: false,
+      error: `${label} must be an integer between ${bounds.min} and ${bounds.max}`,
+    };
+  }
+  return { ok: true, value: raw };
+}
+
+type SimilarSource =
+  | { type: "artists"; artists: string[]; tracksPerSeed: number }
+  | { type: "playlist"; playlistId: number; maxSeeds: number };
+
+interface SimilarInput {
+  source: SimilarSource;
+  walk: Required<WalkOptions>;
+}
+
+function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const rawSource = body["source"];
+  if (!isRecord(rawSource)) {
+    return { ok: false, error: "source is required" };
+  }
+  let source: SimilarSource;
+  if (rawSource["type"] === "artists") {
+    if (!Array.isArray(rawSource["artists"])) {
+      return { ok: false, error: "source.artists must be an array" };
+    }
+    const artists = rawSource["artists"]
+      .filter((a): a is string => typeof a === "string")
+      .map((a) => a.trim())
+      .filter((a) => a.length > 0);
+    if (artists.length === 0) {
+      return { ok: false, error: "at least one artist is required" };
+    }
+    const tracksPerSeed = intField(
+      rawSource,
+      "tracksPerSeed",
+      "source.tracksPerSeed",
+      SIMILAR_SETTINGS.tracksPerSeed,
+    );
+    if (!tracksPerSeed.ok) {
+      return tracksPerSeed;
+    }
+    source = { type: "artists", artists, tracksPerSeed: tracksPerSeed.value };
+  } else if (rawSource["type"] === "playlist") {
+    const playlistId = rawSource["playlistId"];
+    if (typeof playlistId !== "number" || !Number.isInteger(playlistId) || playlistId <= 0) {
+      return { ok: false, error: "source.playlistId must be a playlist id" };
+    }
+    const maxSeeds = intField(rawSource, "maxSeeds", "source.maxSeeds", SIMILAR_SETTINGS.maxSeeds);
+    if (!maxSeeds.ok) {
+      return maxSeeds;
+    }
+    source = { type: "playlist", playlistId, maxSeeds: maxSeeds.value };
+  } else {
+    return { ok: false, error: "source.type must be artists or playlist" };
+  }
+
+  const similarPerArtist = intField(
+    body,
+    "similarPerArtist",
+    "similarPerArtist",
+    SIMILAR_SETTINGS.similarPerArtist,
+  );
+  if (!similarPerArtist.ok) {
+    return similarPerArtist;
+  }
+  const depth = intField(body, "depth", "depth", SIMILAR_SETTINGS.depth);
+  if (!depth.ok) {
+    return depth;
+  }
+  const tracksPerSimilar = intField(
+    body,
+    "tracksPerSimilar",
+    "tracksPerSimilar",
+    SIMILAR_SETTINGS.tracksPerSimilar,
+  );
+  if (!tracksPerSimilar.ok) {
+    return tracksPerSimilar;
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return filter;
+  }
+  return {
+    ok: true,
+    value: {
+      source,
+      walk: {
+        similarPerArtist: similarPerArtist.value,
+        depth: depth.value,
+        tracksPerSimilar: tracksPerSimilar.value,
+        filter: filter.value,
+      },
+    },
+  };
 }
 
 interface ResolveInput {
