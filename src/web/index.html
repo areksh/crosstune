@@ -103,6 +103,33 @@
               <span>Top tracks per artist</span>
               <input id="per-artist" type="number" min="1" max="100" value="10" />
             </label>
+            <details class="filters">
+              <summary>Filters</summary>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Exclude tracks matching (one per line)</span>
+                  <textarea
+                    id="exclude-tracks"
+                    rows="3"
+                    placeholder="live&#10;demo&#10;/remix|edit/"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude albums matching (one per line)</span>
+                  <textarea
+                    id="exclude-albums"
+                    rows="3"
+                    placeholder="greatest hits&#10;live at"
+                  ></textarea>
+                </label>
+              </div>
+              <p class="hint">
+                Terms match whole words, ignoring case: "live" skips "Live at
+                Leeds" but not "Alive". Wrap a term in slashes for a regular
+                expression, e.g. /remix|edit/. Excluded tracks are replaced by
+                the artist's next most popular and listed unticked.
+              </p>
+            </details>
             <div class="actions">
               <button id="resolve" type="button">Preview tracks</button>
             </div>
@@ -185,6 +212,38 @@
                 <option value="oldest">oldest release</option>
               </select>
             </label>
+            <details class="filters">
+              <summary>Filters</summary>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Exclude tracks matching (one per line)</span>
+                  <textarea
+                    id="album-exclude-tracks"
+                    rows="3"
+                    placeholder="demo&#10;/instrumental|karaoke/"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude releases matching (one per line)</span>
+                  <textarea
+                    id="album-exclude-albums"
+                    rows="3"
+                    placeholder="live&#10;deluxe"
+                  ></textarea>
+                </label>
+              </div>
+              <label class="field field-inline">
+                <span>Discs to include</span>
+                <input id="album-discs" type="text" placeholder="all" />
+              </label>
+              <p class="hint">
+                Terms match whole words, ignoring case: "live" skips "Live at
+                Leeds" but not "Alive". Wrap a term in slashes for a regular
+                expression, e.g. /remix|edit/. Releases matching a release term
+                are never picked. Tracks matching a track term, or on a disc not
+                listed (e.g. "1" or "1,3-4"), start unticked.
+              </p>
+            </details>
             <div class="actions">
               <button id="resolve-albums" type="button">Find albums</button>
             </div>
@@ -194,10 +253,11 @@
           <section id="albums-preview" class="panel" hidden>
             <h2>Preview</h2>
             <p class="hint">
-              Pick which version of each album to use.
-              <span id="albums-selected-count"></span>
+              Pick which version of each album to use, then fetch the tracks to
+              review them. <span id="albums-selected-count"></span>
             </p>
             <div id="albums-unresolved" class="unresolved" hidden></div>
+            <div id="albums-excluded" class="warning" hidden></div>
             <div id="album-groups"></div>
 
             <h3>Destination</h3>
@@ -236,7 +296,7 @@
             </div>
 
             <div class="actions">
-              <button id="commit-albums" type="button">Create playlist</button>
+              <button id="commit-albums" type="button">Fetch tracks</button>
             </div>
             <p id="commit-albums-error" class="error" hidden></p>
             <p id="commit-albums-result" class="result" hidden></p>

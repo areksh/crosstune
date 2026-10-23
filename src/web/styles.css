@@ -300,6 +300,37 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* A track the filters excluded: listed unticked, with the reason. */
+.track.excluded .title {
+  color: var(--muted);
+}
+
+.track .reason {
+  color: var(--warn);
+  font-size: 0.82rem;
+}
+
+/* Playlist filters: a collapsible block under the main input. */
+
+.filters {
+  margin: 1rem 0;
+}
+
+.filters summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 1rem;
+}
+
+.filters .field-inline input {
+  width: 10rem;
+}
+
 .radio,
 .checkbox {
   display: flex;
@@ -335,9 +366,16 @@ button:disabled {
   color: var(--muted);
 }
 
-/* Fetched and cached, awaiting the final write: locked and slightly dimmed. */
-.album-group.album-ready {
-  opacity: 0.7;
+/* Fetched: the version is locked and the tracks are listed for review. */
+.album-tracks {
+  margin-top: 0.4rem;
+}
+
+.disc-heading {
+  margin: 0.5rem 0 0.15rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .album-group.album-ready .album-status {

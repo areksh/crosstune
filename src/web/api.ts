@@ -14,6 +14,8 @@ export interface Artist {
 export interface Track {
   id: number;
   title: string;
+  version?: string;
+  discNumber?: number;
   artist?: string;
   album?: string;
   albumId?: string;
@@ -22,6 +24,19 @@ export interface Track {
   bitDepth?: number;
   samplingRate?: number;
   releaseDate?: string;
+}
+
+/** Why the server's filter excluded a track (see src/features/track-filter.ts). */
+export type Exclusion =
+  | { kind: "track"; term: string }
+  | { kind: "album"; term: string }
+  | { kind: "disc"; disc: number };
+
+/** The filter sent with playlist requests; the server validates it. */
+export interface FilterInput {
+  excludeTracks: string[];
+  excludeAlbums: string[];
+  discs?: string;
 }
 
 export interface Album {

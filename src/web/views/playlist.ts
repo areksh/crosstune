@@ -2,13 +2,16 @@
  * Playlist-from-artists view.
  *
  * Drives the resolve -> preview -> commit flow: resolve artist names to their
- * top tracks, let the user untick tracks, choose a destination (a new playlist
- * or an existing one), then commit. This is DOM glue; the logic it drives lives
+ * top tracks (minus any the filters exclude, which the server replaces with the
+ * next most popular and reports so they are listed unticked), let the user
+ * untick or re-tick tracks, choose a destination (a new playlist or an
+ * existing one), then commit. This is DOM glue; the logic it drives lives
  * in the tested server modules.
  */
 
-import { api, type Playlist, type Track } from "../api.js";
+import { api, type Exclusion, type Playlist, type Track } from "../api.js";
 import { el, showError } from "../dom.js";
+import { readTerms, trackRow } from "../tracks.js";
 
 interface Artist {
   id: number;
@@ -19,6 +22,7 @@ interface ResolvedArtist {
   query: string;
   artist: Artist;
   tracks: Track[];
+  excluded: { track: Track; exclusion: Exclusion }[];
 }
 
 interface UnderfilledArtist {
@@ -71,6 +75,10 @@ async function onResolve(): Promise<void> {
     const result = await api<ResolveResponse>("POST", "/api/resolve", {
       artists,
       tracksPerArtist,
+      filter: {
+        excludeTracks: readTerms("exclude-tracks"),
+        excludeAlbums: readTerms("exclude-albums"),
+      },
     });
     renderPreview(result);
   } catch (error) {
@@ -147,35 +155,21 @@ function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
   }
   group.appendChild(heading);
 
+  // Kept tracks first, then the excluded ones the filters passed over, unticked.
   for (const track of resolvedArtist.tracks) {
-    group.appendChild(renderTrack(track));
+    group.appendChild(trackRow(track, rowOptions(track)));
+  }
+  for (const { track, exclusion } of resolvedArtist.excluded) {
+    group.appendChild(trackRow(track, { ...rowOptions(track), exclusion }));
   }
   return group;
 }
 
-function renderTrack(track: Track): HTMLElement {
-  const row = document.createElement("label");
-  row.className = "track";
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = true;
-  checkbox.dataset["trackId"] = String(track.id);
-  checkbox.addEventListener("change", updateSelectedCount);
-  row.appendChild(checkbox);
-
-  const title = document.createElement("span");
-  title.className = "title";
-  title.textContent = track.title;
-  row.appendChild(title);
-
-  if (track.album !== undefined) {
-    const meta = document.createElement("span");
-    meta.className = "meta";
-    meta.textContent = track.album;
-    row.appendChild(meta);
-  }
-  return row;
+function rowOptions(track: Track): { meta?: string; onChange: () => void } {
+  return {
+    ...(track.album !== undefined && { meta: track.album }),
+    onChange: updateSelectedCount,
+  };
 }
 
 /** The unique, ticked track ids in display order. */

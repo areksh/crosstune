@@ -1,16 +1,27 @@
 /**
  * Playlist-from-albums view.
  *
- * Drives the resolve -> preview -> commit flow: resolve "Artist - Album" lines
- * to their matching Qobuz releases, let the user pick which version of each to
- * use (defaulting to a global preference), choose a destination (a new playlist
- * or an existing one), then commit. This is DOM glue; the matching and commit
- * logic lives in the tested server modules. The version ranking is mirrored here
- * only so the preview can show and send the chosen release.
+ * Drives the resolve -> pick versions -> review tracks -> commit flow: resolve
+ * "Artist - Album" lines to their matching Qobuz releases (minus any the album
+ * filter excludes), let the user pick which version of each to use (defaulting
+ * to a global preference), fetch the chosen versions' tracks for review --
+ * tracks on unwanted discs or matching a track filter start unticked -- then
+ * write the ticked tracks to a new or existing playlist. This is DOM glue; the
+ * matching, filtering and commit logic lives in the tested server modules. The
+ * version ranking is mirrored here only so the preview can show and send the
+ * chosen release.
  */
 
-import { api, type Album, type Playlist } from "../api.js";
+import {
+  api,
+  type Album,
+  type Exclusion,
+  type FilterInput,
+  type Playlist,
+  type Track,
+} from "../api.js";
 import { el, showError } from "../dom.js";
+import { readTerms, trackRow } from "../tracks.js";
 
 type Preference = "newest" | "oldest" | "highest-quality";
 
@@ -24,6 +35,12 @@ interface ResolvedAlbum {
 interface ResolveResponse {
   resolvedAlbums: ResolvedAlbum[];
   unresolvedAlbums: string[];
+  excludedAlbums: string[];
+}
+
+interface FetchResponse {
+  fetched: { albumId: string; tracks: { track: Track; exclusion?: Exclusion }[] }[];
+  failedAlbumIds?: string[];
 }
 
 type CommitTarget =
@@ -40,15 +57,13 @@ let playlistsLoaded = false;
 let unresolvedAlbums: string[] = [];
 
 /**
- * The destination captured on the first commit click and kept for the whole
- * cycle, so retries after a failed fetch write to the same place. Nothing is
- * written until every album has been fetched, so the playlist is only created
- * once, at the end, in the user's original order.
+ * The filter as it stood when "Find albums" was pressed. The server validated
+ * it then, and track fetches reuse it so the whole review applies one filter.
  */
-let commitTarget: CommitTarget | undefined;
+let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [] };
 
-/** Fetched track ids per album group (keyed by group index), for the final write. */
-const fetchedTracks = new Map<number, number[]>();
+/** True once any fetch has run in this cycle (changes the button wording). */
+let fetchAttempted = false;
 
 /** True once the final write has succeeded, so the cycle is complete. */
 let committed = false;
@@ -67,6 +82,15 @@ function globalPreference(): Preference {
   return el<HTMLSelectElement>("album-prefer").value as Preference;
 }
 
+function readFilter(): FilterInput {
+  const discs = el<HTMLInputElement>("album-discs").value.trim();
+  return {
+    excludeTracks: readTerms("album-exclude-tracks"),
+    excludeAlbums: readTerms("album-exclude-albums"),
+    ...(discs.length > 0 && { discs }),
+  };
+}
+
 async function onResolve(): Promise<void> {
   const button = el<HTMLButtonElement>("resolve-albums");
   const errorNode = el("resolve-albums-error");
@@ -81,13 +105,16 @@ async function onResolve(): Promise<void> {
     return;
   }
 
+  const filter = readFilter();
   button.disabled = true;
   button.textContent = "Loading...";
   try {
     const result = await api<ResolveResponse>("POST", "/api/resolve-albums", {
       entries,
+      filter,
     });
     resolvedAlbums = result.resolvedAlbums;
+    activeFilter = filter;
     renderPreview(result);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -99,13 +126,18 @@ async function onResolve(): Promise<void> {
 
 function renderPreview(result: ResolveResponse): void {
   unresolvedAlbums = result.unresolvedAlbums;
-  const unresolvedNode = el("albums-unresolved");
-  if (result.unresolvedAlbums.length > 0) {
-    unresolvedNode.hidden = false;
-    unresolvedNode.textContent = `Could not find: ${result.unresolvedAlbums.join(", ")}`;
-  } else {
-    unresolvedNode.hidden = true;
-  }
+  showError(
+    el("albums-unresolved"),
+    result.unresolvedAlbums.length > 0
+      ? `Could not find: ${result.unresolvedAlbums.join(", ")}`
+      : undefined,
+  );
+  showError(
+    el("albums-excluded"),
+    result.excludedAlbums.length > 0
+      ? `Every release excluded by your album filter (skipped): ${result.excludedAlbums.join(", ")}`
+      : undefined,
+  );
 
   const groups = el("album-groups");
   groups.textContent = "";
@@ -113,12 +145,9 @@ function renderPreview(result: ResolveResponse): void {
     groups.appendChild(renderAlbumGroup(resolved, index));
   });
 
-  // A fresh preview starts a new commit cycle: the destination is choosable
-  // again, nothing has been fetched or written yet.
-  commitTarget = undefined;
+  // A fresh preview starts a new cycle: nothing fetched or written yet.
+  fetchAttempted = false;
   committed = false;
-  fetchedTracks.clear();
-  setDestinationEnabled(true);
 
   el("albums-preview").hidden = false;
   showError(el("commit-albums-error"), undefined);
@@ -216,8 +245,9 @@ function compareByDate(a: Album, b: Album, wantOldest: boolean): number {
 
 /**
  * Re-select each still-pending album's version to match the global preference.
- * Locked albums (already added, or with no version left) are left untouched, and
- * versions that already failed to fetch (disabled options) are not re-chosen.
+ * Locked albums (already fetched, added, or with no version left) are left
+ * untouched, and versions that already failed to fetch (disabled options) are
+ * not re-chosen.
  */
 function onPreferChange(): void {
   const preference = globalPreference();
@@ -253,6 +283,11 @@ function enabledVersions(group: HTMLElement): Album[] {
   );
 }
 
+/** Every album group, in the order the user entered them. */
+function allGroups(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>(".album-group")];
+}
+
 /**
  * Album groups that still need fetching: not yet fetched ("ready"), written
  * ("added") or exhausted of versions ("unavailable"). Order follows the DOM,
@@ -260,23 +295,47 @@ function enabledVersions(group: HTMLElement): Album[] {
  */
 function pendingGroups(): HTMLElement[] {
   const done = new Set(["ready", "added", "unavailable"]);
-  return [...document.querySelectorAll<HTMLElement>(".album-group")].filter(
-    (group) => !done.has(group.dataset["state"] ?? "pending"),
-  );
+  return allGroups().filter((group) => !done.has(group.dataset["state"] ?? "pending"));
+}
+
+/** Album groups currently in the given state. */
+function groupsWithState(state: string): HTMLElement[] {
+  return allGroups().filter((group) => group.dataset["state"] === state);
+}
+
+/** The unique, ticked track ids across all fetched albums, in display order. */
+function selectedTrackIds(): number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const box of document.querySelectorAll<HTMLInputElement>(
+    "#album-groups .album-tracks input[type=checkbox]:checked",
+  )) {
+    const id = Number(box.dataset["trackId"]);
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 function updateSelectedCount(): void {
-  const count = resolvedAlbums.length;
-  el("albums-selected-count").textContent = `${count} album${count === 1 ? "" : "s"} selected.`;
-  el<HTMLButtonElement>("commit-albums").disabled = count === 0;
+  const node = el("albums-selected-count");
+  if (groupsWithState("ready").length > 0) {
+    const count = selectedTrackIds().length;
+    node.textContent = `${count} track${count === 1 ? "" : "s"} ticked.`;
+  } else {
+    const count = resolvedAlbums.length;
+    node.textContent = `${count} album${count === 1 ? "" : "s"} selected.`;
+  }
+  updateCommitButton();
 }
 
 function onTargetChange(): void {
   const target = selectedTarget();
   el("album-new-fields").hidden = target !== "new";
   el("album-existing-fields").hidden = target !== "existing";
-  el<HTMLButtonElement>("commit-albums").textContent =
-    target === "new" ? "Create playlist" : "Add to playlist";
+  updateCommitButton();
   if (target === "existing") {
     void loadPlaylists();
   }
@@ -320,14 +379,14 @@ async function loadPlaylists(): Promise<void> {
 }
 
 /**
- * Fetch the pending albums' tracks, and once nothing is left to retry, write the
- * whole playlist in one go.
+ * Fetch the pending albums' tracks for review, or -- once nothing is left to
+ * fetch -- write the ticked tracks.
  *
- * Nothing is written to Qobuz until *every* album has been fetched. Successful
- * albums are cached and locked; failed ones drop to their next-best version for
- * the user to retry. Only when no album is still pending do we assemble the
- * cached tracks in the user's original order and create/add the playlist, so a
- * retried album keeps its place instead of being appended after a partial write.
+ * Nothing is written to Qobuz until every album has been fetched and the user
+ * presses the button again. Successful albums show their tracks and lock their
+ * version; failed ones drop to their next-best version for the user to retry.
+ * The final write takes the ticked tracks in the user's original album order,
+ * so a retried album keeps its place.
  */
 async function onCommit(): Promise<void> {
   const button = el<HTMLButtonElement>("commit-albums");
@@ -335,82 +394,63 @@ async function onCommit(): Promise<void> {
   const resultNode = el("commit-albums-result");
   showError(errorNode, undefined);
 
-  // Capture the destination on the first click and keep it for the whole cycle.
-  if (commitTarget === undefined) {
-    const target = buildTarget();
-    if (target === undefined) {
-      showError(errorNode, "Choose a destination.");
-      return;
-    }
-    commitTarget = target;
-  }
-
   button.disabled = true;
   try {
-    const toFetch = pendingGroups()
-      .map((group) => ({ group, id: selectOf(group).value }))
-      .filter((item) => item.id !== "");
-
-    if (toFetch.length > 0) {
-      button.textContent = "Fetching...";
-      const result = await api<{
-        fetched: { albumId: string; tracks: { track: { id: number } }[] }[];
-        failedAlbumIds?: string[];
-      }>("POST", "/api/album-tracks", { albumIds: toFetch.map((item) => item.id) });
-
-      // Once a fetch has run the destination is fixed for the rest of the cycle.
-      setDestinationEnabled(false);
-
-      const byAlbum = new Map(
-        result.fetched.map((f) => [f.albumId, f.tracks.map((t) => t.track.id)]),
-      );
-      for (const { group, id } of toFetch) {
-        const trackIds = byAlbum.get(id);
-        if (trackIds !== undefined) {
-          fetchedTracks.set(Number(group.dataset["index"]), trackIds);
-          markGroupReady(group);
-        } else {
-          // Not returned means it failed: grey out the version and advance.
-          markGroupFailed(group, id);
-        }
-      }
-    }
-
-    // Write only when nothing is left to retry (unavailable albums are skipped).
-    if (pendingGroups().length === 0) {
-      await writePlaylist(resultNode);
+    if (pendingGroups().length > 0) {
+      await fetchPending(button, resultNode);
     } else {
-      reportFetchProgress(resultNode);
+      await writePlaylist(resultNode);
     }
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {
-    updateCommitButton();
+    updateSelectedCount();
   }
 }
 
-/**
- * Assemble the cached tracks of every fetched album, in the user's original
- * order, and create or add the playlist in a single write.
- */
-async function writePlaylist(node: HTMLElement): Promise<void> {
-  const target = commitTarget!;
-  const trackIds: number[] = [];
-  const seen = new Set<number>();
-  for (const group of document.querySelectorAll<HTMLElement>(".album-group")) {
-    const ids = fetchedTracks.get(Number(group.dataset["index"]));
-    if (ids === undefined) {
-      continue; // an unavailable album with no version that could be fetched
-    }
-    for (const id of ids) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        trackIds.push(id);
-      }
+/** Fetch every pending album's chosen version and show its tracks for review. */
+async function fetchPending(button: HTMLButtonElement, resultNode: HTMLElement): Promise<void> {
+  const toFetch = pendingGroups()
+    .map((group) => ({ group, id: selectOf(group).value }))
+    .filter((item) => item.id !== "");
+  if (toFetch.length === 0) {
+    return;
+  }
+
+  button.textContent = "Fetching...";
+  fetchAttempted = true;
+  const result = await api<FetchResponse>("POST", "/api/album-tracks", {
+    albumIds: toFetch.map((item) => item.id),
+    filter: activeFilter,
+  });
+
+  const byAlbum = new Map(result.fetched.map((f) => [f.albumId, f.tracks]));
+  for (const { group, id } of toFetch) {
+    const tracks = byAlbum.get(id);
+    if (tracks !== undefined) {
+      markGroupReady(group, tracks);
+    } else {
+      // Not returned means it failed: grey out the version and advance.
+      markGroupFailed(group, id);
     }
   }
-  if (trackIds.length === 0) {
+  reportFetchProgress(resultNode);
+}
+
+/** Write the ticked tracks of every fetched album to the chosen destination. */
+async function writePlaylist(node: HTMLElement): Promise<void> {
+  if (groupsWithState("ready").length === 0) {
     showError(el("commit-albums-error"), "None of the albums could be fetched.");
+    return;
+  }
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) {
+    showError(el("commit-albums-error"), "Tick at least one track.");
+    return;
+  }
+  const target = buildTarget();
+  if (target === undefined) {
+    showError(el("commit-albums-error"), "Choose a destination.");
     return;
   }
 
@@ -421,23 +461,55 @@ async function writePlaylist(node: HTMLElement): Promise<void> {
     { target, trackIds },
   );
   committed = true;
-  for (const group of document.querySelectorAll<HTMLElement>(".album-group")) {
-    if (group.dataset["state"] === "ready") {
-      group.dataset["state"] = "added";
-      group.classList.add("album-added");
-      setGroupStatus(group, "Added");
+  for (const group of groupsWithState("ready")) {
+    group.dataset["state"] = "added";
+    group.classList.add("album-added");
+    for (const box of group.querySelectorAll<HTMLInputElement>("input[type=checkbox]")) {
+      box.disabled = true;
     }
+    setGroupStatus(group, "Added");
   }
   reportWrite(node, target, result);
 }
 
-/** Lock an album whose tracks were fetched (cached, awaiting the final write). */
-function markGroupReady(group: HTMLElement): void {
+/** Lock a fetched album's version and list its tracks, grouped by disc. */
+function markGroupReady(
+  group: HTMLElement,
+  tracks: readonly { track: Track; exclusion?: Exclusion }[],
+): void {
   group.dataset["state"] = "ready";
   selectOf(group).disabled = true;
   group.classList.remove("album-failed");
   group.classList.add("album-ready");
-  setGroupStatus(group, "Fetched");
+
+  const list = document.createElement("div");
+  list.className = "album-tracks";
+  const discs = new Set(tracks.map(({ track }) => track.discNumber));
+  let currentDisc: number | undefined;
+  for (const { track, exclusion } of tracks) {
+    if (discs.size > 1 && track.discNumber !== currentDisc) {
+      currentDisc = track.discNumber;
+      const heading = document.createElement("div");
+      heading.className = "disc-heading";
+      heading.textContent = currentDisc === undefined ? "Other" : `Disc ${currentDisc}`;
+      list.appendChild(heading);
+    }
+    list.appendChild(
+      trackRow(track, {
+        ...(exclusion !== undefined && { exclusion }),
+        onChange: updateSelectedCount,
+      }),
+    );
+  }
+  group.appendChild(list);
+
+  const excluded = tracks.filter((t) => t.exclusion !== undefined).length;
+  setGroupStatus(
+    group,
+    excluded > 0
+      ? `Fetched ${tracks.length} tracks; ${excluded} excluded by your filters (unticked)`
+      : `Fetched ${tracks.length} tracks`,
+  );
 }
 
 /**
@@ -469,62 +541,42 @@ function markGroupFailed(group: HTMLElement, triedId: string): void {
   }
 }
 
-/** Show or update a short status line under an album group. */
+/** Show or update a short status line under an album's version picker. */
 function setGroupStatus(group: HTMLElement, text: string): void {
   let status = group.querySelector<HTMLElement>(".album-status");
   if (status === null) {
     status = document.createElement("div");
     status.className = "album-status";
-    group.appendChild(status);
+    selectOf(group).insertAdjacentElement("afterend", status);
   }
   status.textContent = text;
 }
 
-/** Enable or disable the destination controls (locked once a commit has run). */
-function setDestinationEnabled(enabled: boolean): void {
-  for (const radio of document.querySelectorAll<HTMLInputElement>(
-    'input[name="album-target"]',
-  )) {
-    radio.disabled = !enabled;
-  }
-  for (const id of ["album-playlist-name", "album-playlist-public", "album-playlist-select"]) {
-    const node = document.getElementById(id) as
-      | HTMLInputElement
-      | HTMLSelectElement
-      | null;
-    if (node !== null) {
-      node.disabled = !enabled;
-    }
-  }
-}
-
-/** The default commit-button label before any fetch has run. */
-function defaultCommitLabel(): string {
+/** The default label for the write, per the chosen destination. */
+function writeLabel(): string {
   return selectedTarget() === "new" ? "Create playlist" : "Add to playlist";
 }
 
 /** Set the commit button's label and enabled state from the remaining work. */
 function updateCommitButton(): void {
   const button = el<HTMLButtonElement>("commit-albums");
-  const total = document.querySelectorAll(".album-group").length;
   if (committed) {
     button.disabled = true;
     button.textContent = "All albums added";
     return;
   }
-  if (total === 0) {
+  if (allGroups().length === 0) {
     button.disabled = true;
-    button.textContent = defaultCommitLabel();
+    button.textContent = "Fetch tracks";
     return;
   }
-  button.disabled = false;
   if (pendingGroups().length > 0) {
-    button.textContent =
-      commitTarget !== undefined ? "Retry failed albums" : defaultCommitLabel();
-  } else {
-    // Everything fetched but the final write has not gone through yet.
-    button.textContent = "Save to playlist";
+    button.disabled = false;
+    button.textContent = fetchAttempted ? "Retry failed albums" : "Fetch tracks";
+    return;
   }
+  button.textContent = writeLabel();
+  button.disabled = groupsWithState("ready").length > 0 && selectedTrackIds().length === 0;
 }
 
 function buildTarget(): CommitTarget | undefined {
@@ -546,20 +598,13 @@ function buildTarget(): CommitTarget | undefined {
   return { type: "existing", playlistId: Number(value) };
 }
 
-/** Album groups currently in the given state. */
-function groupsWithState(state: string): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>(".album-group")].filter(
-    (group) => group.dataset["state"] === state,
-  );
-}
-
 /**
- * Report progress after a fetch round that still has albums to retry: nothing is
- * written yet, some albums are ready, some need another version, some have none.
+ * Report a fetch round: nothing is written yet; some albums are ready for
+ * review, some need another version, some have none.
  */
 function reportFetchProgress(node: HTMLElement): void {
   node.hidden = false;
-  const total = document.querySelectorAll(".album-group").length;
+  const total = allGroups().length;
   const ready = groupsWithState("ready").length;
   const retry = pendingGroups().map(groupName);
   const unavailable = groupsWithState("unavailable").map(groupName);
@@ -567,6 +612,8 @@ function reportFetchProgress(node: HTMLElement): void {
   let text = `Fetched ${ready} of ${total}. Nothing is saved yet.`;
   if (retry.length > 0) {
     text += ` A different version is selected for ${retry.join(", ")} - press Retry.`;
+  } else {
+    text += " Review the tracks, then save.";
   }
   if (unavailable.length > 0) {
     text += ` No other version for ${unavailable.join(", ")} (will be skipped).`;
