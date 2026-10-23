@@ -151,6 +151,12 @@ export interface SimilarArtist {
   via: Artist;
   /** 1 = similar to a seed, 2 = similar to a level-1 artist, and so on. */
   level: number;
+  /**
+   * Every artist this one came up as similar to, `via` first: each walked
+   * artist whose top list reached it (when replacing repeats, including those
+   * that skipped it for a substitute ranked below it).
+   */
+  similarTo: Artist[];
   /** The kept top tracks, most popular first. */
   tracks: Track[];
   /** Tracks the filter excluded, ranked above the last kept one. */
@@ -252,7 +258,7 @@ export async function walkSimilarArtists(
     ...options.seeds.map((seed) => seed.id),
     ...(options.skipArtistIds ?? []),
   ]);
-  const foundIds = new Set<number>();
+  const foundById = new Map<number, FoundArtist>();
   const found: FoundArtist[] = [];
   const appearances: Appearance[] = [];
   let truncated = false;
@@ -269,15 +275,18 @@ export async function walkSimilarArtists(
         if (truncated || taken >= options.similarPerArtist) {
           break;
         }
-        const repeat = included.has(candidate.id) || foundIds.has(candidate.id);
-        if (repeat) {
+        const earlier = foundById.get(candidate.id);
+        if (earlier !== undefined && !earlier.similarTo.some((a) => a.id === node.artist.id)) {
+          earlier.similarTo.push(node.artist);
+        }
+        if (included.has(candidate.id) || earlier !== undefined) {
           if (replaceRepeats) {
             continue;
           }
           // Kept to its own top N: the repeat uses up a slot. An earlier-found
           // similar artist is listed again here; a seed or playlist artist,
           // already in the result, is not.
-          if (foundIds.has(candidate.id)) {
+          if (earlier !== undefined) {
             appearances.push({ artist: candidate, seed: node.seed, via: node.artist, level });
           }
           taken += 1;
@@ -287,9 +296,10 @@ export async function walkSimilarArtists(
           truncated = true;
           break;
         }
-        foundIds.add(candidate.id);
         const appearance = { artist: candidate, seed: node.seed, via: node.artist, level };
-        found.push(appearance);
+        const entry: FoundArtist = { ...appearance, similarTo: [node.artist] };
+        foundById.set(candidate.id, entry);
+        found.push(entry);
         appearances.push(appearance);
         next.push({ artist: candidate, seed: node.seed });
         taken += 1;

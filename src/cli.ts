@@ -535,7 +535,7 @@ function reportSimilarPlan(
       logger.info(
         repeat
           ? `    = ${entry.artist.name} (similar to ${appearance.via.name}; already listed, added once)`
-          : `    + ${entry.artist.name} (similar to ${appearance.via.name}): ${entry.tracks.length} tracks${excludedNote(entry.excluded.length)}`,
+          : `    + ${entry.artist.name} (similar to ${entry.similarTo.map((a) => a.name).join(", ")}): ${entry.tracks.length} tracks${excludedNote(entry.excluded.length)}`,
       );
     }
     for (const id of listed) {

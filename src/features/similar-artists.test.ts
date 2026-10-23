@@ -137,6 +137,12 @@ describe("resolveSimilarArtists", () => {
       [1, 12],
       [2, 21],
     ]);
+    // 11 still ranked in seed 2's list (above its substitute), so it is similar to both.
+    expect(result.similar.map((s) => [s.artist.id, s.similarTo.map((a) => a.id)])).toEqual([
+      [11, [1, 2]],
+      [12, [1]],
+      [21, [2]],
+    ]);
   });
 
   it("by default keeps each artist to its own top N, listing a shared artist under each", async () => {
@@ -162,8 +168,9 @@ describe("resolveSimilarArtists", () => {
       [1, 1, 11],
       [2, 2, 11],
     ]);
-    // A shared artist's tracks are fetched once.
+    // A shared artist's tracks are fetched once, and it records both artists.
     expect(client.getArtistTopTracks).toHaveBeenCalledTimes(1);
+    expect(result.similar[0]?.similarTo.map((a) => a.id)).toEqual([1, 2]);
   });
 
   it("expands a repeated artist only once, and lists repeats in each branch", async () => {
@@ -191,6 +198,11 @@ describe("resolveSimilarArtists", () => {
       [12, 11, 2],
     ]);
     expect(client.getSimilarArtists).toHaveBeenCalledTimes(4); // 1, 11, 12, then 111 at depth 3
+    expect(result.similar.map((s) => [s.artist.id, s.similarTo.map((a) => a.id)])).toEqual([
+      [11, [1, 12]],
+      [12, [1]],
+      [111, [11, 12]],
+    ]);
   });
 
   it("shows a repeat under every seed it comes up for, grouped by seed", async () => {
