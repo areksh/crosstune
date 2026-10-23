@@ -423,6 +423,35 @@ export class QobuzClient {
   }
 
   /**
+   * Fetch the artists Qobuz lists as similar to an artist, most similar first.
+   *
+   * Uses `/artist/getSimilarArtists`, which is paginated and runs far deeper
+   * than the five similar artists embedded in `/artist/page` (dozens for a
+   * well-known artist). Only the first page of `limit` is requested.
+   *
+   * @param artistId The Qobuz artist id.
+   * @param limit Maximum artists to return.
+   */
+  async getSimilarArtists(artistId: number, limit: number): Promise<Artist[]> {
+    const response = await this.#signedGet(
+      "artistgetSimilarArtists",
+      paths.artistGetSimilarArtists,
+      [
+        ["artist_id", String(artistId)],
+        ["limit", String(limit)],
+        ["offset", "0"],
+      ],
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `artist/getSimilarArtists failed with HTTP ${response.status}`,
+      );
+    }
+    return parseArtists(await response.json());
+  }
+
+  /**
    * Fetch an artist's most popular tracks.
    *
    * Uses `/artist/page`, whose `top_tracks` are ordered by popularity (the same

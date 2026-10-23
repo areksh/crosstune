@@ -15,6 +15,7 @@ export const paths = {
   trackSearch: "/track/search",
   artistSearch: "/artist/search",
   artistPage: "/artist/page",
+  artistGetSimilarArtists: "/artist/getSimilarArtists",
   albumSearch: "/album/search",
   albumGet: "/album/get",
   playlistGet: "/playlist/get",

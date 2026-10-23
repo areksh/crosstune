@@ -33,6 +33,8 @@ interface FetchOptions {
   favorites?: unknown;
   artistSearch?: unknown;
   artistTracks?: unknown;
+  similarArtists?: unknown;
+  similarArtistsStatus?: number;
   albumSearch?: unknown;
   trackSearch?: unknown;
   playlist?: unknown;
@@ -91,6 +93,11 @@ function makeFetch(options: FetchOptions): typeof fetch {
     if (path.endsWith("/artist/page")) {
       return new Response(JSON.stringify(options.artistTracks ?? {}), {
         status: 200,
+      });
+    }
+    if (path.endsWith("/artist/getSimilarArtists")) {
+      return new Response(JSON.stringify(options.similarArtists ?? {}), {
+        status: options.similarArtistsStatus ?? 200,
       });
     }
     if (path.endsWith("/album/search")) {
@@ -450,6 +457,44 @@ describe("QobuzClient.searchArtists", () => {
     expect(request?.url.searchParams.get("limit")).toBe("5");
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
     expect(request?.headers.get("X-App-Id")).toBe("100200300");
+  });
+});
+
+describe("QobuzClient.getSimilarArtists", () => {
+  it("signs the lookup and returns the similar artists, most similar first", async () => {
+    const { client, recorded } = await initedClient({
+      similarArtists: {
+        artists: {
+          total: 67,
+          items: [
+            { id: 11, name: "Screaming Trees" },
+            { id: 12, name: "Mudhoney" },
+          ],
+        },
+      },
+    });
+
+    const artists = await client.getSimilarArtists(42, 2);
+
+    expect(artists).toEqual([
+      { id: 11, name: "Screaming Trees" },
+      { id: 12, name: "Mudhoney" },
+    ]);
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/artist/getSimilarArtists"),
+    );
+    expect(request?.url.searchParams.get("artist_id")).toBe("42");
+    expect(request?.url.searchParams.get("limit")).toBe("2");
+    expect(request?.url.searchParams.get("offset")).toBe("0");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("raises an api-response error when the lookup fails", async () => {
+    const { client } = await initedClient({ similarArtistsStatus: 500 });
+
+    await expect(client.getSimilarArtists(42, 5)).rejects.toMatchObject({
+      kind: "api-response",
+    });
   });
 });
 

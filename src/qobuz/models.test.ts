@@ -104,6 +104,16 @@ describe("parseTracks", () => {
     ]);
   });
 
+  it("reads the performer id as the track's artist id", () => {
+    // playlist/get tracks carry performer { id, name }.
+    const json = {
+      tracks: { items: [{ id: 1, title: "Changes", performer: { id: 66713, name: "Jeff Mills" } }] },
+    };
+    expect(parseTracks(json)).toEqual([
+      { id: 1, title: "Changes", artist: "Jeff Mills", artistId: 66713 },
+    ]);
+  });
+
   it("reads the version and disc number of an album/get track", () => {
     // album/get track items carry media_number (the disc) and a nullable version.
     const json = {

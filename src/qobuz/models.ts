@@ -23,9 +23,9 @@ export interface Track {
   /** Track artist (performer) name, when present. */
   artist?: string;
   /**
-   * Id of the track's main (performer) artist, when present. Set from an
-   * artist/page response and used to tell an artist's own recordings apart from
-   * covers of their songs by other performers.
+   * Id of the track's main (performer) artist, when present. Used to tell an
+   * artist's own recordings apart from covers on an artist page, and to find a
+   * playlist's artists.
    */
   artistId?: number;
   /** International Standard Recording Code, when present. */
@@ -282,8 +282,13 @@ function parseTrack(item: unknown): Track | undefined {
   }
 
   const performer = item["performer"];
-  if (isRecord(performer) && typeof performer["name"] === "string") {
-    track.artist = performer["name"];
+  if (isRecord(performer)) {
+    if (typeof performer["name"] === "string") {
+      track.artist = performer["name"];
+    }
+    if (typeof performer["id"] === "number") {
+      track.artistId = performer["id"];
+    }
   }
   if (typeof item["isrc"] === "string") {
     track.isrc = item["isrc"];
