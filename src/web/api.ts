@@ -32,6 +32,16 @@ export type Exclusion =
   | { kind: "album"; term: string }
   | { kind: "disc"; disc: number };
 
+/**
+ * A track the filter excluded from an artist's top tracks, with `position`: its
+ * index among the listed tracks (kept and excluded, most popular first).
+ */
+export interface ExcludedTrack {
+  track: Track;
+  exclusion: Exclusion;
+  position: number;
+}
+
 /** The filter sent with playlist requests; the server validates it. */
 export interface FilterInput {
   excludeTracks: string[];

@@ -12,15 +12,15 @@
  * filtering live in the tested server modules.
  */
 
-import { api, type Artist, type Exclusion, type Playlist, type Track } from "../api.js";
+import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, showError } from "../dom.js";
-import { readTerms, trackRow } from "../tracks.js";
+import { inRankOrder, readTerms, trackRow } from "../tracks.js";
 
 interface SeedGroup {
   query: string;
   artist: Artist;
   tracks: Track[];
-  excluded: { track: Track; exclusion: Exclusion }[];
+  excluded: ExcludedTrack[];
 }
 
 interface SimilarGroup {
@@ -29,7 +29,7 @@ interface SimilarGroup {
   via: Artist;
   level: number;
   tracks: Track[];
-  excluded: { track: Track; exclusion: Exclusion }[];
+  excluded: ExcludedTrack[];
 }
 
 interface UnderfilledArtist {
@@ -372,16 +372,15 @@ function renderSeed(seed: SeedGroup, similar: SimilarGroup[], fromPlaylist: bool
   return group;
 }
 
-/** Kept tracks ticked, then the excluded ones the filters passed over, unticked. */
+/** Tracks in popularity order, the excluded ones unticked where they ranked. */
 function appendTracks(
   parent: HTMLElement,
-  entry: { tracks: Track[]; excluded: { track: Track; exclusion: Exclusion }[] },
+  entry: { tracks: Track[]; excluded: ExcludedTrack[] },
 ): void {
-  for (const track of entry.tracks) {
-    parent.appendChild(trackRow(track, rowOptions(track)));
-  }
-  for (const { track, exclusion } of entry.excluded) {
-    parent.appendChild(trackRow(track, { ...rowOptions(track), exclusion }));
+  for (const { track, exclusion } of inRankOrder(entry.tracks, entry.excluded)) {
+    parent.appendChild(
+      trackRow(track, { ...rowOptions(track), ...(exclusion !== undefined && { exclusion }) }),
+    );
   }
 }
 

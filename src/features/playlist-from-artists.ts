@@ -57,8 +57,12 @@ export interface ExistingPlaylistClient {
 /** The full surface {@link buildPlaylistFromArtists} depends on. */
 export type PlaylistBuilderClient = ArtistResolverClient & PlaylistWriterClient;
 
-/** A track the filter excluded, with the reason. */
-export type ExcludedTrack = Required<FilteredTrack>;
+/**
+ * A track the filter excluded, with the reason and its `position`: the index it
+ * would have among the listed tracks (kept and excluded, most popular first),
+ * so a reviewer can show it, and put it back, where it ranked.
+ */
+export type ExcludedTrack = Required<FilteredTrack> & { position: number };
 
 /** A resolved artist together with the top tracks fetched for it. */
 export interface ResolvedArtistTracks {
@@ -68,7 +72,8 @@ export interface ResolvedArtistTracks {
   tracks: Track[];
   /**
    * Tracks the filter excluded that ranked above the last kept track, most
-   * popular first, so a reviewer can tick one back on. Empty without a filter.
+   * popular first, each with its `position` in that order, so a reviewer can
+   * tick one back on in place. Empty without a filter.
    */
   excluded: ExcludedTrack[];
 }
@@ -271,7 +276,7 @@ function takeTopTracks(
     if (exclusion === undefined) {
       tracks.push(track);
     } else {
-      excluded.push({ track, exclusion });
+      excluded.push({ track, exclusion, position: tracks.length + excluded.length });
     }
   }
   return { tracks, excluded };

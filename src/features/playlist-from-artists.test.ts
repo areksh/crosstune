@@ -317,11 +317,12 @@ describe("resolveArtistTracks with a filter", () => {
     expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, TOP_TRACKS_POOL);
     const [resolved] = result.resolvedArtists;
     expect(resolved?.tracks.map((t) => t.id)).toEqual([101, 103, 105]);
-    // Only the excluded tracks ranked above the last kept one are reported.
+    // Only the excluded tracks ranked above the last kept one are reported,
+    // each with its place in the popularity order among the listed tracks.
     expect(resolved?.excluded).toEqual([
-      { track: popular[0], exclusion: { kind: "track", term: "live" } },
-      { track: popular[2], exclusion: { kind: "track", term: "live" } },
-      { track: popular[4], exclusion: { kind: "track", term: "live" } },
+      { track: popular[0], exclusion: { kind: "track", term: "live" }, position: 0 },
+      { track: popular[2], exclusion: { kind: "track", term: "live" }, position: 2 },
+      { track: popular[4], exclusion: { kind: "track", term: "live" }, position: 4 },
     ]);
     expect(result.partialArtists).toEqual([]);
   });

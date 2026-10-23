@@ -296,7 +296,8 @@ tools; a home page introduces each.
    Optionally open *Filters* to exclude tracks or albums by term (one per line).
 2. Preview the tracks grouped by artist, and untick any you do not want. Tracks
    the filters excluded are replaced by the next most popular, and listed
-   unticked with the reason, so you can tick one back on. Names that matched
+   unticked with the reason where they rank, so you can tick one back on in
+   its place. Names that matched
    nothing, artists Qobuz returned no tracks for (skipped from the list), and
    artists that yielded fewer tracks than requested are each called out above
    the preview.
@@ -333,7 +334,8 @@ tools; a home page introduces each.
    fetched in batches, with progress shown on the button.
 3. Preview: each starting artist is listed with the similar artists found from
    it nested underneath, labelled with who they are similar to. Untick any
-   tracks you do not want; tracks the filters excluded are listed unticked.
+   tracks you do not want; tracks the filters excluded are listed unticked
+   where they rank.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped; when starting from a playlist, that playlist is preselected)
    -- and commit.

@@ -56,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Plain terms match whole words ignoring case, so "live" skips "Live at Leeds"
   but not "Alive"; `/.../` terms are regular expressions. On the CLI these are
   `--exclude-track`, `--exclude-album` and `--discs`. In the web UI they sit
-  under *Filters*, and excluded tracks are listed unticked with the reason
-  rather than hidden. Playlist from artists replaces an excluded track with the
+  under *Filters*, and excluded tracks are listed unticked with the reason, in
+  their place (popularity rank or album order), rather than hidden. Playlist from artists replaces an excluded track with the
   artist's next most popular one; playlist from albums never picks a release
   that matches an album term.
 

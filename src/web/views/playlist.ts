@@ -9,9 +9,9 @@
  * in the tested server modules.
  */
 
-import { api, type Exclusion, type Playlist, type Track } from "../api.js";
+import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, showError } from "../dom.js";
-import { readTerms, trackRow } from "../tracks.js";
+import { inRankOrder, readTerms, trackRow } from "../tracks.js";
 
 interface Artist {
   id: number;
@@ -22,7 +22,7 @@ interface ResolvedArtist {
   query: string;
   artist: Artist;
   tracks: Track[];
-  excluded: { track: Track; exclusion: Exclusion }[];
+  excluded: ExcludedTrack[];
 }
 
 interface UnderfilledArtist {
@@ -155,12 +155,11 @@ function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
   }
   group.appendChild(heading);
 
-  // Kept tracks first, then the excluded ones the filters passed over, unticked.
-  for (const track of resolvedArtist.tracks) {
-    group.appendChild(trackRow(track, rowOptions(track)));
-  }
-  for (const { track, exclusion } of resolvedArtist.excluded) {
-    group.appendChild(trackRow(track, { ...rowOptions(track), exclusion }));
+  // In popularity order, the excluded tracks unticked where they ranked.
+  for (const { track, exclusion } of inRankOrder(resolvedArtist.tracks, resolvedArtist.excluded)) {
+    group.appendChild(
+      trackRow(track, { ...rowOptions(track), ...(exclusion !== undefined && { exclusion }) }),
+    );
   }
   return group;
 }
