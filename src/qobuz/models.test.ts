@@ -104,6 +104,24 @@ describe("parseTracks", () => {
     ]);
   });
 
+  it("reads the version and disc number of an album/get track", () => {
+    // album/get track items carry media_number (the disc) and a nullable version.
+    const json = {
+      tracks: {
+        items: [
+          { id: 1, title: "Hey You", version: "2011 Remaster", media_number: 2 },
+          { id: 2, title: "In the Flesh?", version: null, media_number: 1 },
+          { id: 3, title: "Empty Version", version: "" },
+        ],
+      },
+    };
+    expect(parseTracks(json)).toEqual([
+      { id: 1, title: "Hey You", version: "2011 Remaster", discNumber: 2 },
+      { id: 2, title: "In the Flesh?", discNumber: 1 },
+      { id: 3, title: "Empty Version" },
+    ]);
+  });
+
   it("derives a release date from a released_at timestamp", () => {
     const json = {
       tracks: {
@@ -201,6 +219,7 @@ describe("parseArtistPageTracks", () => {
       {
         id: 627460,
         title: "Glory Box",
+        version: "Album Version",
         artist: "Portishead",
         artistId: 41259,
         isrc: "GBAQT9400066",

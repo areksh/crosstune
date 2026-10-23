@@ -16,6 +16,10 @@ export interface Artist {
 export interface Track {
   id: number;
   title: string;
+  /** Track variant label ("Live", "2011 Remaster", ...), when present. */
+  version?: string;
+  /** Disc (medium) number within its album, when present (album/get tracks). */
+  discNumber?: number;
   /** Track artist (performer) name, when present. */
   artist?: string;
   /**
@@ -222,6 +226,7 @@ function parseArtistPageTrack(item: unknown): Track | undefined {
     return undefined;
   }
   const track: Track = { id: item["id"], title: item["title"] };
+  readVersion(item, track);
 
   const artist = item["artist"];
   if (isRecord(artist)) {
@@ -271,6 +276,10 @@ function parseTrack(item: unknown): Track | undefined {
     return undefined;
   }
   const track: Track = { id: item["id"], title: item["title"] };
+  readVersion(item, track);
+  if (typeof item["media_number"] === "number") {
+    track.discNumber = item["media_number"];
+  }
 
   const performer = item["performer"];
   if (isRecord(performer) && typeof performer["name"] === "string") {
@@ -305,6 +314,13 @@ function parseTrack(item: unknown): Track | undefined {
     track.hires = item["hires"];
   }
   return track;
+}
+
+/** Copy a track's non-empty `version` label (Qobuz sends null when there is none). */
+function readVersion(item: Record<string, unknown>, track: Track): void {
+  if (typeof item["version"] === "string" && item["version"].length > 0) {
+    track.version = item["version"];
+  }
 }
 
 /** Read a release date (YYYY-MM-DD) from an album object, if present. */
