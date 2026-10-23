@@ -21,10 +21,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   "Artist - Album", using every track of each. When an album has several
   versions, choose which to use (newest, oldest, or highest quality). Available
   on the CLI and in the web UI.
-
-Both playlist tools can **exclude** tracks whose title, or whose album's title,
-matches a term (see [Filters](#filters)), and the album tool can keep only
-chosen discs.
+- **Similar artists** -- discover music through Qobuz's similar artists. Start
+  from a list of artists (a new playlist with their tracks and those of artists
+  like them) or from one of your playlists (expand it with artists it does not
+  have yet), walking one to three levels deep. Available on the CLI and in the
+  web UI.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
@@ -32,6 +33,10 @@ chosen discs.
   text or M3U; back up your whole account (favourites and playlists) to a
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
   its id or by search. Available on the CLI and in the web UI.
+
+The playlist tools can **exclude** tracks whose title, or whose album's title,
+matches a term (see [Filters](#filters)), and the album tool can keep only
+chosen discs.
 
 There is also a **local web UI** (`qobuz-helper ui`) hosting these tools, each
 with a preview-and-edit step before anything is changed. More to follow.
@@ -136,6 +141,33 @@ checked against the title and its version label ("Remastered 2011", "Demo"),
 album terms against the album's title (and version, for album releases). A term
 wrapped in slashes, such as `/remix|edit$/`, is a regular expression, also
 case-insensitive. Repeat a flag to add more terms.
+
+```sh
+# Metallica's top tracks, plus 3 tracks from each of 3 similar artists, plus
+# 3 similar to each of those (depth 2), in a new playlist
+npm run dev -- similar-artists --name "Metal Family" --depth 2 "Metallica"
+
+# Only the similar artists, 5 per artist, no live recordings
+npm run dev -- similar-artists --name "Like Portishead" --seed-tracks 0 \
+  --similar 5 --exclude-track live "Portishead"
+
+# Expand a playlist from its 10 most frequent artists (dry run, then --apply)
+npm run dev -- similar-artists --playlist 12345678
+npm run dev -- similar-artists --playlist 12345678 --apply
+```
+
+Options for `similar-artists`: either `--name <name>` with artist names (or
+piped names, one per line), which creates a new playlist, or `--playlist <id>`,
+which adds to that playlist and only reports unless `--apply` is given. Both
+take `--similar N` (similar artists per artist, 1-20, default 3), `--depth D`
+(1-3, default 1: depth 2 also takes artists similar to the similar artists),
+`--tracks M` (top tracks per similar artist, 1-30, default 3), and the
+[filters](#filters) `--exclude-track`/`--exclude-album`. With `--name`:
+`--seed-tracks K` (the given artists' own top tracks, 0-100, default 5; 0 for
+none) and `--public`. With `--playlist`: `--seeds S` (start from its S most
+frequent artists, 1-50, default 10). Each artist is used once, artists already
+in a source playlist are never suggested, and the walk stops at 100 similar
+artists (and says so).
 
 ```sh
 # Report duplicate tracks in a playlist, or across your favourites
@@ -276,6 +308,20 @@ tools; a home page introduces each.
    fetched, the next-best one is selected for you to retry.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped) -- and save the ticked tracks.
+
+**Similar artists:**
+
+1. Start from artists (one per line, with how many of their own top tracks to
+   include) or from one of your playlists (with how many of its most frequent
+   artists to start from). Choose how many similar artists to take per artist,
+   how many levels deep to go, and how many top tracks each similar artist
+   contributes. Optionally open *Filters*.
+2. Preview: each starting artist is listed with the similar artists found from
+   it nested underneath, labelled with who they are similar to. Untick any
+   tracks you do not want; tracks the filters excluded are listed unticked.
+3. Choose a destination -- a new playlist, or an existing one (tracks already in
+   it are skipped; when starting from a playlist, that playlist is preselected)
+   -- and commit.
 
 **Deduplicator:**
 

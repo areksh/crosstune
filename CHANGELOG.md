@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Similar artists: a new tool (CLI `similar-artists` and a web view) that adds
+  the top tracks of the artists Qobuz lists as similar. Start from a list of
+  artists, optionally with some of their own top tracks, to create a playlist;
+  or from one of your playlists, seeded from its most frequent artists, to
+  expand it with artists it does not already have. Choose how many similar
+  artists per artist (up to 20 -- beyond the five Qobuz shows on an artist
+  page), how many levels deep to go (up to 3: depth 2 also takes artists
+  similar to the similar artists), and how many tracks each contributes. Each
+  artist is used once, the walk stops at 100 artists, and the track filters
+  apply.
+
 - Playlist filters. Both playlist tools can exclude tracks whose title (or
   version label) matches a term, and tracks from albums whose title matches a
   term; the album tool can also keep only chosen discs (e.g. "1" or "1,3-4").
