@@ -378,12 +378,20 @@
               <span>Top tracks per similar artist</span>
               <input id="similar-tracks" type="number" min="1" max="30" value="3" />
             </label>
+            <label class="checkbox">
+              <input id="similar-replace-repeats" type="checkbox" />
+              Replace artists that already came up with the next most similar one
+            </label>
             <p class="hint">
               Depth 1 adds artists similar to yours; depth 2 also adds artists
-              similar to those, and so on. Each artist is used once, artists
-              already in a source playlist are never suggested, and the walk
-              stops after the number of similar artists you set. Qobuz lists
-              about 70 similar artists for a well-known artist.
+              similar to those, and so on. By default each artist keeps to its
+              own top matches: one that already came up (one of yours, one
+              already in a source playlist, or one found from another artist)
+              uses up a place and is listed again, but added once. Tick the box
+              above to take the next most similar artist instead -- more
+              artists, but less similar ones. The walk stops after the number of
+              similar artists you set; Qobuz lists about 70 for a well-known
+              artist.
             </p>
             <p id="similar-estimate" class="estimate" hidden></p>
             <details class="filters">

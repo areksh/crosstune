@@ -6,9 +6,11 @@
  * view shows it (a large run must be confirmed). The walk finds the similar
  * artists in one request; their tracks are then fetched in small batches, so
  * no single request runs long enough for the browser to abort it. The preview
- * shows each seed with the similar artists found from it (indented, labelled
- * with who they were found from); the user unticks or re-ticks tracks, chooses
- * a destination, then commits. This is DOM glue; the walk, the estimate and the
+ * shows each seed with the similar artists that came up for it (indented,
+ * labelled with every artist they are similar to). An artist shared between
+ * branches is listed in each place but added once, and its copies' ticks are
+ * kept in sync. The user unticks or re-ticks tracks, chooses a destination,
+ * then commits. This is DOM glue; the walk, the estimate and the
  * filtering live in the tested server modules.
  */
 
@@ -28,8 +30,18 @@ interface SimilarGroup {
   seed: Artist;
   via: Artist;
   level: number;
+  /** Every artist this one came up as similar to, `via` first. */
+  similarTo: Artist[];
   tracks: Track[];
   excluded: ExcludedTrack[];
+}
+
+/** One place a similar artist came up (see the server's `Appearance`). */
+interface Appearance {
+  artist: Artist;
+  seed: Artist;
+  via: Artist;
+  level: number;
 }
 
 interface UnderfilledArtist {
@@ -43,6 +55,7 @@ type FoundArtist = Omit<SimilarGroup, "tracks" | "excluded">;
 interface WalkResponse {
   seeds: SeedGroup[];
   found: FoundArtist[];
+  appearances: Appearance[];
   unresolvedArtists: string[];
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
@@ -78,6 +91,7 @@ const ESTIMATE_INPUTS = [
 interface PlanResponse {
   seeds: SeedGroup[];
   similar: SimilarGroup[];
+  appearances: Appearance[];
   unresolvedArtists: string[];
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
@@ -104,6 +118,7 @@ export function initSimilarView(): void {
     el(id).addEventListener("input", scheduleEstimate);
     el(id).addEventListener("change", scheduleEstimate);
   }
+  el("similar-groups").addEventListener("change", syncCopies);
   scheduleEstimate();
 }
 
@@ -157,6 +172,7 @@ function settingsBody(): { body: Record<string, unknown> } | { missing: string }
       depth: numberInput("similar-depth"),
       maxArtists: numberInput("similar-max-artists"),
       tracksPerSimilar: numberInput("similar-tracks"),
+      replaceRepeats: el<HTMLInputElement>("similar-replace-repeats").checked,
       filter: {
         excludeTracks: readTerms("similar-exclude-tracks"),
         excludeAlbums: readTerms("similar-exclude-albums"),
@@ -275,6 +291,7 @@ async function fetchTracksInBatches(
   return {
     seeds: walk.seeds,
     similar,
+    appearances: walk.appearances,
     unresolvedArtists: walk.unresolvedArtists,
     emptyArtists,
     partialArtists,
@@ -315,11 +332,15 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
 
   const groups = el("similar-groups");
   groups.textContent = "";
+  const byArtist = new Map(plan.similar.map((entry) => [entry.artist.id, entry]));
+  const listed = new Set<number>();
   for (const seed of plan.seeds) {
     groups.appendChild(
       renderSeed(
         seed,
-        plan.similar.filter((entry) => entry.seed.id === seed.artist.id),
+        plan.appearances.filter((a) => a.seed.id === seed.artist.id),
+        byArtist,
+        listed,
         fromPlaylist,
       ),
     );
@@ -336,7 +357,17 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
   updateSelectedCount();
 }
 
-function renderSeed(seed: SeedGroup, similar: SimilarGroup[], fromPlaylist: boolean): HTMLElement {
+/**
+ * A seed with its own tracks and, indented, each similar artist that came up
+ * for it. `listed` collects artists already shown, so a repeat says so.
+ */
+function renderSeed(
+  seed: SeedGroup,
+  appearances: Appearance[],
+  byArtist: ReadonlyMap<number, SimilarGroup>,
+  listed: Set<number>,
+  fromPlaylist: boolean,
+): HTMLElement {
   const group = document.createElement("div");
   group.className = "artist-group";
 
@@ -353,23 +384,42 @@ function renderSeed(seed: SeedGroup, similar: SimilarGroup[], fromPlaylist: bool
   group.appendChild(heading);
   appendTracks(group, seed);
 
-  for (const entry of similar) {
+  for (const appearance of appearances) {
+    const entry = byArtist.get(appearance.artist.id);
+    if (entry === undefined) {
+      continue; // no tracks: called out above the preview
+    }
     const sub = document.createElement("div");
     sub.className = "similar-group";
     const title = document.createElement("h5");
     title.textContent = entry.artist.name;
     const from = document.createElement("span");
     from.className = "matched";
-    from.textContent =
-      entry.level === 1
-        ? ` -- similar to ${entry.via.name}`
-        : ` -- similar to ${entry.via.name} (via ${entry.seed.name})`;
+    const names = entry.similarTo.map((a) => a.name).join(", ");
+    const branch = appearance.level > 1 ? ` (on ${appearance.seed.name}'s branch)` : "";
+    const repeat = listed.has(entry.artist.id) ? " -- also listed above; added once" : "";
+    from.textContent = ` -- similar to ${names}${branch}${repeat}`;
     title.appendChild(from);
     sub.appendChild(title);
     appendTracks(sub, entry);
     group.appendChild(sub);
+    listed.add(entry.artist.id);
   }
   return group;
+}
+
+/** Tick or untick every copy of a track when one copy changes. */
+function syncCopies(event: Event): void {
+  const box = event.target;
+  if (!(box instanceof HTMLInputElement) || box.type !== "checkbox") {
+    return;
+  }
+  for (const other of document.querySelectorAll<HTMLInputElement>(
+    `#similar-groups input[type=checkbox][data-track-id="${box.dataset["trackId"]}"]`,
+  )) {
+    other.checked = box.checked;
+  }
+  updateSelectedCount();
 }
 
 /** Tracks in popularity order, the excluded ones unticked where they ranked. */
