@@ -39,6 +39,12 @@ import {
   type AlbumEntry,
 } from "../features/playlist-from-albums.js";
 import {
+  compileTrackFilter,
+  NO_FILTER,
+  parseDiscList,
+  type TrackFilter,
+} from "../features/track-filter.js";
+import {
   buildBackup,
   collectCollection,
   commitImport,
@@ -193,6 +199,7 @@ async function resolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const result = await resolveArtistTracks(deps.service, {
     artists: input.value.artists,
     tracksPerArtist: input.value.tracksPerArtist,
+    filter: input.value.filter,
   });
   return { status: 200, body: result };
 }
@@ -212,11 +219,13 @@ async function resolveAlbums(body: unknown, deps: ApiDeps): Promise<ApiResponse>
   }
   const result = await resolveAlbumVersions(deps.service, {
     entries: input.value.entries,
+    filter: input.value.filter,
   });
   return {
     status: 200,
     body: {
       resolvedAlbums: result.resolvedAlbums,
+      excludedAlbums: result.excludedAlbums,
       // Lines that were not in the expected format are surfaced alongside the
       // ones that matched nothing, so the user sees every entry accounted for.
       unresolvedAlbums: [...result.unresolvedAlbums, ...input.value.malformed],
@@ -236,7 +245,11 @@ async function albumTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
-  const result = await fetchAlbumTracks(deps.service, input.value.albumIds);
+  const result = await fetchAlbumTracks(
+    deps.service,
+    input.value.albumIds,
+    input.value.filter,
+  );
   return { status: 200, body: result };
 }
 
@@ -397,9 +410,58 @@ async function restore(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/**
+ * Parse the optional `filter` of a playlist request:
+ * `{ excludeTracks?: string[], excludeAlbums?: string[], discs?: string }`,
+ * where `discs` is a list as the user typed it ("1", "1,3-4"). Absent means no
+ * filter; an invalid regex term or disc list is a 400 naming the problem.
+ */
+function parseFilterInput(raw: unknown): Parsed<TrackFilter> {
+  if (raw === undefined) {
+    return { ok: true, value: NO_FILTER };
+  }
+  if (!isRecord(raw)) {
+    return { ok: false, error: "filter must be an object" };
+  }
+  const terms = (key: string): string[] | undefined => {
+    const value = raw[key];
+    if (value === undefined) {
+      return [];
+    }
+    return Array.isArray(value) && value.every((term) => typeof term === "string")
+      ? value
+      : undefined;
+  };
+  const excludeTracks = terms("excludeTracks");
+  const excludeAlbums = terms("excludeAlbums");
+  if (excludeTracks === undefined || excludeAlbums === undefined) {
+    return {
+      ok: false,
+      error: "filter.excludeTracks and filter.excludeAlbums must be arrays of strings",
+    };
+  }
+  const discs = raw["discs"];
+  if (discs !== undefined && typeof discs !== "string") {
+    return { ok: false, error: 'filter.discs must be a string such as "1" or "1,3-4"' };
+  }
+  try {
+    return {
+      ok: true,
+      value: compileTrackFilter({
+        excludeTracks,
+        excludeAlbums,
+        discs: parseDiscList(discs ?? ""),
+      }),
+    };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
 interface ResolveInput {
   artists: string[];
   tracksPerArtist: number;
+  filter: TrackFilter;
 }
 
 function parseResolveInput(body: unknown): Parsed<ResolveInput> {
@@ -433,7 +495,11 @@ function parseResolveInput(body: unknown): Parsed<ResolveInput> {
     }
     tracksPerArtist = raw;
   }
-  return { ok: true, value: { artists, tracksPerArtist } };
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return filter;
+  }
+  return { ok: true, value: { artists, tracksPerArtist, filter: filter.value } };
 }
 
 type CommitTarget =
@@ -497,6 +563,7 @@ interface ResolveAlbumsInput {
   entries: AlbumEntry[];
   /** Input lines that were not in the "Artist - Album" format. */
   malformed: string[];
+  filter: TrackFilter;
 }
 
 function parseResolveAlbumsInput(body: unknown): Parsed<ResolveAlbumsInput> {
@@ -526,11 +593,16 @@ function parseResolveAlbumsInput(body: unknown): Parsed<ResolveAlbumsInput> {
       error: "at least one album in 'Artist - Album' format is required",
     };
   }
-  return { ok: true, value: { entries, malformed } };
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return filter;
+  }
+  return { ok: true, value: { entries, malformed, filter: filter.value } };
 }
 
 interface AlbumTracksInput {
   albumIds: string[];
+  filter: TrackFilter;
 }
 
 function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
@@ -545,7 +617,11 @@ function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
   if (albumIds === undefined || albumIds.length === 0) {
     return { ok: false, error: "at least one album id is required" };
   }
-  return { ok: true, value: { albumIds } };
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return filter;
+  }
+  return { ok: true, value: { albumIds, filter: filter.value } };
 }
 
 type DedupeSource =

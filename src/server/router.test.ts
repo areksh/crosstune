@@ -225,6 +225,113 @@ describe("POST /api/commit", () => {
   });
 });
 
+describe("filter in playlist requests", () => {
+  it("applies a track filter when resolving artists", async () => {
+    const svc = service({
+      searchArtists: vi.fn(async (q: string) => [{ id: 5, name: q }]),
+      getArtistTopTracks: vi.fn(async () => [
+        { id: 100, title: "Roads", version: "Live" },
+        { id: 101, title: "Sour Times" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve", {
+        artists: ["Portishead"],
+        tracksPerArtist: 1,
+        filter: { excludeTracks: ["live"] },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ track: Track }> }>;
+    };
+    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([101]);
+    expect(body.resolvedArtists[0]?.excluded.map((e) => e.track.id)).toEqual([100]);
+  });
+
+  it("drops excluded releases when resolving albums and reports fully excluded ones", async () => {
+    const svc = service({
+      searchAlbums: vi.fn(async () => [
+        { id: "live", title: "Dummy", artist: "Portishead", version: "Live" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", {
+        entries: ["Portishead - Dummy"],
+        filter: { excludeAlbums: ["live"] },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      resolvedAlbums: [],
+      unresolvedAlbums: [],
+      excludedAlbums: ["Portishead - Dummy"],
+    });
+  });
+
+  it("marks tracks outside the disc list when fetching album tracks", async () => {
+    const svc = service({
+      getAlbumTracks: vi.fn(async () => [
+        { id: 1, title: "One", discNumber: 1 },
+        { id: 2, title: "Two", discNumber: 2 },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["a"], filter: { discs: "1" } }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      fetched: [
+        {
+          albumId: "a",
+          tracks: [
+            { track: { id: 1, title: "One", discNumber: 1 } },
+            { track: { id: 2, title: "Two", discNumber: 2 }, exclusion: { kind: "disc", disc: 2 } },
+          ],
+        },
+      ],
+      failedAlbumIds: [],
+    });
+  });
+
+  it.each([
+    ["a non-object filter", "live"],
+    ["non-array terms", { excludeTracks: "live" }],
+    ["non-string terms", { excludeAlbums: [1] }],
+    ["a non-string disc list", { discs: [1] }],
+  ])("rejects %s", async (_label, filter) => {
+    const res = await handleApi(
+      request("POST", "/api/resolve", { artists: ["A"], filter }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an invalid regex term with a message naming it", async () => {
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", {
+        entries: ["A - B"],
+        filter: { excludeTracks: ["/(oops/"] },
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toContain("/(oops/");
+  });
+
+  it("rejects a malformed disc list", async () => {
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["a"], filter: { discs: "two" } }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/disc/i);
+  });
+});
+
 describe("POST /api/resolve-albums", () => {
   it("resolves 'Artist - Album' lines to their matching versions", async () => {
     const svc = service({
