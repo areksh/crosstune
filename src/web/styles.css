@@ -331,6 +331,23 @@ button:disabled {
   width: 10rem;
 }
 
+/* Similar artists: each seed's similar artists sit indented under it. */
+
+.source-toggle {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.similar-group {
+  margin: 0.6rem 0 0.6rem 1.25rem;
+}
+
+.similar-group h5 {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+}
+
 .radio,
 .checkbox {
   display: flex;

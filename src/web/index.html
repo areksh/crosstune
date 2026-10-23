@@ -19,6 +19,9 @@
           <a class="nav-link" data-view="albums" href="#/albums">
             Playlist from albums
           </a>
+          <a class="nav-link" data-view="similar" href="#/similar">
+            Similar artists
+          </a>
           <a class="nav-link" data-view="deduplicate" href="#/deduplicate">
             Deduplicator
           </a>
@@ -57,6 +60,15 @@
                 Give a list of albums as "Artist - Album" and build a playlist
                 from them. When an album has several versions, choose which to
                 use -- newest, oldest, or highest quality.
+              </p>
+              <span class="card-cta">Open tool -&gt;</span>
+            </a>
+            <a class="card" href="#/similar">
+              <h3>Similar artists</h3>
+              <p>
+                Discover music through Qobuz's similar artists. Start from a
+                list of artists or one of your playlists, go one or more levels
+                deep, and add the top tracks of artists like them.
               </p>
               <span class="card-cta">Open tool -&gt;</span>
             </a>
@@ -300,6 +312,155 @@
             </div>
             <p id="commit-albums-error" class="error" hidden></p>
             <p id="commit-albums-result" class="result" hidden></p>
+          </section>
+        </section>
+
+        <!-- Similar artists -->
+        <section id="view-similar" class="view" hidden>
+          <header class="view-header">
+            <h1>Similar artists</h1>
+            <p class="lede">
+              Start from a list of artists or one of your playlists, and add the
+              top tracks of the artists Qobuz lists as similar to them.
+            </p>
+          </header>
+
+          <section class="panel">
+            <div class="source-toggle">
+              <label class="radio">
+                <input type="radio" name="similar-source" value="artists" checked />
+                Start from artists
+              </label>
+              <label class="radio">
+                <input type="radio" name="similar-source" value="playlist" />
+                Start from a playlist
+              </label>
+            </div>
+            <div id="similar-artists-fields">
+              <label class="field">
+                <span>Artists (one per line)</span>
+                <textarea
+                  id="similar-artists"
+                  rows="6"
+                  placeholder="Metallica&#10;Portishead"
+                ></textarea>
+              </label>
+              <label class="field field-inline">
+                <span>Their own top tracks (0 for none)</span>
+                <input id="similar-seed-tracks" type="number" min="0" max="100" value="5" />
+              </label>
+            </div>
+            <div id="similar-playlist-fields" hidden>
+              <label class="field">
+                <span>Playlist</span>
+                <select id="similar-source-playlist">
+                  <option value="">Loading...</option>
+                </select>
+              </label>
+              <label class="field field-inline">
+                <span>Start from its most frequent artists, up to</span>
+                <input id="similar-max-seeds" type="number" min="1" max="50" value="10" />
+              </label>
+            </div>
+            <label class="field field-inline">
+              <span>Similar artists per artist</span>
+              <input id="similar-per-artist" type="number" min="1" max="20" value="3" />
+            </label>
+            <label class="field field-inline">
+              <span>Depth</span>
+              <input id="similar-depth" type="number" min="1" max="3" value="1" />
+            </label>
+            <label class="field field-inline">
+              <span>Top tracks per similar artist</span>
+              <input id="similar-tracks" type="number" min="1" max="30" value="3" />
+            </label>
+            <p class="hint">
+              Depth 1 adds artists similar to yours; depth 2 also adds artists
+              similar to those, and so on. Each artist is used once, and at most
+              100 similar artists are taken. Artists already in a source
+              playlist are never suggested.
+            </p>
+            <details class="filters">
+              <summary>Filters</summary>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Exclude tracks matching (one per line)</span>
+                  <textarea
+                    id="similar-exclude-tracks"
+                    rows="3"
+                    placeholder="live&#10;demo&#10;/remix|edit/"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude albums matching (one per line)</span>
+                  <textarea
+                    id="similar-exclude-albums"
+                    rows="3"
+                    placeholder="greatest hits&#10;live at"
+                  ></textarea>
+                </label>
+              </div>
+              <p class="hint">
+                Terms match whole words, ignoring case: "live" skips "Live at
+                Leeds" but not "Alive". Wrap a term in slashes for a regular
+                expression, e.g. /remix|edit/. Excluded tracks are replaced by
+                the artist's next most popular and listed unticked.
+              </p>
+            </details>
+            <div class="actions">
+              <button id="resolve-similar" type="button">Find similar artists</button>
+            </div>
+            <p id="resolve-similar-error" class="error" hidden></p>
+          </section>
+
+          <section id="similar-preview" class="panel" hidden>
+            <h2>Preview</h2>
+            <p class="hint">
+              Untick any track you do not want.
+              <span id="similar-selected-count"></span>
+            </p>
+            <div id="similar-unresolved" class="unresolved" hidden></div>
+            <div id="similar-truncated" class="warning" hidden></div>
+            <div id="similar-empty" class="warning" hidden></div>
+            <div id="similar-partial" class="info" hidden></div>
+            <div id="similar-groups"></div>
+
+            <h3>Destination</h3>
+            <div class="destination">
+              <label class="radio">
+                <input type="radio" name="similar-target" value="new" checked />
+                Create a new playlist
+              </label>
+              <div id="similar-new-fields" class="target-fields">
+                <label class="field">
+                  <span>Name</span>
+                  <input id="similar-playlist-name" type="text" placeholder="My playlist" />
+                </label>
+                <label class="checkbox">
+                  <input id="similar-playlist-public" type="checkbox" />
+                  Make it public
+                </label>
+              </div>
+
+              <label class="radio">
+                <input type="radio" name="similar-target" value="existing" />
+                Add to an existing playlist
+              </label>
+              <div id="similar-existing-fields" class="target-fields" hidden>
+                <label class="field">
+                  <span>Playlist</span>
+                  <select id="similar-playlist-select">
+                    <option value="">Loading...</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button id="commit-similar" type="button">Create playlist</button>
+            </div>
+            <p id="commit-similar-error" class="error" hidden></p>
+            <p id="commit-similar-result" class="result" hidden></p>
           </section>
         </section>
 
