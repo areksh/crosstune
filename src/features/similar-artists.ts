@@ -5,9 +5,17 @@
  * artists of an existing playlist ({@link planFromPlaylist}) -- this walks the
  * similar-artists graph breadth-first to a chosen depth, then gathers each
  * similar artist's top tracks. Depth 1 takes artists similar to the seeds;
- * depth 2 also takes artists similar to those, and so on. Every artist appears
- * at most once, attributed to the first artist it was found from, and a
- * user-set cap on the number of artists keeps the walk bounded.
+ * depth 2 also takes artists similar to those, and so on. Each found artist is
+ * fetched and expanded once, and a user-set cap on the number of artists keeps
+ * the walk bounded.
+ *
+ * When an artist's top N includes one that already came up (a seed, an artist
+ * already in a source playlist, or one found from another artist), it is by
+ * default *kept to its own top N*: the repeat uses up a slot and is listed as
+ * an appearance under each artist it came up for, so no artist is padded with
+ * a less similar substitute. With `replaceRepeats` the repeat is skipped and
+ * the next most similar artist taken instead, which yields more distinct
+ * artists at the cost of similarity.
  *
  * Like the other tools this is the *resolve* half: it returns a plan to review.
  * Committing reuses {@link createPlaylistWithTracks} and
@@ -151,7 +159,7 @@ export interface SimilarArtist {
 
 export interface ResolveSimilarOptions {
   seeds: readonly Artist[];
-  /** Similar artists to take per artist expanded (1-20 in the UI). */
+  /** Similar artists to take per artist expanded. */
   similarPerArtist: number;
   /** How many levels to walk (1 = artists similar to the seeds). */
   depth: number;
@@ -162,11 +170,30 @@ export interface ResolveSimilarOptions {
   filter?: TrackFilter;
   /** Cap on similar artists in total (default `SIMILAR_SETTINGS.maxArtists`). */
   maxArtists?: number;
+  /** Replace artists that already came up with the next most similar (default false). */
+  replaceRepeats?: boolean;
+}
+
+/**
+ * One place a similar artist came up: as one of `via`'s top similar artists,
+ * on `seed`'s branch, `level` steps from it. An artist shared between branches
+ * has several appearances but is fetched (and added) once.
+ */
+export interface Appearance {
+  artist: Artist;
+  seed: Artist;
+  via: Artist;
+  level: number;
 }
 
 export interface ResolveSimilarResult {
-  /** Similar artists with at least one track (kept or excluded): by seed, then level. */
+  /**
+   * Distinct similar artists with at least one track (kept or excluded), by
+   * the seed and level they were first found from.
+   */
   similar: SimilarArtist[];
+  /** Every place a similar artist came up: by seed, then discovery order. */
+  appearances: Appearance[];
   /** Similar artists Qobuz returned no tracks for (left out of `similar`). */
   emptyArtists: UnderfilledArtist[];
   /** Similar artists with fewer tracks than requested. */
@@ -193,14 +220,14 @@ export async function resolveSimilarArtists(
   client: SimilarArtistsClient,
   options: ResolveSimilarOptions,
 ): Promise<ResolveSimilarResult> {
-  const { found, truncated } = await walkSimilarArtists(client, options);
+  const { found, appearances, truncated } = await walkSimilarArtists(client, options);
   const fetched = await fetchArtistTracks(
     client,
     found.map((node) => node.artist),
     options.tracksPerSimilar,
     options.filter,
   );
-  return { ...attachTracks(found, fetched), truncated };
+  return { ...attachTracks(found, fetched), appearances, truncated };
 }
 
 /**
@@ -216,14 +243,18 @@ export async function resolveSimilarArtists(
 export async function walkSimilarArtists(
   client: Pick<SimilarArtistsClient, "getSimilarArtists">,
   options: Omit<ResolveSimilarOptions, "tracksPerSimilar" | "filter">,
-): Promise<{ found: FoundArtist[]; truncated: boolean }> {
+): Promise<{ found: FoundArtist[]; appearances: Appearance[]; truncated: boolean }> {
   const maxArtists = options.maxArtists ?? SIMILAR_SETTINGS.maxArtists.fallback;
+  const replaceRepeats = options.replaceRepeats ?? false;
 
-  const seen = new Set<number>([
+  // Already in the result before the walk: never added, never expanded.
+  const included = new Set<number>([
     ...options.seeds.map((seed) => seed.id),
     ...(options.skipArtistIds ?? []),
   ]);
+  const foundIds = new Set<number>();
   const found: FoundArtist[] = [];
+  const appearances: Appearance[] = [];
   let truncated = false;
   let frontier = options.seeds.map((seed) => ({ artist: seed, seed }));
 
@@ -238,15 +269,28 @@ export async function walkSimilarArtists(
         if (truncated || taken >= options.similarPerArtist) {
           break;
         }
-        if (seen.has(candidate.id)) {
+        const repeat = included.has(candidate.id) || foundIds.has(candidate.id);
+        if (repeat) {
+          if (replaceRepeats) {
+            continue;
+          }
+          // Kept to its own top N: the repeat uses up a slot. An earlier-found
+          // similar artist is listed again here; a seed or playlist artist,
+          // already in the result, is not.
+          if (foundIds.has(candidate.id)) {
+            appearances.push({ artist: candidate, seed: node.seed, via: node.artist, level });
+          }
+          taken += 1;
           continue;
         }
         if (found.length >= maxArtists) {
           truncated = true;
           break;
         }
-        seen.add(candidate.id);
-        found.push({ artist: candidate, seed: node.seed, via: node.artist, level });
+        foundIds.add(candidate.id);
+        const appearance = { artist: candidate, seed: node.seed, via: node.artist, level };
+        found.push(appearance);
+        appearances.push(appearance);
         next.push({ artist: candidate, seed: node.seed });
         taken += 1;
       }
@@ -255,12 +299,11 @@ export async function walkSimilarArtists(
   }
 
   // Group by seed (in seed order); within a seed, discovery order is already
-  // level by level.
+  // level by level. The sort is stable.
   const seedOrder = new Map(options.seeds.map((seed, index) => [seed.id, index]));
-  const ordered = [...found].sort(
-    (a, b) => (seedOrder.get(a.seed.id) ?? 0) - (seedOrder.get(b.seed.id) ?? 0),
-  );
-  return { found: ordered, truncated };
+  const bySeed = <T extends { seed: Artist }>(list: T[]): T[] =>
+    [...list].sort((a, b) => (seedOrder.get(a.seed.id) ?? 0) - (seedOrder.get(b.seed.id) ?? 0));
+  return { found: bySeed(found), appearances: bySeed(appearances), truncated };
 }
 
 /**
@@ -307,7 +350,7 @@ export async function fetchArtistTracks(
 function attachTracks(
   found: readonly FoundArtist[],
   result: Awaited<ReturnType<typeof fetchArtistTracks>>,
-): Omit<ResolveSimilarResult, "truncated"> {
+): Omit<ResolveSimilarResult, "truncated" | "appearances"> {
   const byId = new Map(result.fetched.map((entry) => [entry.artist.id, entry]));
   const similar: SimilarArtist[] = [];
   for (const node of found) {
@@ -359,12 +402,15 @@ export function seedsFromPlaylist(
 
 /**
  * Flatten a plan to an ordered, de-duplicated list of track ids: each seed's
- * own tracks, then its similar artists' tracks, seed by seed.
+ * own tracks, then the tracks of the similar artists appearing under it, seed
+ * by seed. A shared artist's tracks land at its first appearance.
  */
 export function similarTrackIds(
   seeds: readonly { artist: Artist; tracks: readonly Track[] }[],
-  similar: readonly { seed: Artist; tracks: readonly Track[] }[],
+  similar: readonly { artist: Artist; tracks: readonly Track[] }[],
+  appearances: readonly { artist: Artist; seed: Artist }[],
 ): number[] {
+  const tracksOf = new Map(similar.map((entry) => [entry.artist.id, entry.tracks]));
   const ids: number[] = [];
   const seen = new Set<number>();
   const add = (tracks: readonly Track[]): void => {
@@ -377,9 +423,9 @@ export function similarTrackIds(
   };
   for (const seed of seeds) {
     add(seed.tracks);
-    for (const entry of similar) {
-      if (entry.seed.id === seed.artist.id) {
-        add(entry.tracks);
+    for (const appearance of appearances) {
+      if (appearance.seed.id === seed.artist.id) {
+        add(tracksOf.get(appearance.artist.id) ?? []);
       }
     }
   }
@@ -393,6 +439,8 @@ export interface WalkOptions {
   tracksPerSimilar: number;
   /** Cap on similar artists in total (default `SIMILAR_SETTINGS.maxArtists`). */
   maxArtists?: number;
+  /** Replace artists that already came up with the next most similar (default false). */
+  replaceRepeats?: boolean;
   filter?: TrackFilter;
 }
 
@@ -400,7 +448,10 @@ export interface WalkOptions {
 export interface SimilarWalk {
   /** Seeds in input order; `tracks` is empty when none were wanted or available. */
   seeds: ResolvedArtistTracks[];
+  /** Distinct artists found, each to be fetched once. */
   found: FoundArtist[];
+  /** Every place a similar artist came up (see {@link Appearance}). */
+  appearances: Appearance[];
   /** Seed names that matched no artist. */
   unresolvedArtists: string[];
   /** Seeds Qobuz returned no tracks for. */
@@ -448,6 +499,7 @@ export async function walkFromArtists(
   return {
     seeds,
     found: walk.found,
+    appearances: walk.appearances,
     unresolvedArtists: resolved.unresolvedArtists,
     emptyArtists: resolved.emptyArtists,
     partialArtists: resolved.partialArtists,
@@ -476,6 +528,7 @@ export async function walkFromPlaylist(
   return {
     seeds: seeds.map((artist) => ({ query: artist.name, artist, tracks: [], excluded: [] })),
     found: walk.found,
+    appearances: walk.appearances,
     unresolvedArtists: [],
     emptyArtists: [],
     partialArtists: [],

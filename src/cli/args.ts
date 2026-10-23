@@ -148,6 +148,8 @@ export interface SimilarArgs {
   maxArtists: number;
   /** Go ahead even when the run is estimated to be very large. */
   yes: boolean;
+  /** Replace artists that already came up with the next most similar. */
+  replaceRepeats: boolean;
   /** Present only when an exclude flag was given. */
   filter?: TrackFilterSpec;
 }
@@ -613,7 +615,8 @@ const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
  * creating a new playlist) or `--playlist <id>` (seed from that playlist's
  * artists and add to it, report-only unless `--apply`). Shared options:
  * `--similar N`, `--depth D`, `--tracks M`, `--max-artists A`, `--yes` (run
- * even when estimated to be very large), and the repeatable
+ * even when estimated to be very large), `--replace-repeats` (replace artists
+ * that already came up with the next most similar), and the repeatable
  * `--exclude-track`/`--exclude-album`. Artists source only: `--seed-tracks K`
  * (0 for none) and `--public`. Playlist source only: `--seeds S` and `--apply`.
  * Ranges and defaults are {@link SIMILAR_SETTINGS}.
@@ -635,6 +638,7 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
   let isPublic = false;
   let apply = false;
   let yes = false;
+  let replaceRepeats = false;
   const used = new Set<string>();
   const positional: string[] = [];
   const filter = new FilterFlags(false);
@@ -681,6 +685,9 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
       case "--yes":
         yes = true;
         break;
+      case "--replace-repeats":
+        replaceRepeats = true;
+        break;
       case "--seed-tracks":
         settings.tracksPerSeed = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSeed);
         i += 1;
@@ -713,6 +720,7 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     tracksPerSimilar: settings.tracksPerSimilar,
     maxArtists: settings.maxArtists,
     yes,
+    replaceRepeats,
     ...(spec !== undefined && { filter: spec }),
   };
 

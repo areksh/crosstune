@@ -321,6 +321,7 @@ describe("parseSimilarArgs", () => {
       tracksPerSimilar: 3,
       maxArtists: 100,
       yes: false,
+      replaceRepeats: false,
     });
   });
 
@@ -339,6 +340,7 @@ describe("parseSimilarArgs", () => {
       "--max-artists",
       "250",
       "--yes",
+      "--replace-repeats",
       "--public",
       "--exclude-track",
       "live",
@@ -357,6 +359,7 @@ describe("parseSimilarArgs", () => {
       tracksPerSimilar: 4,
       maxArtists: 250,
       yes: true,
+      replaceRepeats: true,
       filter: { excludeTracks: ["live"], excludeAlbums: [] },
     });
   });
@@ -369,6 +372,7 @@ describe("parseSimilarArgs", () => {
       tracksPerSimilar: 3,
       maxArtists: 100,
       yes: false,
+      replaceRepeats: false,
     });
     expect(parseSimilarArgs(["--playlist", "42"]).source).toEqual({
       type: "playlist",

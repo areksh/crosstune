@@ -109,7 +109,37 @@ describe("resolveSimilarArtists", () => {
     expect(result.truncated).toBe(true);
   });
 
-  it("never suggests a seed, a skipped artist, or one already chosen", async () => {
+  it("with replaceRepeats, replaces a seed, a skipped or an already-found artist with the next", async () => {
+    const client = stubClient({
+      similar: {
+        1: [artist(2), artist(11), artist(12), artist(13)],
+        2: [artist(11), artist(99), artist(21)],
+      },
+    });
+
+    const result = await resolveSimilarArtists(client, {
+      seeds: [artist(1), artist(2)],
+      similarPerArtist: 2,
+      depth: 1,
+      tracksPerSimilar: 1,
+      skipArtistIds: new Set([99]),
+      replaceRepeats: true,
+    });
+
+    // Seed 1 skips seed 2; seed 2 skips 11 (taken by seed 1) and 99 (skipped).
+    expect(result.similar.map((s) => [s.seed.id, s.artist.id])).toEqual([
+      [1, 11],
+      [1, 12],
+      [2, 21],
+    ]);
+    expect(result.appearances.map((a) => [a.seed.id, a.artist.id])).toEqual([
+      [1, 11],
+      [1, 12],
+      [2, 21],
+    ]);
+  });
+
+  it("by default keeps each artist to its own top N, listing a shared artist under each", async () => {
     const client = stubClient({
       similar: {
         1: [artist(2), artist(11), artist(12), artist(13)],
@@ -125,11 +155,60 @@ describe("resolveSimilarArtists", () => {
       skipArtistIds: new Set([99]),
     });
 
-    // Seed 1 skips seed 2; seed 2 skips 11 (taken by seed 1) and 99 (skipped).
-    expect(result.similar.map((s) => [s.seed.id, s.artist.id])).toEqual([
-      [1, 11],
-      [1, 12],
-      [2, 21],
+    // Seed 1's top two are seed 2 (already included) and 11; seed 2's are 11
+    // (already found) and 99 (already included). Nothing is substituted.
+    expect(result.similar.map((s) => [s.seed.id, s.artist.id])).toEqual([[1, 11]]);
+    expect(result.appearances.map((a) => [a.seed.id, a.via.id, a.artist.id])).toEqual([
+      [1, 1, 11],
+      [2, 2, 11],
+    ]);
+    // A shared artist's tracks are fetched once.
+    expect(client.getArtistTopTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it("expands a repeated artist only once, and lists repeats in each branch", async () => {
+    const client = stubClient({
+      similar: {
+        1: [artist(11), artist(12)],
+        11: [artist(111)],
+        12: [artist(111), artist(11)],
+      },
+    });
+
+    const result = await resolveSimilarArtists(client, {
+      seeds: [artist(1)],
+      similarPerArtist: 2,
+      depth: 3,
+      tracksPerSimilar: 1,
+    });
+
+    expect(result.similar.map((s) => s.artist.id)).toEqual([11, 12, 111]);
+    expect(result.appearances.map((a) => [a.via.id, a.artist.id, a.level])).toEqual([
+      [1, 11, 1],
+      [1, 12, 1],
+      [11, 111, 2],
+      [12, 111, 2],
+      [12, 11, 2],
+    ]);
+    expect(client.getSimilarArtists).toHaveBeenCalledTimes(4); // 1, 11, 12, then 111 at depth 3
+  });
+
+  it("shows a repeat under every seed it comes up for, grouped by seed", async () => {
+    const client = stubClient({
+      similar: { 1: [artist(30)], 2: [artist(20)], 3: [artist(30)] },
+    });
+
+    const result = await resolveSimilarArtists(client, {
+      seeds: [artist(1), artist(2), artist(3)],
+      similarPerArtist: 1,
+      depth: 1,
+      tracksPerSimilar: 1,
+    });
+
+    expect(result.appearances.map((a) => [a.seed.id, a.artist.id])).toEqual([
+      [1, 30],
+      [2, 20],
+      [3, 30],
     ]);
   });
 
@@ -391,11 +470,31 @@ describe("similarTrackIds", () => {
       { artist: artist(2), tracks: [] },
     ];
     const similar = [
-      { artist: artist(11), seed: artist(1), tracks: [...tracksFor(11), tracksFor(1)[0]!] },
-      { artist: artist(21), seed: artist(2), tracks: tracksFor(21) },
+      { artist: artist(11), tracks: [...tracksFor(11), tracksFor(1)[0]!] },
+      { artist: artist(21), tracks: tracksFor(21) },
+    ];
+    const appearances = [
+      { artist: artist(11), seed: artist(1) },
+      { artist: artist(21), seed: artist(2) },
+      // A repeat of 11 under seed 2 adds nothing new.
+      { artist: artist(11), seed: artist(2) },
     ];
 
-    expect(similarTrackIds(seeds, similar)).toEqual([100, 101, 1100, 2100]);
+    expect(similarTrackIds(seeds, similar, appearances)).toEqual([100, 101, 1100, 2100]);
+  });
+
+  it("places a shared artist's tracks at its first appearance in seed order", () => {
+    const seeds = [
+      { artist: artist(1), tracks: [] },
+      { artist: artist(2), tracks: tracksFor(2) },
+    ];
+    const similar = [{ artist: artist(30), tracks: tracksFor(30) }];
+    const appearances = [
+      { artist: artist(30), seed: artist(1) },
+      { artist: artist(30), seed: artist(2) },
+    ];
+
+    expect(similarTrackIds(seeds, similar, appearances)).toEqual([3000, 200]);
   });
 });
 
@@ -476,6 +575,7 @@ describe("planFromPlaylist", () => {
       similarPerArtist: 1,
       depth: 1,
       tracksPerSimilar: 1,
+      replaceRepeats: true,
     });
 
     expect(client.getPlaylistTracks).toHaveBeenCalledWith(42);
@@ -483,6 +583,28 @@ describe("planFromPlaylist", () => {
     expect(plan.seeds.map((s) => [s.artist.id, s.tracks])).toEqual([[5, []]]);
     expect(plan.similar.map((s) => s.artist.id)).toEqual([50]);
     expect(plan.unresolvedArtists).toEqual([]);
+  });
+
+  it("by default counts an artist already in the playlist towards the top N", async () => {
+    const client = stubClient({
+      playlist: [
+        { id: 1, title: "a", artistId: 5, artist: "Five" },
+        { id: 2, title: "b", artistId: 7, artist: "Seven" },
+      ],
+      similar: { 5: [artist(7), artist(50)] },
+    });
+
+    const plan = await planFromPlaylist(client, {
+      playlistId: 42,
+      maxSeeds: 1,
+      similarPerArtist: 1,
+      depth: 1,
+      tracksPerSimilar: 1,
+    });
+
+    // Five's most similar artist is Seven, already in the playlist: nothing new.
+    expect(plan.similar).toEqual([]);
+    expect(plan.appearances).toEqual([]);
   });
 });
 

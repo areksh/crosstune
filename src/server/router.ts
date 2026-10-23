@@ -681,6 +681,10 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
   if (!tracksPerSimilar.ok) {
     return tracksPerSimilar;
   }
+  const replaceRepeats = body["replaceRepeats"] ?? false;
+  if (typeof replaceRepeats !== "boolean") {
+    return { ok: false, error: "replaceRepeats must be a boolean" };
+  }
   const filter = parseFilterInput(body["filter"]);
   if (!filter.ok) {
     return filter;
@@ -694,6 +698,7 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
         depth: depth.value,
         tracksPerSimilar: tracksPerSimilar.value,
         maxArtists: maxArtists.value,
+        replaceRepeats,
         filter: filter.value,
       },
     },

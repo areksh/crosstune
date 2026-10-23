@@ -416,6 +416,40 @@ describe("POST /api/similar/walk", () => {
     expect(body.truncated).toBe(true);
   });
 
+  it("keeps each artist to its own top N unless told to replace repeats", async () => {
+    // Nirvana and Hole both list Mudhoney first.
+    const svc = similarService();
+    svc.getSimilarArtists = vi.fn(async (id: number) =>
+      id === 1
+        ? [{ id: 11, name: "Mudhoney" }]
+        : [{ id: 11, name: "Mudhoney" }, { id: 13, name: "Tad" }],
+    );
+    svc.searchArtists = vi.fn(async (q: string) => [{ id: q === "Nirvana" ? 1 : 2, name: q }]);
+    const walk = async (replaceRepeats?: boolean) =>
+      (
+        await handleApi(
+          request("POST", "/api/similar/walk", {
+            source: { type: "artists", artists: ["Nirvana", "Hole"], tracksPerSeed: 0 },
+            similarPerArtist: 1,
+            ...(replaceRepeats !== undefined && { replaceRepeats }),
+          }),
+          deps({ service: svc }),
+        )
+      ).body as {
+        found: Array<{ artist: Artist }>;
+        appearances: Array<{ artist: Artist; seed: Artist }>;
+      };
+
+    const strict = await walk();
+    expect(strict.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(strict.appearances.map((a) => [a.seed.id, a.artist.id])).toEqual([
+      [1, 11],
+      [2, 11],
+    ]);
+    const replacing = await walk(true);
+    expect(replacing.found.map((f) => f.artist.id)).toEqual([11, 13]);
+  });
+
   it("accepts zero seed tracks", async () => {
     const res = await handleApi(
       request("POST", "/api/similar/walk", {
@@ -443,6 +477,7 @@ describe("POST /api/similar/walk", () => {
     ["a fractional count", { source: { type: "artists", artists: ["A"] }, similarPerArtist: 1.5 }],
     ["31 tracks per similar artist", { source: { type: "artists", artists: ["A"] }, tracksPerSimilar: 31 }],
     ["a bad filter", { source: { type: "artists", artists: ["A"] }, filter: { discs: 1 } }],
+    ["a non-boolean replaceRepeats", { source: { type: "artists", artists: ["A"] }, replaceRepeats: "yes" }],
   ])("rejects %s", async (_label, body) => {
     const res = await handleApi(request("POST", "/api/similar/walk", body), deps());
     expect(res.status).toBe(400);
