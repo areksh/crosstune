@@ -151,6 +151,11 @@ npm run dev -- similar-artists --name "Metal Family" --depth 2 "Metallica"
 npm run dev -- similar-artists --name "Like Portishead" --seed-tracks 0 \
   --similar 5 --exclude-track live "Portishead"
 
+# A big, deep walk: 10 per artist, 3 levels, stopping after 500 artists
+# (refused as very large unless --yes is given)
+npm run dev -- similar-artists --name "Deep Metal" --similar 10 --depth 3 \
+  --max-artists 500 --yes "Metallica"
+
 # Expand a playlist from its 10 most frequent artists (dry run, then --apply)
 npm run dev -- similar-artists --playlist 12345678
 npm run dev -- similar-artists --playlist 12345678 --apply
@@ -159,15 +164,20 @@ npm run dev -- similar-artists --playlist 12345678 --apply
 Options for `similar-artists`: either `--name <name>` with artist names (or
 piped names, one per line), which creates a new playlist, or `--playlist <id>`,
 which adds to that playlist and only reports unless `--apply` is given. Both
-take `--similar N` (similar artists per artist, 1-20, default 3), `--depth D`
-(1-3, default 1: depth 2 also takes artists similar to the similar artists),
-`--tracks M` (top tracks per similar artist, 1-30, default 3), and the
-[filters](#filters) `--exclude-track`/`--exclude-album`. With `--name`:
-`--seed-tracks K` (the given artists' own top tracks, 0-100, default 5; 0 for
-none) and `--public`. With `--playlist`: `--seeds S` (start from its S most
-frequent artists, 1-50, default 10). Each artist is used once, artists already
-in a source playlist are never suggested, and the walk stops at 100 similar
-artists (and says so).
+take `--similar N` (similar artists per artist, default 3; Qobuz lists about 70
+for a well-known artist), `--depth D` (default 1: depth 2 also takes artists
+similar to the similar artists), `--max-artists A` (stop after A similar
+artists, default 100), `--tracks M` (top tracks per similar artist, 1-30,
+default 3), `--yes`, and the [filters](#filters)
+`--exclude-track`/`--exclude-album`. With `--name`: `--seed-tracks K` (the given
+artists' own top tracks, 0-100, default 5; 0 for none) and `--public`. With
+`--playlist`: `--seeds S` (start from its S most frequent artists, 1-50,
+default 10). `--similar`, `--depth` and `--max-artists` have no upper limit.
+Before signing in, the command prints an estimate of the largest outcome, and
+refuses a very large run (over about 1000 tracks or 1500 Qobuz requests) unless
+`--yes` is given. Each artist is used once, artists already in a source playlist
+are never suggested, and the command says when the walk stopped at
+`--max-artists`.
 
 ```sh
 # Report duplicate tracks in a playlist, or across your favourites
@@ -314,12 +324,17 @@ tools; a home page introduces each.
 1. Start from artists (one per line, with how many of their own top tracks to
    include) or from one of your playlists (with how many of its most frequent
    artists to start from). Choose how many similar artists to take per artist,
-   how many levels deep to go, and how many top tracks each similar artist
-   contributes. Optionally open *Filters*.
-2. Preview: each starting artist is listed with the similar artists found from
+   how many levels deep to go, after how many similar artists to stop, and how
+   many top tracks each similar artist contributes. None of these has an upper
+   limit: an estimate under the settings shows the largest possible outcome,
+   turning orange for a very large run, which you are asked to confirm.
+   Optionally open *Filters*.
+2. Find similar artists: the artists are found first, then their tracks are
+   fetched in batches, with progress shown on the button.
+3. Preview: each starting artist is listed with the similar artists found from
    it nested underneath, labelled with who they are similar to. Untick any
    tracks you do not want; tracks the filters excluded are listed unticked.
-3. Choose a destination -- a new playlist, or an existing one (tracks already in
+4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped; when starting from a playlist, that playlist is preselected)
    -- and commit.
 

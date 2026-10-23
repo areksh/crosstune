@@ -41,11 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artists, optionally with some of their own top tracks, to create a playlist;
   or from one of your playlists, seeded from its most frequent artists, to
   expand it with artists it does not already have. Choose how many similar
-  artists per artist (up to 20 -- beyond the five Qobuz shows on an artist
-  page), how many levels deep to go (up to 3: depth 2 also takes artists
-  similar to the similar artists), and how many tracks each contributes. Each
-  artist is used once, the walk stops at 100 artists, and the track filters
-  apply.
+  artists per artist (well beyond the five Qobuz shows on an artist page),
+  how many levels deep to go (depth 2 also takes artists similar to the
+  similar artists), how many tracks each contributes, and after how many
+  similar artists to stop (default 100). None of these has an upper limit;
+  instead the tool estimates the largest outcome as you choose and warns about
+  a very large run (over about 1000 tracks or 1500 Qobuz requests), which the
+  web UI asks you to confirm and the CLI only runs with `--yes`. Each artist is
+  used once and the track filters apply.
 
 - Playlist filters. Both playlist tools can exclude tracks whose title (or
   version label) matches a term, and tracks from albums whose title matches a
