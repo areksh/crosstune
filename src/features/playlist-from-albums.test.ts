@@ -9,6 +9,7 @@ import {
   selectAlbumVersion,
   type AlbumPlaylistBuilderClient,
 } from "./playlist-from-albums.js";
+import { compileTrackFilter } from "./track-filter.js";
 
 /** Build an album, overriding just the fields a test cares about. */
 function album(overrides: Partial<Album> & { id: string }): Album {
@@ -210,11 +211,50 @@ describe("resolveAlbumVersions", () => {
 
     expect(result.resolvedAlbums).toEqual([]);
     expect(result.unresolvedAlbums).toEqual(["Nonexistent - Nothing"]);
+    expect(result.excludedAlbums).toEqual([]);
+  });
+
+  it("drops versions whose title or version matches an album term", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Portishead Dummy": [
+          album({ id: "studio", title: "Dummy", artist: "Portishead" }),
+          album({ id: "live", title: "Dummy", artist: "Portishead", version: "Live" }),
+        ],
+      },
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ artist: "Portishead", album: "Dummy" }],
+      filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+    });
+
+    expect(result.resolvedAlbums[0]?.versions.map((v) => v.id)).toEqual(["studio"]);
+    expect(result.excludedAlbums).toEqual([]);
+  });
+
+  it("reports an album whose every version is excluded, apart from unresolved ones", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Portishead Dummy": [
+          album({ id: "live", title: "Dummy", artist: "Portishead", version: "Live" }),
+        ],
+      },
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ artist: "Portishead", album: "Dummy" }],
+      filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+    });
+
+    expect(result.resolvedAlbums).toEqual([]);
+    expect(result.unresolvedAlbums).toEqual([]);
+    expect(result.excludedAlbums).toEqual(["Portishead - Dummy"]);
   });
 });
 
 describe("fetchAlbumTracks", () => {
-  it("returns each album's track ids in request order, fetching each album once", async () => {
+  it("returns each album's tracks in request order, fetching each album once", async () => {
     const client = stubClient({
       tracksByAlbum: {
         a: [{ id: 1, title: "One" }, { id: 2, title: "Two" }],
@@ -224,11 +264,14 @@ describe("fetchAlbumTracks", () => {
 
     const result = await fetchAlbumTracks(client, ["a", "b", "a"]);
 
-    // Per-album ids are kept separate (dups across albums are the caller's to
-    // resolve when it assembles the final ordered list).
+    // Per-album tracks are kept separate (dups across albums are the caller's
+    // to resolve when it assembles the final ordered list).
     expect(result.fetched).toEqual([
-      { albumId: "a", trackIds: [1, 2] },
-      { albumId: "b", trackIds: [2, 3] },
+      { albumId: "a", tracks: [{ track: { id: 1, title: "One" } }, { track: { id: 2, title: "Two" } }] },
+      {
+        albumId: "b",
+        tracks: [{ track: { id: 2, title: "Two again" } }, { track: { id: 3, title: "Three" } }],
+      },
     ]);
     expect(result.failedAlbumIds).toEqual([]);
     expect(client.getAlbumTracks).toHaveBeenCalledTimes(2);
@@ -250,10 +293,84 @@ describe("fetchAlbumTracks", () => {
     const result = await fetchAlbumTracks(client, ["a", "bad", "b"]);
 
     expect(result.fetched).toEqual([
-      { albumId: "a", trackIds: [1] },
-      { albumId: "b", trackIds: [3] },
+      { albumId: "a", tracks: [{ track: { id: 1, title: "a" } }] },
+      { albumId: "b", tracks: [{ track: { id: 3, title: "b" } }] },
     ]);
     expect(result.failedAlbumIds).toEqual(["bad"]);
+  });
+});
+
+describe("fetchAlbumTracks with a filter", () => {
+  it("marks excluded tracks in album order instead of dropping them", async () => {
+    const tracks: Track[] = [
+      { id: 1, title: "In the Flesh?", discNumber: 1 },
+      { id: 2, title: "Hey You", discNumber: 2 },
+      { id: 3, title: "Demo", discNumber: 1, version: "Demo" },
+    ];
+    const client = stubClient({ tracksByAlbum: { wall: tracks } });
+
+    const result = await fetchAlbumTracks(
+      client,
+      ["wall"],
+      compileTrackFilter({ excludeTracks: ["demo"], discs: [1] }),
+    );
+
+    expect(result.fetched).toEqual([
+      {
+        albumId: "wall",
+        tracks: [
+          { track: tracks[0] },
+          { track: tracks[1], exclusion: { kind: "disc", disc: 2 } },
+          { track: tracks[2], exclusion: { kind: "track", term: "demo" } },
+        ],
+      },
+    ]);
+  });
+});
+
+describe("buildPlaylistFromAlbums with a filter", () => {
+  it("skips excluded versions and tracks and reports what was left out", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Pink Floyd The Wall": [
+          album({ id: "cd", title: "The Wall", artist: "Pink Floyd", bitDepth: 16 }),
+          album({
+            id: "live",
+            title: "The Wall",
+            artist: "Pink Floyd",
+            version: "Live",
+            bitDepth: 24,
+          }),
+        ],
+        "Pink Floyd Pulse": [
+          album({ id: "pulse", title: "Pulse", artist: "Pink Floyd", version: "Live" }),
+        ],
+      },
+      tracksByAlbum: {
+        cd: [
+          { id: 1, title: "In the Flesh?", discNumber: 1 },
+          { id: 2, title: "Hey You", discNumber: 2 },
+        ],
+      },
+    });
+
+    const result = await buildPlaylistFromAlbums(client, {
+      entries: [
+        { artist: "Pink Floyd", album: "The Wall" },
+        { artist: "Pink Floyd", album: "Pulse" },
+      ],
+      playlistName: "Floyd",
+      preference: "highest-quality",
+      filter: compileTrackFilter({ excludeAlbums: ["live"], discs: [1] }),
+    });
+
+    // The hi-res "Live" release would win on quality, but it is excluded.
+    expect(client.getAlbumTracks).toHaveBeenCalledWith("cd");
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(1, [1]);
+    expect(result.resolvedAlbums.map((r) => [r.album.id, r.trackCount, r.excludedCount])).toEqual([
+      ["cd", 1, 1],
+    ]);
+    expect(result.excludedAlbums).toEqual(["Pink Floyd - Pulse"]);
   });
 });
 

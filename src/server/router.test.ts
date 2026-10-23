@@ -275,7 +275,7 @@ describe("POST /api/resolve-albums", () => {
 });
 
 describe("POST /api/album-tracks", () => {
-  it("returns each album's track ids in request order, fetching without writing", async () => {
+  it("returns each album's tracks in request order, fetching without writing", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async (id: string) =>
         id === "a"
@@ -290,8 +290,11 @@ describe("POST /api/album-tracks", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       fetched: [
-        { albumId: "a", trackIds: [1, 2] },
-        { albumId: "b", trackIds: [3] },
+        {
+          albumId: "a",
+          tracks: [{ track: { id: 1, title: "One" } }, { track: { id: 2, title: "Two" } }],
+        },
+        { albumId: "b", tracks: [{ track: { id: 3, title: "Three" } }] },
       ],
       failedAlbumIds: [],
     });
@@ -315,7 +318,7 @@ describe("POST /api/album-tracks", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      fetched: [{ albumId: "a", trackIds: [1] }],
+      fetched: [{ albumId: "a", tracks: [{ track: { id: 1, title: "One" } }] }],
       failedAlbumIds: ["bad"],
     });
   });

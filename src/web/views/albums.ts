@@ -354,14 +354,16 @@ async function onCommit(): Promise<void> {
     if (toFetch.length > 0) {
       button.textContent = "Fetching...";
       const result = await api<{
-        fetched: { albumId: string; trackIds: number[] }[];
+        fetched: { albumId: string; tracks: { track: { id: number } }[] }[];
         failedAlbumIds?: string[];
       }>("POST", "/api/album-tracks", { albumIds: toFetch.map((item) => item.id) });
 
       // Once a fetch has run the destination is fixed for the rest of the cycle.
       setDestinationEnabled(false);
 
-      const byAlbum = new Map(result.fetched.map((f) => [f.albumId, f.trackIds]));
+      const byAlbum = new Map(
+        result.fetched.map((f) => [f.albumId, f.tracks.map((t) => t.track.id)]),
+      );
       for (const { group, id } of toFetch) {
         const trackIds = byAlbum.get(id);
         if (trackIds !== undefined) {
