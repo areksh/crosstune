@@ -271,6 +271,28 @@ describe("resolveArtistTracks", () => {
   });
 });
 
+describe("resolveArtistTracks with no tracks wanted", () => {
+  it("resolves the artists without fetching or flagging them", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: [{ id: 100, title: "Song" }] },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A", "Ghost"],
+      tracksPerArtist: 0,
+    });
+
+    expect(client.getArtistTopTracks).not.toHaveBeenCalled();
+    expect(result.resolvedArtists).toEqual([
+      { query: "A", artist: { id: 1, name: "A" }, tracks: [], excluded: [] },
+    ]);
+    expect(result.unresolvedArtists).toEqual(["Ghost"]);
+    expect(result.emptyArtists).toEqual([]);
+    expect(result.partialArtists).toEqual([]);
+  });
+});
+
 describe("resolveArtistTracks with a filter", () => {
   /** Ten popularity-ordered tracks; even ids are live recordings. */
   const popular: Track[] = Array.from({ length: 10 }, (_v, i) => ({

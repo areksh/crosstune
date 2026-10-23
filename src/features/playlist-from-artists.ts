@@ -103,7 +103,10 @@ export interface ResolveArtistsResult {
 export interface ResolveArtistsOptions {
   /** Artist names to resolve. */
   artists: string[];
-  /** Top tracks to take per artist (default 10). */
+  /**
+   * Top tracks to take per artist (default 10). Zero resolves the artists only:
+   * nothing is fetched and no artist is flagged as empty or partial.
+   */
   tracksPerArtist?: number;
   /** Tracks to exclude; excluded tracks are replaced by the next most popular. */
   filter?: TrackFilter;
@@ -179,6 +182,9 @@ export async function resolveArtistTracks(
       if (artist === undefined) {
         return undefined;
       }
+      if (tracksPerArtist === 0) {
+        return { query, artist, tracks: [], excluded: [] };
+      }
       return {
         query,
         artist,
@@ -198,6 +204,10 @@ export async function resolveArtistTracks(
       return;
     }
     const trackCount = outcome.tracks.length;
+    if (tracksPerArtist === 0) {
+      resolvedArtists.push(outcome);
+      return;
+    }
     if (trackCount === 0 && outcome.excluded.length === 0) {
       // Matched an artist, but Qobuz returned no tracks (commonly a regional
       // restriction). Drop it from the list and flag it separately.
