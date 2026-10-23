@@ -47,8 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   similar artists to stop (default 100). None of these has an upper limit;
   instead the tool estimates the largest outcome as you choose and warns about
   a very large run (over about 1000 tracks or 1500 Qobuz requests), which the
-  web UI asks you to confirm and the CLI only runs with `--yes`. Each artist is
-  used once and the track filters apply.
+  web UI asks you to confirm and the CLI only runs with `--yes`. Each artist
+  keeps to its own top matches: a similar artist that already came up uses up
+  a place and is listed under every artist it is similar to, but added once
+  (in the web UI its copies' ticks stay in sync); `--replace-repeats` (or the
+  web checkbox) substitutes the next most similar artist instead. The track
+  filters apply.
 
 - Playlist filters. Both playlist tools can exclude tracks whose title (or
   version label) matches a term, and tracks from albums whose title matches a

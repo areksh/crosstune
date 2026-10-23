@@ -173,10 +173,16 @@ default 3), `--yes`, and the [filters](#filters)
 artists' own top tracks, 0-100, default 5; 0 for none) and `--public`. With
 `--playlist`: `--seeds S` (start from its S most frequent artists, 1-50,
 default 10). `--similar`, `--depth` and `--max-artists` have no upper limit.
+Each artist keeps to its own top `N`: a similar artist that already came up --
+one of yours, one already in a source playlist, or one found from another artist
+-- uses up a place and is listed again, but added once. `--replace-repeats`
+takes the next most similar artist instead, giving more artists but less
+similar ones (with many seeds, the later ones would otherwise mostly get
+substitutes).
 Before signing in, the command prints an estimate of the largest outcome, and
 refuses a very large run (over about 1000 tracks or 1500 Qobuz requests) unless
-`--yes` is given. Each artist is used once, artists already in a source playlist
-are never suggested, and the command says when the walk stopped at
+`--yes` is given. Each similar artist is fetched and added once, artists already in a
+source playlist are never added, and the command says when the walk stopped at
 `--max-artists`.
 
 ```sh
@@ -328,12 +334,16 @@ tools; a home page introduces each.
    how many levels deep to go, after how many similar artists to stop, and how
    many top tracks each similar artist contributes. None of these has an upper
    limit: an estimate under the settings shows the largest possible outcome,
-   turning orange for a very large run, which you are asked to confirm.
-   Optionally open *Filters*.
+   turning orange for a very large run, which you are asked to confirm. Tick
+   *Replace artists that already came up* to substitute the next most similar
+   artist for repeats (see the CLI's `--replace-repeats`). Optionally open
+   *Filters*.
 2. Find similar artists: the artists are found first, then their tracks are
    fetched in batches, with progress shown on the button.
-3. Preview: each starting artist is listed with the similar artists found from
-   it nested underneath, labelled with who they are similar to. Untick any
+3. Preview: each starting artist is listed with the similar artists that came
+   up for it nested underneath, each labelled with every artist it is similar
+   to. An artist shared between several is listed under each but added once,
+   and ticking or unticking one of its tracks updates every copy. Untick any
    tracks you do not want; tracks the filters excluded are listed unticked
    where they rank.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
