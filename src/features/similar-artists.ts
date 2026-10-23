@@ -6,8 +6,8 @@
  * similar-artists graph breadth-first to a chosen depth, then gathers each
  * similar artist's top tracks. Depth 1 takes artists similar to the seeds;
  * depth 2 also takes artists similar to those, and so on. Every artist appears
- * at most once, attributed to the first artist it was found from, and a hard
- * cap keeps the walk (and the request) bounded.
+ * at most once, attributed to the first artist it was found from, and a
+ * user-set cap on the number of artists keeps the walk bounded.
  *
  * Like the other tools this is the *resolve* half: it returns a plan to review.
  * Committing reuses {@link createPlaylistWithTracks} and
@@ -32,32 +32,107 @@ export interface SimilarArtistsClient {
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
 }
 
-/**
- * The most similar artists the walk will collect in total, across all seeds and
- * levels. Three per artist at depth 3 is already 39 per seed, and each costs a
- * top-track request.
- */
-export const MAX_SIMILAR_ARTISTS = 100;
+/** An accepted range (no `max` means unbounded) and the default of a setting. */
+export interface SettingBounds {
+  readonly min: number;
+  readonly max?: number;
+  readonly fallback: number;
+}
 
 /**
  * Accepted range and default of each setting, shared by the CLI and the API so
- * both validate the same way.
+ * both validate the same way. The per-artist count, the depth and the artist
+ * cap are deliberately unbounded: the user chooses, and
+ * {@link estimateSimilar} warns when the choice is very large.
  */
 export const SIMILAR_SETTINGS = {
-  similarPerArtist: { min: 1, max: 20, fallback: 3 },
-  depth: { min: 1, max: 3, fallback: 1 },
+  similarPerArtist: { min: 1, fallback: 3 },
+  depth: { min: 1, fallback: 1 },
+  /** The most similar artists the walk collects in total, across seeds and levels. */
+  maxArtists: { min: 1, fallback: 100 },
   /** The artist page lists at most 30 top tracks. */
   tracksPerSimilar: { min: 1, max: 30, fallback: 3 },
   /** 0 takes no tracks from the seeds themselves. */
   tracksPerSeed: { min: 0, max: 100, fallback: 5 },
   maxSeeds: { min: 1, max: 50, fallback: 10 },
-} as const;
+} as const satisfies Record<string, SettingBounds>;
 
-/** Spare candidates requested per lookup, to replace ones already used. */
-const SPARE_CANDIDATES = 10;
+/**
+ * Candidates requested per similar-artists lookup. Qobuz returns an artist's
+ * whole list in one page whatever is asked (about 70 for a well-known artist),
+ * so asking for more than it has costs nothing and leaves spares to replace
+ * artists already used.
+ */
+export const SIMILAR_CANDIDATE_LIMIT = 500;
 
-/** The most candidates requested per lookup. */
-const MAX_CANDIDATES = 50;
+/**
+ * When a run counts as large enough to need a confirmation: about this many
+ * tracks, or this many Qobuz requests (around a minute and a half of work).
+ */
+export const LARGE_RUN = { tracks: 1000, requests: 1500 } as const;
+
+/** Rough wall-clock cost of one Qobuz request through the bounded pool (measured). */
+const SECONDS_PER_REQUEST = 0.06;
+
+/** The most a run could produce, worked out from its settings before running it. */
+export interface SimilarEstimate {
+  /** Most similar artists the walk could collect. */
+  artists: number;
+  /** Most tracks the plan could hold (seeds' own plus the similar artists'). */
+  tracks: number;
+  /** Rough upper bound on Qobuz requests. */
+  requests: number;
+  /** Rough duration in seconds. */
+  seconds: number;
+  /** True past {@link LARGE_RUN}: worth a warning and a confirmation. */
+  large: boolean;
+}
+
+/**
+ * Estimate the largest outcome of a run: `seedCount` seeds (for a playlist, its
+ * seed cap) each fanning out `similarPerArtist` per level for `depth` levels,
+ * limited by `maxArtists`. It is an upper bound -- Qobuz lists a finite number
+ * of similar artists per artist (about 70 for a well-known one), and artists
+ * shared between branches are only used once.
+ */
+export function estimateSimilar(options: {
+  seedCount: number;
+  tracksPerSeed: number;
+  similarPerArtist: number;
+  depth: number;
+  tracksPerSimilar: number;
+  maxArtists: number;
+}): SimilarEstimate {
+  const { seedCount, similarPerArtist: n, depth } = options;
+  // Geometric series n + n^2 + ... + n^depth per seed, in closed form so an
+  // absurd depth cannot loop; overflow to Infinity is clamped by the cap.
+  const perSeed = n === 1 ? depth : (n * (Math.pow(n, depth) - 1)) / (n - 1);
+  const artists = Math.min(options.maxArtists, seedCount * perSeed);
+  // Seed searches and seed tracks; one lookup and one top-track fetch per artist.
+  const requests = seedCount * 2 + artists * 2;
+  const tracks = seedCount * options.tracksPerSeed + artists * options.tracksPerSimilar;
+  return {
+    artists,
+    tracks,
+    requests,
+    seconds: requests * SECONDS_PER_REQUEST,
+    large: tracks > LARGE_RUN.tracks || requests > LARGE_RUN.requests,
+  };
+}
+
+/** A one-line, human-readable summary of an estimate. */
+export function describeEstimate(estimate: SimilarEstimate): string {
+  const plural = (count: number, word: string): string =>
+    `${count} ${word}${count === 1 ? "" : "s"}`;
+  const duration =
+    estimate.seconds < 60
+      ? "under a minute"
+      : `about ${plural(Math.round(estimate.seconds / 60), "minute")}`;
+  return (
+    `up to ${plural(estimate.artists, "similar artist")} and ${plural(estimate.tracks, "track")}, ` +
+    `about ${estimate.requests} Qobuz requests (${duration})`
+  );
+}
 
 /** An artist found through the walk, with its top tracks. */
 export interface SimilarArtist {
@@ -85,7 +160,7 @@ export interface ResolveSimilarOptions {
   /** Artists never to suggest (e.g. those already in a playlist). Seeds always are. */
   skipArtistIds?: ReadonlySet<number>;
   filter?: TrackFilter;
-  /** Cap on similar artists in total (default {@link MAX_SIMILAR_ARTISTS}). */
+  /** Cap on similar artists in total (default `SIMILAR_SETTINGS.maxArtists`). */
   maxArtists?: number;
 }
 
@@ -142,8 +217,7 @@ export async function walkSimilarArtists(
   client: Pick<SimilarArtistsClient, "getSimilarArtists">,
   options: Omit<ResolveSimilarOptions, "tracksPerSimilar" | "filter">,
 ): Promise<{ found: FoundArtist[]; truncated: boolean }> {
-  const maxArtists = options.maxArtists ?? MAX_SIMILAR_ARTISTS;
-  const candidateLimit = Math.min(options.similarPerArtist + SPARE_CANDIDATES, MAX_CANDIDATES);
+  const maxArtists = options.maxArtists ?? SIMILAR_SETTINGS.maxArtists.fallback;
 
   const seen = new Set<number>([
     ...options.seeds.map((seed) => seed.id),
@@ -155,7 +229,7 @@ export async function walkSimilarArtists(
 
   for (let level = 1; level <= options.depth && frontier.length > 0 && !truncated; level += 1) {
     const candidateLists = await mapWithConcurrency(frontier, DEFAULT_CONCURRENCY, (node) =>
-      client.getSimilarArtists(node.artist.id, candidateLimit),
+      client.getSimilarArtists(node.artist.id, SIMILAR_CANDIDATE_LIMIT),
     );
     const next: typeof frontier = [];
     frontier.forEach((node, index) => {
@@ -317,6 +391,8 @@ export interface WalkOptions {
   similarPerArtist: number;
   depth: number;
   tracksPerSimilar: number;
+  /** Cap on similar artists in total (default `SIMILAR_SETTINGS.maxArtists`). */
+  maxArtists?: number;
   filter?: TrackFilter;
 }
 

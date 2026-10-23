@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Artist, Track } from "../qobuz/index.js";
 import {
+  describeEstimate,
+  estimateSimilar,
   fetchArtistTracks,
+  LARGE_RUN,
   planFromArtists,
   planFromPlaylist,
   resolveSimilarArtists,
   seedsFromPlaylist,
+  SIMILAR_CANDIDATE_LIMIT,
   similarTrackIds,
   walkFromArtists,
   walkFromPlaylist,
@@ -59,23 +63,50 @@ describe("resolveSimilarArtists", () => {
       [12, 1, 1, 1],
     ]);
     expect(result.similar[0]?.tracks.map((t) => t.id)).toEqual([1100, 1101, 1102]);
-    // Asks for spare candidates so already-used artists can be skipped.
-    expect(client.getSimilarArtists).toHaveBeenCalledWith(1, 12);
+    // Asks for the whole list, so already-used artists can be replaced.
+    expect(client.getSimilarArtists).toHaveBeenCalledWith(1, SIMILAR_CANDIDATE_LIMIT);
     expect(client.getArtistTopTracks).toHaveBeenCalledWith(11, 3);
     expect(result.truncated).toBe(false);
   });
 
-  it("caps the candidate request at 50", async () => {
-    const client = stubClient({ similar: {} });
+  it("takes as many similar artists per artist as asked, and walks as deep", async () => {
+    // Seed 1 has 60 similar artists; each of those has one more of its own.
+    const level1 = Array.from({ length: 60 }, (_v, i) => artist(1000 + i));
+    const similar: Record<number, Artist[]> = { 1: level1 };
+    for (const a of level1) {
+      similar[a.id] = [artist(a.id + 5000)];
+    }
+    for (const a of level1) {
+      similar[a.id + 5000] = [artist(a.id + 9000)];
+    }
+    const client = stubClient({ similar });
 
-    await resolveSimilarArtists(client, {
+    const result = await resolveSimilarArtists(client, {
       seeds: [artist(1)],
-      similarPerArtist: 45,
+      similarPerArtist: 60,
+      depth: 3,
+      tracksPerSimilar: 1,
+      maxArtists: 1000,
+    });
+
+    expect(result.similar.filter((s) => s.level === 1)).toHaveLength(60);
+    expect(result.similar.filter((s) => s.level === 3)).toHaveLength(60);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("stops at the default cap of 100 artists when none is given", async () => {
+    const many = Array.from({ length: 150 }, (_v, i) => artist(1000 + i));
+    const client = stubClient({ similar: { 1: many } });
+
+    const result = await resolveSimilarArtists(client, {
+      seeds: [artist(1)],
+      similarPerArtist: 150,
       depth: 1,
       tracksPerSimilar: 1,
     });
 
-    expect(client.getSimilarArtists).toHaveBeenCalledWith(1, 50);
+    expect(result.similar).toHaveLength(100);
+    expect(result.truncated).toBe(true);
   });
 
   it("never suggests a seed, a skipped artist, or one already chosen", async () => {
@@ -452,5 +483,83 @@ describe("planFromPlaylist", () => {
     expect(plan.seeds.map((s) => [s.artist.id, s.tracks])).toEqual([[5, []]]);
     expect(plan.similar.map((s) => s.artist.id)).toEqual([50]);
     expect(plan.unresolvedArtists).toEqual([]);
+  });
+});
+
+describe("estimateSimilar", () => {
+  const base = {
+    seedCount: 2,
+    tracksPerSeed: 5,
+    similarPerArtist: 3,
+    depth: 2,
+    tracksPerSimilar: 3,
+    maxArtists: 1000,
+  };
+
+  it("counts every level of the walk, plus the seeds' own tracks", () => {
+    // 2 seeds x (3 + 9) similar artists = 24; tracks 2x5 + 24x3 = 82.
+    const estimate = estimateSimilar(base);
+    expect(estimate.artists).toBe(24);
+    expect(estimate.tracks).toBe(82);
+    expect(estimate.requests).toBe(2 * 2 + 24 * 2);
+    expect(estimate.large).toBe(false);
+  });
+
+  it("is limited by the artist cap", () => {
+    const estimate = estimateSimilar({ ...base, depth: 10, maxArtists: 100 });
+    expect(estimate.artists).toBe(100);
+    expect(estimate.tracks).toBe(2 * 5 + 100 * 3);
+  });
+
+  it("stays finite for absurd settings", () => {
+    const estimate = estimateSimilar({
+      ...base,
+      similarPerArtist: 1_000_000,
+      depth: 1_000_000,
+      maxArtists: Number.MAX_SAFE_INTEGER,
+    });
+    expect(Number.isFinite(estimate.artists)).toBe(true);
+    expect(estimate.large).toBe(true);
+  });
+
+  it("finishes quickly for a deep walk of one artist per level", () => {
+    const estimate = estimateSimilar({
+      ...base,
+      similarPerArtist: 1,
+      depth: Number.MAX_SAFE_INTEGER,
+      maxArtists: 50,
+    });
+    expect(estimate.artists).toBe(50);
+  });
+
+  it("is zero without seeds", () => {
+    expect(estimateSimilar({ ...base, seedCount: 0 })).toMatchObject({
+      artists: 0,
+      tracks: 0,
+      large: false,
+    });
+  });
+
+  it("flags a run past the track or request threshold as large", () => {
+    expect(
+      estimateSimilar({ ...base, depth: 1, similarPerArtist: 1, tracksPerSimilar: 30, seedCount: 34, tracksPerSeed: 0 })
+        .large,
+    ).toBe(true); // 34 x 30 = 1020 tracks
+    expect(LARGE_RUN.tracks).toBe(1000);
+    expect(
+      estimateSimilar({ ...base, depth: 1, similarPerArtist: 800, tracksPerSimilar: 1, seedCount: 1, tracksPerSeed: 0 })
+        .large,
+    ).toBe(true); // 800 artists -> 1602 requests
+  });
+});
+
+describe("describeEstimate", () => {
+  it("summarises artists, tracks, requests and a rough duration", () => {
+    expect(describeEstimate({ artists: 24, tracks: 82, requests: 52, seconds: 3, large: false })).toBe(
+      "up to 24 similar artists and 82 tracks, about 52 Qobuz requests (under a minute)",
+    );
+    expect(describeEstimate({ artists: 1, tracks: 1, requests: 4, seconds: 150, large: false })).toBe(
+      "up to 1 similar artist and 1 track, about 4 Qobuz requests (about 3 minutes)",
+    );
   });
 });

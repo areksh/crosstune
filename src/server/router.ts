@@ -63,9 +63,12 @@ import {
   type MatchedItem,
 } from "../features/import-export.js";
 import {
+  describeEstimate,
+  estimateSimilar,
   planFromArtists,
   planFromPlaylist,
   SIMILAR_SETTINGS,
+  type SettingBounds,
   type WalkOptions,
 } from "../features/similar-artists.js";
 import { authorise, type RequestHeaders } from "./security.js";
@@ -177,6 +180,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.method === "POST" && req.path === "/api/album-tracks") {
     return albumTracks(req.body, deps);
   }
+  if (req.method === "POST" && req.path === "/api/similar/estimate") {
+    return estimateSimilarRun(req.body);
+  }
   if (req.method === "POST" && req.path === "/api/similar/resolve") {
     return resolveSimilar(req.body, deps);
   }
@@ -286,6 +292,25 @@ async function resolveSimilar(body: unknown, deps: ApiDeps): Promise<ApiResponse
           maxSeeds: source.maxSeeds,
         });
   return { status: 200, body: plan };
+}
+
+/**
+ * Estimate the largest outcome of a similar-artists run from its settings,
+ * without calling Qobuz, so the view can warn before a very large run. A
+ * playlist source counts its seed cap as the seed count.
+ */
+function estimateSimilarRun(body: unknown): ApiResponse {
+  const input = parseSimilarInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, walk } = input.value;
+  const estimate = estimateSimilar({
+    seedCount: source.type === "artists" ? source.artists.length : source.maxSeeds,
+    tracksPerSeed: source.type === "artists" ? source.tracksPerSeed : 0,
+    ...walk,
+  });
+  return { status: 200, body: { ...estimate, summary: describeEstimate(estimate) } };
 }
 
 /** Create a new playlist from the tracks, or add them to an existing one. */
@@ -495,22 +520,30 @@ function parseFilterInput(raw: unknown): Parsed<TrackFilter> {
 
 /**
  * Read an optional integer field, defaulting when absent.
- * Fails unless it is an integer within [min, max].
+ * Fails unless it is an integer within the bounds (`max` absent: no upper bound).
  */
 function intField(
   record: Record<string, unknown>,
   key: string,
   label: string,
-  bounds: { min: number; max: number; fallback: number },
+  bounds: SettingBounds,
 ): Parsed<number> {
   const raw = record[key];
   if (raw === undefined) {
     return { ok: true, value: bounds.fallback };
   }
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < bounds.min || raw > bounds.max) {
+  if (
+    typeof raw !== "number" ||
+    !Number.isSafeInteger(raw) ||
+    raw < bounds.min ||
+    (bounds.max !== undefined && raw > bounds.max)
+  ) {
     return {
       ok: false,
-      error: `${label} must be an integer between ${bounds.min} and ${bounds.max}`,
+      error:
+        bounds.max === undefined
+          ? `${label} must be an integer of at least ${bounds.min}`
+          : `${label} must be an integer between ${bounds.min} and ${bounds.max}`,
     };
   }
   return { ok: true, value: raw };
@@ -582,6 +615,10 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
   if (!depth.ok) {
     return depth;
   }
+  const maxArtists = intField(body, "maxArtists", "maxArtists", SIMILAR_SETTINGS.maxArtists);
+  if (!maxArtists.ok) {
+    return maxArtists;
+  }
   const tracksPerSimilar = intField(
     body,
     "tracksPerSimilar",
@@ -603,6 +640,7 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
         similarPerArtist: similarPerArtist.value,
         depth: depth.value,
         tracksPerSimilar: tracksPerSimilar.value,
+        maxArtists: maxArtists.value,
         filter: filter.value,
       },
     },

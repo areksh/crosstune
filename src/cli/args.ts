@@ -9,7 +9,7 @@ import {
   DEFAULT_ALBUM_PREFERENCE,
   type AlbumPreference,
 } from "../features/playlist-from-albums.js";
-import { SIMILAR_SETTINGS } from "../features/similar-artists.js";
+import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import {
   compileTerm,
   parseDiscList,
@@ -145,6 +145,9 @@ export interface SimilarArgs {
   similarPerArtist: number;
   depth: number;
   tracksPerSimilar: number;
+  maxArtists: number;
+  /** Go ahead even when the run is estimated to be very large. */
+  yes: boolean;
   /** Present only when an exclude flag was given. */
   filter?: TrackFilterSpec;
 }
@@ -578,17 +581,23 @@ function isFormat(value: string | undefined): value is Format {
   return value !== undefined && (FORMATS as readonly string[]).includes(value);
 }
 
-/** Parse `raw` as an integer within `bounds`, naming `flag` in the error. */
-function boundedInt(
-  flag: string,
-  raw: string | undefined,
-  bounds: { readonly min: number; readonly max: number },
-): number {
+/**
+ * Parse `raw` as an integer within `bounds` (`max` absent: no upper bound),
+ * naming `flag` in the error.
+ */
+function boundedInt(flag: string, raw: string | undefined, bounds: SettingBounds): number {
   const value = Number(raw);
-  if (raw === undefined || !Number.isInteger(value) || value < bounds.min || value > bounds.max) {
-    throw new Error(
-      `${flag} must be an integer between ${bounds.min} and ${bounds.max}, got "${raw}"`,
-    );
+  if (
+    raw === undefined ||
+    !Number.isSafeInteger(value) ||
+    value < bounds.min ||
+    (bounds.max !== undefined && value > bounds.max)
+  ) {
+    const range =
+      bounds.max === undefined
+        ? `an integer of at least ${bounds.min}`
+        : `an integer between ${bounds.min} and ${bounds.max}`;
+    throw new Error(`${flag} must be ${range}, got "${raw}"`);
   }
   return value;
 }
@@ -603,7 +612,8 @@ const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
  * Exactly one source: `--name <name>` (seed from the positional artist names,
  * creating a new playlist) or `--playlist <id>` (seed from that playlist's
  * artists and add to it, report-only unless `--apply`). Shared options:
- * `--similar N`, `--depth D`, `--tracks M`, and the repeatable
+ * `--similar N`, `--depth D`, `--tracks M`, `--max-artists A`, `--yes` (run
+ * even when estimated to be very large), and the repeatable
  * `--exclude-track`/`--exclude-album`. Artists source only: `--seed-tracks K`
  * (0 for none) and `--public`. Playlist source only: `--seeds S` and `--apply`.
  * Ranges and defaults are {@link SIMILAR_SETTINGS}.
@@ -618,11 +628,13 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     similarPerArtist: SIMILAR_SETTINGS.similarPerArtist.fallback as number,
     depth: SIMILAR_SETTINGS.depth.fallback as number,
     tracksPerSimilar: SIMILAR_SETTINGS.tracksPerSimilar.fallback as number,
+    maxArtists: SIMILAR_SETTINGS.maxArtists.fallback as number,
     tracksPerSeed: SIMILAR_SETTINGS.tracksPerSeed.fallback as number,
     maxSeeds: SIMILAR_SETTINGS.maxSeeds.fallback as number,
   };
   let isPublic = false;
   let apply = false;
+  let yes = false;
   const used = new Set<string>();
   const positional: string[] = [];
   const filter = new FilterFlags(false);
@@ -662,6 +674,13 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
         settings.tracksPerSimilar = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSimilar);
         i += 1;
         break;
+      case "--max-artists":
+        settings.maxArtists = boundedInt(arg, value, SIMILAR_SETTINGS.maxArtists);
+        i += 1;
+        break;
+      case "--yes":
+        yes = true;
+        break;
       case "--seed-tracks":
         settings.tracksPerSeed = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSeed);
         i += 1;
@@ -692,6 +711,8 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     similarPerArtist: settings.similarPerArtist,
     depth: settings.depth,
     tracksPerSimilar: settings.tracksPerSimilar,
+    maxArtists: settings.maxArtists,
+    yes,
     ...(spec !== undefined && { filter: spec }),
   };
 

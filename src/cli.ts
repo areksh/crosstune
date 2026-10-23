@@ -59,14 +59,16 @@
  *       is inferred from the filename when --format is omitted.
  *
  *   qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] \
- *       [--tracks M] [--seed-tracks K] [--public] [filters] "Artist" ...
+ *       [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] \
+ *       [filters] "Artist" ...
  *   qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] \
- *       [--depth D] [--tracks M] [filters] [--apply]
+ *       [--depth D] [--tracks M] [--max-artists A] [--yes] [filters] [--apply]
  *       Add the top tracks of Qobuz's similar artists, walked to depth D from
  *       the given artists (alongside K of their own tracks, in a new playlist)
  *       or from a playlist's S most frequent artists (added to that playlist;
  *       without --apply it only reports). Artists already in the playlist are
- *       never suggested.
+ *       never suggested. The walk stops after A similar artists (default 100);
+ *       a run estimated to be very large is refused unless --yes is given.
  *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
@@ -112,6 +114,8 @@ import {
   createPlaylistWithTracks,
 } from "./features/playlist-from-artists.js";
 import {
+  describeEstimate,
+  estimateSimilar,
   planFromArtists,
   planFromPlaylist,
   similarTrackIds,
@@ -432,12 +436,28 @@ function planSimilarArtists(
     similarPerArtist: parsed.similarPerArtist,
     depth: parsed.depth,
     tracksPerSimilar: parsed.tracksPerSimilar,
+    maxArtists: parsed.maxArtists,
     ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
   };
 
+  // Size the run before signing in, and refuse a very large one unless asked.
+  const estimate = estimateSimilar({
+    ...walk,
+    seedCount: source.type === "artists" ? artists.length : source.maxSeeds,
+    tracksPerSeed: source.type === "artists" ? source.tracksPerSeed : 0,
+  });
+  if (estimate.large && !parsed.yes) {
+    throw new Error(
+      `This run could add ${describeEstimate(estimate)}. Lower --similar, --depth, --tracks or --max-artists, or pass --yes to go ahead.`,
+    );
+  }
+
   return async (client: QobuzClient): Promise<void> => {
+    if (estimate.large) {
+      logger.warn(`large run: ${describeEstimate(estimate)}`);
+    }
     logger.info(
-      `Finding ${parsed.similarPerArtist} similar artist${parsed.similarPerArtist === 1 ? "" : "s"} per artist, ${parsed.depth} level${parsed.depth === 1 ? "" : "s"} deep...`,
+      `Finding ${parsed.similarPerArtist} similar artist${parsed.similarPerArtist === 1 ? "" : "s"} per artist, ${parsed.depth} level${parsed.depth === 1 ? "" : "s"} deep (${describeEstimate(estimate)})...`,
     );
     const plan =
       source.type === "artists"
@@ -448,7 +468,11 @@ function planSimilarArtists(
             maxSeeds: source.maxSeeds,
           });
     const trackIds = similarTrackIds(plan.seeds, plan.similar);
-    reportSimilarPlan(plan, source.type === "artists" && source.tracksPerSeed > 0);
+    reportSimilarPlan(
+      plan,
+      source.type === "artists" && source.tracksPerSeed > 0,
+      parsed.maxArtists,
+    );
     if (trackIds.length === 0) {
       logger.warn("No tracks found to add.");
       return;
@@ -482,7 +506,11 @@ function planSimilarArtists(
 }
 
 /** Log a similar-artists plan: per seed, its tracks and the similar artists found. */
-function reportSimilarPlan(plan: SimilarPlan, showSeedTracks: boolean): void {
+function reportSimilarPlan(
+  plan: SimilarPlan,
+  showSeedTracks: boolean,
+  maxArtists: number,
+): void {
   for (const seed of plan.seeds) {
     logger.info(
       showSeedTracks
@@ -499,7 +527,9 @@ function reportSimilarPlan(plan: SimilarPlan, showSeedTracks: boolean): void {
     logger.warn("no artists to start from (the playlist has no tracks with an artist id)");
   }
   if (plan.truncated) {
-    logger.warn("stopped at 100 similar artists; lower --similar or --depth for a fuller walk");
+    logger.warn(
+      `stopped at ${maxArtists} similar artists; raise --max-artists, or lower --similar or --depth for a fuller walk`,
+    );
   }
   if (plan.emptyArtists.length > 0) {
     logger.warn(
@@ -792,8 +822,8 @@ function printUsage(): void {
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
       '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... "Artist - Album" ...',
-      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--seed-tracks K] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
-      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--exclude-track <term>]... [--exclude-album <term>]... [--apply]",
+      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
+      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--exclude-track <term>]... [--exclude-album <term>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
@@ -806,7 +836,7 @@ function printUsage(): void {
       "Album version preferences: highest-quality (default), newest, oldest.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
-      "similar-artists defaults: --similar 3 (1-20), --depth 1 (1-3), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply.",
+      "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",

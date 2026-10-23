@@ -319,6 +319,8 @@ describe("parseSimilarArgs", () => {
       similarPerArtist: 3,
       depth: 1,
       tracksPerSimilar: 3,
+      maxArtists: 100,
+      yes: false,
     });
   });
 
@@ -334,6 +336,9 @@ describe("parseSimilarArgs", () => {
       "4",
       "--seed-tracks",
       "0",
+      "--max-artists",
+      "250",
+      "--yes",
       "--public",
       "--exclude-track",
       "live",
@@ -350,6 +355,8 @@ describe("parseSimilarArgs", () => {
       similarPerArtist: 5,
       depth: 2,
       tracksPerSimilar: 4,
+      maxArtists: 250,
+      yes: true,
       filter: { excludeTracks: ["live"], excludeAlbums: [] },
     });
   });
@@ -360,6 +367,8 @@ describe("parseSimilarArgs", () => {
       similarPerArtist: 3,
       depth: 1,
       tracksPerSimilar: 3,
+      maxArtists: 100,
+      yes: false,
     });
     expect(parseSimilarArgs(["--playlist", "42"]).source).toEqual({
       type: "playlist",
@@ -384,10 +393,25 @@ describe("parseSimilarArgs", () => {
     expect(() => parseSimilarArgs(["--playlist", "1", "Nirvana"])).toThrow(/Nirvana/);
   });
 
+  it("has no upper limit on --similar, --depth or --max-artists", () => {
+    const parsed = parseSimilarArgs([
+      "--name",
+      "x",
+      "--similar",
+      "70",
+      "--depth",
+      "8",
+      "--max-artists",
+      "5000",
+      "A",
+    ]);
+    expect([parsed.similarPerArtist, parsed.depth, parsed.maxArtists]).toEqual([70, 8, 5000]);
+  });
+
   it.each([
     ["--similar", "0"],
-    ["--similar", "21"],
-    ["--depth", "4"],
+    ["--depth", "0"],
+    ["--max-artists", "0"],
     ["--tracks", "31"],
     ["--tracks", "two"],
     ["--seed-tracks", "-1"],

@@ -365,13 +365,13 @@ describe("POST /api/similar/resolve", () => {
       similar: Array<{ artist: Artist; tracks: Track[]; level: number }>;
       truncated: boolean;
     };
-    // Defaults: 5 seed tracks, 3 similar per artist (13 candidates), 3 tracks each, depth 1.
+    // Defaults: 5 seed tracks, 3 similar per artist, 3 tracks each, depth 1.
     expect(body.seeds.map((s) => [s.artist.id, s.tracks.length])).toEqual([[1, 5]]);
     expect(body.similar.map((s) => [s.artist.id, s.tracks.length, s.level])).toEqual([
       [11, 3, 1],
       [12, 3, 1],
     ]);
-    expect(svc.getSimilarArtists).toHaveBeenCalledWith(1, 13);
+    expect(svc.getSimilarArtists).toHaveBeenCalledWith(1, 500);
     expect(body.truncated).toBe(false);
   });
 
@@ -400,7 +400,24 @@ describe("POST /api/similar/resolve", () => {
     expect(body.similar[0]?.tracks.map((t) => t.id)).toEqual([1101, 1102]);
     expect(body.similar[0]?.excluded).toHaveLength(1);
     // Depth 2 looked up the level-1 artist too.
-    expect(svc.getSimilarArtists).toHaveBeenCalledWith(11, 11);
+    expect(svc.getSimilarArtists).toHaveBeenCalledWith(11, 500);
+  });
+
+  it("accepts large counts, deep walks and a chosen artist cap", async () => {
+    const svc = similarService();
+    const res = await handleApi(
+      request("POST", "/api/similar/resolve", {
+        source: { type: "artists", artists: ["Nirvana"] },
+        similarPerArtist: 70,
+        depth: 6,
+        maxArtists: 1,
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { similar: unknown[]; truncated: boolean };
+    expect(body.similar).toHaveLength(1);
+    expect(body.truncated).toBe(true);
   });
 
   it("accepts zero seed tracks", async () => {
@@ -425,13 +442,55 @@ describe("POST /api/similar/resolve", () => {
     ["zero seeds", { source: { type: "playlist", playlistId: 1, maxSeeds: 0 } }],
     ["too many seeds", { source: { type: "playlist", playlistId: 1, maxSeeds: 51 } }],
     ["depth 0", { source: { type: "artists", artists: ["A"] }, depth: 0 }],
-    ["depth 4", { source: { type: "artists", artists: ["A"] }, depth: 4 }],
-    ["21 similar per artist", { source: { type: "artists", artists: ["A"] }, similarPerArtist: 21 }],
+    ["0 similar per artist", { source: { type: "artists", artists: ["A"] }, similarPerArtist: 0 }],
+    ["an artist cap of 0", { source: { type: "artists", artists: ["A"] }, maxArtists: 0 }],
     ["a fractional count", { source: { type: "artists", artists: ["A"] }, similarPerArtist: 1.5 }],
     ["31 tracks per similar artist", { source: { type: "artists", artists: ["A"] }, tracksPerSimilar: 31 }],
     ["a bad filter", { source: { type: "artists", artists: ["A"] }, filter: { discs: 1 } }],
   ])("rejects %s", async (_label, body) => {
     const res = await handleApi(request("POST", "/api/similar/resolve", body), deps());
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/similar/estimate", () => {
+  it("estimates from the settings without calling Qobuz", async () => {
+    const svc = service();
+    const res = await handleApi(
+      request("POST", "/api/similar/estimate", {
+        source: { type: "artists", artists: ["A", "B"], tracksPerSeed: 5 },
+        similarPerArtist: 3,
+        depth: 2,
+        tracksPerSimilar: 3,
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ artists: 24, tracks: 82, large: false });
+    expect((res.body as { summary: string }).summary).toMatch(/^up to 24 similar artists/);
+    expect(svc.searchArtists).not.toHaveBeenCalled();
+    expect(svc.getSimilarArtists).not.toHaveBeenCalled();
+  });
+
+  it("uses the seed cap as the seed count for a playlist, and flags a large run", async () => {
+    const res = await handleApi(
+      request("POST", "/api/similar/estimate", {
+        source: { type: "playlist", playlistId: 1, maxSeeds: 50 },
+        similarPerArtist: 20,
+        depth: 3,
+        maxArtists: 5000,
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ artists: 5000, large: true });
+  });
+
+  it("rejects invalid settings", async () => {
+    const res = await handleApi(
+      request("POST", "/api/similar/estimate", { source: { type: "artists", artists: [] } }),
+      deps(),
+    );
     expect(res.status).toBe(400);
   });
 });
