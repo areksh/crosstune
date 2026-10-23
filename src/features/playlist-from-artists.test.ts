@@ -6,6 +6,7 @@ import {
   buildPlaylistFromArtists,
   collectTrackIds,
   createPlaylistWithTracks,
+  fetchTopTracks,
   resolveArtistTracks,
   TOP_TRACKS_POOL,
   type PlaylistBuilderClient,
@@ -371,6 +372,37 @@ describe("resolveArtistTracks with a filter", () => {
     expect(result.partialArtists).toEqual([
       { query: "A", artist: { id: 1, name: "A" }, trackCount: 0, requested: 2 },
     ]);
+  });
+});
+
+describe("fetchTopTracks", () => {
+  it("fetches the pool for an active filter and backfills past excluded tracks", async () => {
+    const getArtistTopTracks = vi.fn(async (_id: number, limit?: number) =>
+      [
+        { id: 1, title: "Song", version: "Live" },
+        { id: 2, title: "Other" },
+        { id: 3, title: "Third" },
+      ].slice(0, limit),
+    );
+
+    const result = await fetchTopTracks(
+      { getArtistTopTracks },
+      9,
+      1,
+      compileTrackFilter({ excludeTracks: ["live"] }),
+    );
+
+    expect(getArtistTopTracks).toHaveBeenCalledWith(9, TOP_TRACKS_POOL);
+    expect(result.tracks.map((t) => t.id)).toEqual([2]);
+    expect(result.excluded.map((e) => e.track.id)).toEqual([1]);
+  });
+
+  it("requests only the count without a filter", async () => {
+    const getArtistTopTracks = vi.fn(async () => [{ id: 1, title: "Song" }]);
+
+    await fetchTopTracks({ getArtistTopTracks }, 9, 4);
+
+    expect(getArtistTopTracks).toHaveBeenCalledWith(9, 4);
   });
 });
 

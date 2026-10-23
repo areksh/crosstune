@@ -179,13 +179,11 @@ export async function resolveArtistTracks(
       if (artist === undefined) {
         return undefined;
       }
-      // With a filter, fetch the whole pool so excluded tracks can be replaced
-      // by the next most popular ones.
-      const fetchCount = isFilterActive(filter)
-        ? Math.max(tracksPerArtist, TOP_TRACKS_POOL)
-        : tracksPerArtist;
-      const pool = await client.getArtistTopTracks(artist.id, fetchCount);
-      return { query, artist, ...takeTopTracks(pool, tracksPerArtist, filter) };
+      return {
+        query,
+        artist,
+        ...(await fetchTopTracks(client, artist.id, tracksPerArtist, filter)),
+      };
     },
   );
 
@@ -223,6 +221,25 @@ export async function resolveArtistTracks(
   });
 
   return { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists };
+}
+
+/**
+ * Fetch an artist's `count` most popular tracks that the filter allows, plus
+ * the excluded ones passed over on the way (most popular first).
+ *
+ * With an active filter the whole top-track pool is fetched, so excluded tracks
+ * can be replaced by the next most popular ones; without one only `count` are
+ * requested.
+ */
+export async function fetchTopTracks(
+  client: Pick<ArtistResolverClient, "getArtistTopTracks">,
+  artistId: number,
+  count: number,
+  filter: TrackFilter = NO_FILTER,
+): Promise<{ tracks: Track[]; excluded: ExcludedTrack[] }> {
+  const fetchCount = isFilterActive(filter) ? Math.max(count, TOP_TRACKS_POOL) : count;
+  const pool = await client.getArtistTopTracks(artistId, fetchCount);
+  return takeTopTracks(pool, count, filter);
 }
 
 /**
