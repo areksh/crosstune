@@ -105,7 +105,12 @@ describe("POST /api/resolve", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       resolvedArtists: [
-        { query: "Portishead", artist: { id: 5, name: "Portishead" }, tracks: [{ id: 100, title: "Roads" }] },
+        {
+          query: "Portishead",
+          artist: { id: 5, name: "Portishead" },
+          tracks: [{ id: 100, title: "Roads" }],
+          excluded: [],
+        },
       ],
       unresolvedArtists: [],
       emptyArtists: [],

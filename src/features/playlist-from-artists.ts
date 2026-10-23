@@ -10,12 +10,22 @@
  *      existing one (skipping tracks already present).
  *
  * {@link buildPlaylistFromArtists} composes both phases in one call for the CLI.
+ * An optional {@link TrackFilter} excludes tracks by title or album; excluded
+ * tracks are replaced by the artist's next most popular ones, and those passed
+ * over are reported so the web UI can offer them unticked.
  * Each function depends only on the small client surface it needs, so all are
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
+import {
+  isFilterActive,
+  NO_FILTER,
+  trackExclusion,
+  type FilteredTrack,
+  type TrackFilter,
+} from "./track-filter.js";
 
 /** The client surface needed to resolve artists to their top tracks. */
 export interface ArtistResolverClient {
@@ -47,11 +57,20 @@ export interface ExistingPlaylistClient {
 /** The full surface {@link buildPlaylistFromArtists} depends on. */
 export type PlaylistBuilderClient = ArtistResolverClient & PlaylistWriterClient;
 
+/** A track the filter excluded, with the reason. */
+export type ExcludedTrack = Required<FilteredTrack>;
+
 /** A resolved artist together with the top tracks fetched for it. */
 export interface ResolvedArtistTracks {
   query: string;
   artist: Artist;
+  /** The kept tracks, most popular first (at most `tracksPerArtist`). */
   tracks: Track[];
+  /**
+   * Tracks the filter excluded that ranked above the last kept track, most
+   * popular first, so a reviewer can tick one back on. Empty without a filter.
+   */
+  excluded: ExcludedTrack[];
 }
 
 /**
@@ -86,6 +105,8 @@ export interface ResolveArtistsOptions {
   artists: string[];
   /** Top tracks to take per artist (default 10). */
   tracksPerArtist?: number;
+  /** Tracks to exclude; excluded tracks are replaced by the next most popular. */
+  filter?: TrackFilter;
 }
 
 export interface BuildPlaylistOptions {
@@ -95,6 +116,8 @@ export interface BuildPlaylistOptions {
   playlistName: string;
   /** Top tracks to take per artist (default 10). */
   tracksPerArtist?: number;
+  /** Tracks to leave out; the next most popular tracks take their place. */
+  filter?: TrackFilter;
   /** Optional playlist description. */
   description?: string;
   /** Whether the playlist is public (default false). */
@@ -106,6 +129,8 @@ export interface ResolvedArtist {
   query: string;
   artist: Artist;
   trackCount: number;
+  /** Tracks the filter left out (those ranked above the last one added). */
+  excludedCount: number;
 }
 
 export interface BuildPlaylistResult {
@@ -121,6 +146,12 @@ export interface BuildPlaylistResult {
 
 /** How many search results to consider when looking for an exact-name match. */
 const ARTIST_SEARCH_LIMIT = 5;
+
+/**
+ * How many top tracks to fetch when a filter may exclude some, so the excluded
+ * ones can be replaced. Qobuz's artist page lists at most this many.
+ */
+export const TOP_TRACKS_POOL = 30;
 const DEFAULT_TRACKS_PER_ARTIST = 10;
 
 /**
@@ -134,6 +165,7 @@ export async function resolveArtistTracks(
   options: ResolveArtistsOptions,
 ): Promise<ResolveArtistsResult> {
   const tracksPerArtist = options.tracksPerArtist ?? DEFAULT_TRACKS_PER_ARTIST;
+  const filter = options.filter ?? NO_FILTER;
 
   // Resolve with a bounded pool, then split the outcomes. Results come back in
   // input order (see mapWithConcurrency), so the grouped-by-artist preview keeps
@@ -147,8 +179,13 @@ export async function resolveArtistTracks(
       if (artist === undefined) {
         return undefined;
       }
-      const tracks = await client.getArtistTopTracks(artist.id, tracksPerArtist);
-      return { query, artist, tracks };
+      // With a filter, fetch the whole pool so excluded tracks can be replaced
+      // by the next most popular ones.
+      const fetchCount = isFilterActive(filter)
+        ? Math.max(tracksPerArtist, TOP_TRACKS_POOL)
+        : tracksPerArtist;
+      const pool = await client.getArtistTopTracks(artist.id, fetchCount);
+      return { query, artist, ...takeTopTracks(pool, tracksPerArtist, filter) };
     },
   );
 
@@ -163,7 +200,7 @@ export async function resolveArtistTracks(
       return;
     }
     const trackCount = outcome.tracks.length;
-    if (trackCount === 0) {
+    if (trackCount === 0 && outcome.excluded.length === 0) {
       // Matched an artist, but Qobuz returned no tracks (commonly a regional
       // restriction). Drop it from the list and flag it separately.
       emptyArtists.push({
@@ -186,6 +223,31 @@ export async function resolveArtistTracks(
   });
 
   return { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists };
+}
+
+/**
+ * Walk a popularity-ordered pool, keeping the first `count` tracks the filter
+ * allows and collecting the excluded ones passed over on the way.
+ */
+function takeTopTracks(
+  pool: readonly Track[],
+  count: number,
+  filter: TrackFilter,
+): { tracks: Track[]; excluded: ExcludedTrack[] } {
+  const tracks: Track[] = [];
+  const excluded: ExcludedTrack[] = [];
+  for (const track of pool) {
+    if (tracks.length >= count) {
+      break;
+    }
+    const exclusion = trackExclusion(track, filter);
+    if (exclusion === undefined) {
+      tracks.push(track);
+    } else {
+      excluded.push({ track, exclusion });
+    }
+  }
+  return { tracks, excluded };
 }
 
 /**
@@ -277,6 +339,7 @@ export async function buildPlaylistFromArtists(
       ...(options.tracksPerArtist !== undefined && {
         tracksPerArtist: options.tracksPerArtist,
       }),
+      ...(options.filter !== undefined && { filter: options.filter }),
     });
 
   // De-duplicate across artists, counting how many each contributed.
@@ -292,7 +355,12 @@ export async function buildPlaylistFromArtists(
         added += 1;
       }
     }
-    summaries.push({ query: resolved.query, artist: resolved.artist, trackCount: added });
+    summaries.push({
+      query: resolved.query,
+      artist: resolved.artist,
+      trackCount: added,
+      excludedCount: resolved.excluded.length,
+    });
   }
 
   const playlist = await createPlaylistWithTracks(client, {

@@ -7,8 +7,10 @@ import {
   collectTrackIds,
   createPlaylistWithTracks,
   resolveArtistTracks,
+  TOP_TRACKS_POOL,
   type PlaylistBuilderClient,
 } from "./playlist-from-artists.js";
+import { compileTrackFilter } from "./track-filter.js";
 
 /** A configurable stub of the client surface the builder depends on. */
 function stubClient(config: {
@@ -22,8 +24,9 @@ function stubClient(config: {
 } {
   return {
     searchArtists: vi.fn(async (query: string) => config.artistsByQuery?.[query] ?? []),
-    getArtistTopTracks: vi.fn(
-      async (artistId: number) => config.tracksByArtist?.[artistId] ?? [],
+    // Honour the limit like the real client, so pool sizes are observable.
+    getArtistTopTracks: vi.fn(async (artistId: number, limit?: number) =>
+      (config.tracksByArtist?.[artistId] ?? []).slice(0, limit),
     ),
     createPlaylist: vi.fn(
       async (name: string) => config.playlist ?? { id: 1, name },
@@ -263,6 +266,136 @@ describe("resolveArtistTracks", () => {
     expect(result.emptyArtists).toEqual([]);
     expect(result.partialArtists).toEqual([
       { query: "A", artist: { id: 1, name: "A" }, trackCount: 2, requested: 4 },
+    ]);
+  });
+});
+
+describe("resolveArtistTracks with a filter", () => {
+  /** Ten popularity-ordered tracks; even ids are live recordings. */
+  const popular: Track[] = Array.from({ length: 10 }, (_v, i) => ({
+    id: 100 + i,
+    title: `Song ${i}`,
+    ...(i % 2 === 0 && { version: "Live" }),
+  }));
+  const live = compileTrackFilter({ excludeTracks: ["live"] });
+
+  it("fetches the whole popularity pool and backfills past excluded tracks", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: popular },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: 3,
+      filter: live,
+    });
+
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, TOP_TRACKS_POOL);
+    const [resolved] = result.resolvedArtists;
+    expect(resolved?.tracks.map((t) => t.id)).toEqual([101, 103, 105]);
+    // Only the excluded tracks ranked above the last kept one are reported.
+    expect(resolved?.excluded).toEqual([
+      { track: popular[0], exclusion: { kind: "track", term: "live" } },
+      { track: popular[2], exclusion: { kind: "track", term: "live" } },
+      { track: popular[4], exclusion: { kind: "track", term: "live" } },
+    ]);
+    expect(result.partialArtists).toEqual([]);
+  });
+
+  it("asks for more than the pool when more tracks are wanted", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: popular },
+    });
+
+    await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: TOP_TRACKS_POOL + 5,
+      filter: live,
+    });
+
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, TOP_TRACKS_POOL + 5);
+  });
+
+  it("asks only for the requested count when the filter is empty", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: popular },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: 3,
+      filter: compileTrackFilter({}),
+    });
+
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, 3);
+    expect(result.resolvedArtists[0]?.excluded).toEqual([]);
+  });
+
+  it("flags an artist whose pool runs out after filtering as partial", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: popular },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: 8,
+      filter: live,
+    });
+
+    expect(result.resolvedArtists[0]?.tracks).toHaveLength(5);
+    expect(result.resolvedArtists[0]?.excluded).toHaveLength(5);
+    expect(result.partialArtists).toEqual([
+      { query: "A", artist: { id: 1, name: "A" }, trackCount: 5, requested: 8 },
+    ]);
+  });
+
+  it("keeps an artist whose tracks were all excluded, so they can be reviewed", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: [{ id: 100, title: "Song", version: "Live" }] },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: 2,
+      filter: live,
+    });
+
+    expect(result.emptyArtists).toEqual([]);
+    expect(result.resolvedArtists[0]?.tracks).toEqual([]);
+    expect(result.resolvedArtists[0]?.excluded).toHaveLength(1);
+    expect(result.partialArtists).toEqual([
+      { query: "A", artist: { id: 1, name: "A" }, trackCount: 0, requested: 2 },
+    ]);
+  });
+});
+
+describe("buildPlaylistFromArtists with a filter", () => {
+  it("leaves excluded tracks out and counts them per artist", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: {
+        1: [
+          { id: 100, title: "Roads", album: "Roseland NYC Live" },
+          { id: 101, title: "Sour Times", album: "Dummy" },
+        ],
+      },
+    });
+
+    const result = await buildPlaylistFromArtists(client, {
+      artists: ["A"],
+      playlistName: "P",
+      tracksPerArtist: 1,
+      filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+    });
+
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(1, [101]);
+    expect(result.resolvedArtists).toEqual([
+      { query: "A", artist: { id: 1, name: "A" }, trackCount: 1, excludedCount: 1 },
     ]);
   });
 });
