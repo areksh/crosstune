@@ -58,6 +58,16 @@
  *       a full backup. Without --apply it resolves and reports only; the format
  *       is inferred from the filename when --format is omitted.
  *
+ *   qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] \
+ *       [--tracks M] [--seed-tracks K] [--public] [filters] "Artist" ...
+ *   qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] \
+ *       [--depth D] [--tracks M] [filters] [--apply]
+ *       Add the top tracks of Qobuz's similar artists, walked to depth D from
+ *       the given artists (alongside K of their own tracks, in a new playlist)
+ *       or from a playlist's S most frequent artists (added to that playlist;
+ *       without --apply it only reports). Artists already in the playlist are
+ *       never suggested.
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -74,6 +84,7 @@ import {
   parseExportArgs,
   parseImportArgs,
   parsePlaylistArgs,
+  parseSimilarArgs,
   type DedupeSource,
   type ExportArgs,
   type ImportArgs,
@@ -95,7 +106,17 @@ import {
   tracksToRemove,
   type DedupTrack,
 } from "./features/deduplicate.js";
-import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
+import {
+  addTracksToExistingPlaylist,
+  buildPlaylistFromArtists,
+  createPlaylistWithTracks,
+} from "./features/playlist-from-artists.js";
+import {
+  planFromArtists,
+  planFromPlaylist,
+  similarTrackIds,
+  type SimilarPlan,
+} from "./features/similar-artists.js";
 import { compileTrackFilter } from "./features/track-filter.js";
 import {
   buildBackup,
@@ -172,6 +193,11 @@ async function main(): Promise<void> {
     }
     case "playlist-from-albums": {
       const plan = planPlaylistFromAlbums(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "similar-artists": {
+      const plan = planSimilarArtists(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -382,6 +408,107 @@ function planPlaylistFromAlbums(
       logger.warn(`could not fetch tracks: ${result.failedAlbums.join(", ")}`);
     }
   };
+}
+
+/**
+ * Validate the similar-artists command's arguments (and read any piped artist
+ * names) up front, returning an executor to run once the client is signed in.
+ */
+function planSimilarArtists(
+  argv: string[],
+): (client: QobuzClient) => Promise<void> {
+  const parsed = parseSimilarArgs(argv);
+  const { source } = parsed;
+  const artists =
+    source.type === "artists"
+      ? source.artists.length > 0
+        ? source.artists
+        : readLinesFromStdin()
+      : [];
+  if (source.type === "artists" && artists.length === 0) {
+    throw new Error("No artists given. Pass them as arguments or pipe them on stdin.");
+  }
+  const walk = {
+    similarPerArtist: parsed.similarPerArtist,
+    depth: parsed.depth,
+    tracksPerSimilar: parsed.tracksPerSimilar,
+    ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
+  };
+
+  return async (client: QobuzClient): Promise<void> => {
+    logger.info(
+      `Finding ${parsed.similarPerArtist} similar artist${parsed.similarPerArtist === 1 ? "" : "s"} per artist, ${parsed.depth} level${parsed.depth === 1 ? "" : "s"} deep...`,
+    );
+    const plan =
+      source.type === "artists"
+        ? await planFromArtists(client, { ...walk, artists, tracksPerSeed: source.tracksPerSeed })
+        : await planFromPlaylist(client, {
+            ...walk,
+            playlistId: source.playlistId,
+            maxSeeds: source.maxSeeds,
+          });
+    const trackIds = similarTrackIds(plan.seeds, plan.similar);
+    reportSimilarPlan(plan, source.type === "artists" && source.tracksPerSeed > 0);
+    if (trackIds.length === 0) {
+      logger.warn("No tracks found to add.");
+      return;
+    }
+
+    if (source.type === "artists") {
+      const playlist = await createPlaylistWithTracks(client, {
+        name: source.playlistName,
+        trackIds,
+        isPublic: source.isPublic,
+      });
+      logger.info(
+        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`,
+      );
+      return;
+    }
+    if (!source.apply) {
+      logger.info(
+        `\n(dry run -- pass --apply to add up to ${trackIds.length} tracks to the playlist)`,
+      );
+      return;
+    }
+    const { added, skipped } = await addTracksToExistingPlaylist(client, {
+      playlistId: source.playlistId,
+      trackIds,
+    });
+    logger.info(
+      `\nAdded ${added.length} tracks to the playlist${skipped.length > 0 ? ` (${skipped.length} already present, skipped)` : ""}.`,
+    );
+  };
+}
+
+/** Log a similar-artists plan: per seed, its tracks and the similar artists found. */
+function reportSimilarPlan(plan: SimilarPlan, showSeedTracks: boolean): void {
+  for (const seed of plan.seeds) {
+    logger.info(
+      showSeedTracks
+        ? `  ${seed.artist.name}: ${seed.tracks.length} tracks${excludedNote(seed.excluded.length)}`
+        : `  ${seed.artist.name}`,
+    );
+    for (const entry of plan.similar.filter((s) => s.seed.id === seed.artist.id)) {
+      logger.info(
+        `    + ${entry.artist.name} (similar to ${entry.via.name}): ${entry.tracks.length} tracks${excludedNote(entry.excluded.length)}`,
+      );
+    }
+  }
+  if (plan.seeds.length === 0) {
+    logger.warn("no artists to start from (the playlist has no tracks with an artist id)");
+  }
+  if (plan.truncated) {
+    logger.warn("stopped at 100 similar artists; lower --similar or --depth for a fuller walk");
+  }
+  if (plan.emptyArtists.length > 0) {
+    logger.warn(
+      `no tracks available for: ${plan.emptyArtists.map((a) => a.artist.name).join(", ")}`,
+    );
+  }
+  if (plan.unresolvedArtists.length > 0) {
+    logger.warn(`not found: ${plan.unresolvedArtists.join(", ")}`);
+  }
 }
 
 /** " (N excluded)" for a summary line, or nothing when the filter left everything in. */
@@ -665,6 +792,8 @@ function printUsage(): void {
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
       '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... "Artist - Album" ...',
+      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--seed-tracks K] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
+      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--exclude-track <term>]... [--exclude-album <term>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
@@ -677,6 +806,7 @@ function printUsage(): void {
       "Album version preferences: highest-quality (default), newest, oldest.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
+      "similar-artists defaults: --similar 3 (1-20), --depth 1 (1-3), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",

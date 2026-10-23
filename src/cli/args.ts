@@ -9,6 +9,7 @@ import {
   DEFAULT_ALBUM_PREFERENCE,
   type AlbumPreference,
 } from "../features/playlist-from-albums.js";
+import { SIMILAR_SETTINGS } from "../features/similar-artists.js";
 import {
   compileTerm,
   parseDiscList,
@@ -127,6 +128,25 @@ class FilterFlags {
       ...(this.#discs !== undefined && { discs: this.#discs }),
     };
   }
+}
+
+/** Arguments for the `similar-artists` command. */
+export interface SimilarArgs {
+  source:
+    | {
+        type: "artists";
+        playlistName: string;
+        /** Seed names; empty means read them from stdin. */
+        artists: string[];
+        tracksPerSeed: number;
+        isPublic: boolean;
+      }
+    | { type: "playlist"; playlistId: number; maxSeeds: number; apply: boolean };
+  similarPerArtist: number;
+  depth: number;
+  tracksPerSimilar: number;
+  /** Present only when an exclude flag was given. */
+  filter?: TrackFilterSpec;
 }
 
 /** Where the deduplicator should look for tracks. */
@@ -556,4 +576,155 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
 
 function isFormat(value: string | undefined): value is Format {
   return value !== undefined && (FORMATS as readonly string[]).includes(value);
+}
+
+/** Parse `raw` as an integer within `bounds`, naming `flag` in the error. */
+function boundedInt(
+  flag: string,
+  raw: string | undefined,
+  bounds: { readonly min: number; readonly max: number },
+): number {
+  const value = Number(raw);
+  if (raw === undefined || !Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+    throw new Error(
+      `${flag} must be an integer between ${bounds.min} and ${bounds.max}, got "${raw}"`,
+    );
+  }
+  return value;
+}
+
+/** Flags of `similar-artists` that only make sense for one source. */
+const ARTISTS_ONLY_FLAGS = ["--seed-tracks", "--public"] as const;
+const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
+
+/**
+ * Parse the arguments for the `similar-artists` command.
+ *
+ * Exactly one source: `--name <name>` (seed from the positional artist names,
+ * creating a new playlist) or `--playlist <id>` (seed from that playlist's
+ * artists and add to it, report-only unless `--apply`). Shared options:
+ * `--similar N`, `--depth D`, `--tracks M`, and the repeatable
+ * `--exclude-track`/`--exclude-album`. Artists source only: `--seed-tracks K`
+ * (0 for none) and `--public`. Playlist source only: `--seeds S` and `--apply`.
+ * Ranges and defaults are {@link SIMILAR_SETTINGS}.
+ *
+ * @throws {Error} on a missing or doubled source, an out-of-range number, an
+ *   option for the other source, or an unknown option.
+ */
+export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
+  let playlistName: string | undefined;
+  let playlistId: number | undefined;
+  const settings = {
+    similarPerArtist: SIMILAR_SETTINGS.similarPerArtist.fallback as number,
+    depth: SIMILAR_SETTINGS.depth.fallback as number,
+    tracksPerSimilar: SIMILAR_SETTINGS.tracksPerSimilar.fallback as number,
+    tracksPerSeed: SIMILAR_SETTINGS.tracksPerSeed.fallback as number,
+    maxSeeds: SIMILAR_SETTINGS.maxSeeds.fallback as number,
+  };
+  let isPublic = false;
+  let apply = false;
+  const used = new Set<string>();
+  const positional: string[] = [];
+  const filter = new FilterFlags(false);
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const consumed = filter.take(argv, i);
+    if (consumed > 0) {
+      i += consumed - 1;
+      continue;
+    }
+    const arg = argv[i]!;
+    const value = argv[i + 1];
+    used.add(arg);
+    switch (arg) {
+      case "--name":
+        playlistName = value;
+        i += 1;
+        break;
+      case "--playlist": {
+        const id = Number(value);
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id, got "${value}"`);
+        }
+        playlistId = id;
+        i += 1;
+        break;
+      }
+      case "--similar":
+        settings.similarPerArtist = boundedInt(arg, value, SIMILAR_SETTINGS.similarPerArtist);
+        i += 1;
+        break;
+      case "--depth":
+        settings.depth = boundedInt(arg, value, SIMILAR_SETTINGS.depth);
+        i += 1;
+        break;
+      case "--tracks":
+        settings.tracksPerSimilar = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSimilar);
+        i += 1;
+        break;
+      case "--seed-tracks":
+        settings.tracksPerSeed = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSeed);
+        i += 1;
+        break;
+      case "--seeds":
+        settings.maxSeeds = boundedInt(arg, value, SIMILAR_SETTINGS.maxSeeds);
+        i += 1;
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        if (arg.startsWith("--")) {
+          throw new Error(`Unknown argument: ${arg}`);
+        }
+        positional.push(arg);
+    }
+  }
+
+  if (playlistName !== undefined && playlistId !== undefined) {
+    throw new Error("Give only one of --name or --playlist");
+  }
+  const spec = filter.spec();
+  const shared = {
+    similarPerArtist: settings.similarPerArtist,
+    depth: settings.depth,
+    tracksPerSimilar: settings.tracksPerSimilar,
+    ...(spec !== undefined && { filter: spec }),
+  };
+
+  if (playlistId !== undefined) {
+    const wrong = ARTISTS_ONLY_FLAGS.find((flag) => used.has(flag));
+    if (wrong !== undefined) {
+      throw new Error(`${wrong} only applies with --name (seeding from artists)`);
+    }
+    if (positional.length > 0) {
+      throw new Error(
+        `Artist names cannot be combined with --playlist (got "${positional.join(", ")}")`,
+      );
+    }
+    return {
+      source: { type: "playlist", playlistId, maxSeeds: settings.maxSeeds, apply },
+      ...shared,
+    };
+  }
+  if (playlistName === undefined || playlistName.length === 0) {
+    throw new Error("A source is required: --name <playlist name> or --playlist <id>");
+  }
+  const wrong = PLAYLIST_ONLY_FLAGS.find((flag) => used.has(flag));
+  if (wrong !== undefined) {
+    throw new Error(`${wrong} only applies with --playlist`);
+  }
+  return {
+    source: {
+      type: "artists",
+      playlistName,
+      artists: positional,
+      tracksPerSeed: settings.tracksPerSeed,
+      isPublic,
+    },
+    ...shared,
+  };
 }

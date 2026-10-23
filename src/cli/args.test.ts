@@ -7,6 +7,7 @@ import {
   parseExportArgs,
   parseImportArgs,
   parsePlaylistArgs,
+  parseSimilarArgs,
 } from "./args.js";
 
 describe("extractLogLevel", () => {
@@ -302,5 +303,104 @@ describe("parseImportArgs", () => {
 
   it("rejects more than one target", () => {
     expect(() => parseImportArgs(["--favourites", "--account", "f.json"])).toThrow(/only one/);
+  });
+});
+
+describe("parseSimilarArgs", () => {
+  it("parses an artists source with defaults", () => {
+    expect(parseSimilarArgs(["--name", "Grunge", "Nirvana", "Hole"])).toEqual({
+      source: {
+        type: "artists",
+        playlistName: "Grunge",
+        artists: ["Nirvana", "Hole"],
+        tracksPerSeed: 5,
+        isPublic: false,
+      },
+      similarPerArtist: 3,
+      depth: 1,
+      tracksPerSimilar: 3,
+    });
+  });
+
+  it("parses every option of an artists source", () => {
+    const parsed = parseSimilarArgs([
+      "--name",
+      "Metal",
+      "--similar",
+      "5",
+      "--depth",
+      "2",
+      "--tracks",
+      "4",
+      "--seed-tracks",
+      "0",
+      "--public",
+      "--exclude-track",
+      "live",
+      "Metallica",
+    ]);
+    expect(parsed).toEqual({
+      source: {
+        type: "artists",
+        playlistName: "Metal",
+        artists: ["Metallica"],
+        tracksPerSeed: 0,
+        isPublic: true,
+      },
+      similarPerArtist: 5,
+      depth: 2,
+      tracksPerSimilar: 4,
+      filter: { excludeTracks: ["live"], excludeAlbums: [] },
+    });
+  });
+
+  it("parses a playlist source", () => {
+    expect(parseSimilarArgs(["--playlist", "42", "--seeds", "8", "--apply"])).toEqual({
+      source: { type: "playlist", playlistId: 42, maxSeeds: 8, apply: true },
+      similarPerArtist: 3,
+      depth: 1,
+      tracksPerSimilar: 3,
+    });
+    expect(parseSimilarArgs(["--playlist", "42"]).source).toEqual({
+      type: "playlist",
+      playlistId: 42,
+      maxSeeds: 10,
+      apply: false,
+    });
+  });
+
+  it("requires exactly one of --name and --playlist", () => {
+    expect(() => parseSimilarArgs(["Nirvana"])).toThrow(/--name.*--playlist/);
+    expect(() => parseSimilarArgs(["--name", "x", "--playlist", "1"])).toThrow(/only one/i);
+  });
+
+  it("rejects options that belong to the other source", () => {
+    expect(() => parseSimilarArgs(["--name", "x", "--apply", "A"])).toThrow(/--apply/);
+    expect(() => parseSimilarArgs(["--name", "x", "--seeds", "3", "A"])).toThrow(/--seeds/);
+    expect(() => parseSimilarArgs(["--playlist", "1", "--seed-tracks", "2"])).toThrow(
+      /--seed-tracks/,
+    );
+    expect(() => parseSimilarArgs(["--playlist", "1", "--public"])).toThrow(/--public/);
+    expect(() => parseSimilarArgs(["--playlist", "1", "Nirvana"])).toThrow(/Nirvana/);
+  });
+
+  it.each([
+    ["--similar", "0"],
+    ["--similar", "21"],
+    ["--depth", "4"],
+    ["--tracks", "31"],
+    ["--tracks", "two"],
+    ["--seed-tracks", "-1"],
+  ])("rejects %s %s", (flag, value) => {
+    expect(() => parseSimilarArgs(["--name", "x", flag, value, "A"])).toThrow(flag);
+  });
+
+  it("rejects a bad playlist id or seed count", () => {
+    expect(() => parseSimilarArgs(["--playlist", "abc"])).toThrow(/--playlist/);
+    expect(() => parseSimilarArgs(["--playlist", "1", "--seeds", "0"])).toThrow(/--seeds/);
+  });
+
+  it("rejects --discs, which only the album tool has", () => {
+    expect(() => parseSimilarArgs(["--name", "x", "--discs", "1", "A"])).toThrow(/--discs/);
   });
 });
