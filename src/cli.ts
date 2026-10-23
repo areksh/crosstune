@@ -19,16 +19,21 @@
  *       Vertical-slice smoke test (extraction -> sign-in -> one API call).
  *
  *   qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] \
+ *       [--exclude-track <term>]... [--exclude-album <term>]... \
  *       "Artist One" "Artist Two" ...
  *       Build a playlist from the given artists' top tracks. Artist names may
- *       also be piped on stdin, one per line.
+ *       also be piped on stdin, one per line. Tracks whose title, or whose
+ *       album's title, matches an exclude term are replaced by the artist's
+ *       next most popular tracks.
  *
  *   qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] \
- *       [--public] "Artist One - Album One" "Artist Two - Album Two" ...
+ *       [--public] [--discs <list>] [--exclude-track <term>]... \
+ *       [--exclude-album <term>]... "Artist One - Album One" ...
  *       Build a playlist from whole albums. Each entry is "Artist - Album";
  *       entries may also be piped on stdin, one per line. When an album has
  *       several versions, --prefer picks one: highest-quality (default), newest,
- *       or oldest.
+ *       or oldest. Releases matching --exclude-album are never picked; tracks
+ *       matching --exclude-track, or on a disc outside --discs, are left out.
  *
  *   qobuz-helper deduplicate (--playlist <id> | --favourites)
  *                            [--keep <strategy>] [--apply]
@@ -91,6 +96,7 @@ import {
   type DedupTrack,
 } from "./features/deduplicate.js";
 import { buildPlaylistFromArtists } from "./features/playlist-from-artists.js";
+import { compileTrackFilter } from "./features/track-filter.js";
 import {
   buildBackup,
   collectCollection,
@@ -278,13 +284,16 @@ function planPlaylistFromArtists(
       ...(parsed.tracksPerArtist !== undefined && {
         tracksPerArtist: parsed.tracksPerArtist,
       }),
+      ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
     });
 
     logger.info(
       `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
     );
     for (const resolved of result.resolvedArtists) {
-      logger.info(`  ${resolved.artist.name}: ${resolved.trackCount} tracks`);
+      logger.info(
+        `  ${resolved.artist.name}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
+      );
     }
     for (const partial of result.partialArtists) {
       logger.info(
@@ -348,6 +357,7 @@ function planPlaylistFromAlbums(
       playlistName: parsed.playlistName,
       preference: parsed.preference,
       isPublic: parsed.isPublic,
+      ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
     });
 
     logger.info(
@@ -357,16 +367,26 @@ function planPlaylistFromAlbums(
       const version =
         resolved.album.version === undefined ? "" : ` [${resolved.album.version}]`;
       logger.info(
-        `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks`,
+        `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
       );
     }
     if (result.unresolvedAlbums.length > 0) {
       logger.warn(`not found: ${result.unresolvedAlbums.join(", ")}`);
     }
+    if (result.excludedAlbums.length > 0) {
+      logger.warn(
+        `every release excluded by --exclude-album: ${result.excludedAlbums.join(", ")}`,
+      );
+    }
     if (result.failedAlbums.length > 0) {
       logger.warn(`could not fetch tracks: ${result.failedAlbums.join(", ")}`);
     }
   };
+}
+
+/** " (N excluded)" for a summary line, or nothing when the filter left everything in. */
+function excludedNote(count: number): string {
+  return count > 0 ? ` (${count} excluded)` : "";
 }
 
 /**
@@ -643,8 +663,8 @@ function printUsage(): void {
       "  qobuz-helper logout",
       "  qobuz-helper ui",
       "  qobuz-helper check",
-      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] "Artist" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] "Artist - Album" ...',
+      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... "Artist - Album" ...',
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
@@ -655,6 +675,8 @@ function printUsage(): void {
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
       "Album version preferences: highest-quality (default), newest, oldest.",
+      "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
+      "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",

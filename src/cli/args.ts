@@ -9,6 +9,11 @@ import {
   DEFAULT_ALBUM_PREFERENCE,
   type AlbumPreference,
 } from "../features/playlist-from-albums.js";
+import {
+  compileTerm,
+  parseDiscList,
+  type TrackFilterSpec,
+} from "../features/track-filter.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
 export interface ExtractedLogLevel {
@@ -55,6 +60,8 @@ export interface PlaylistArgs {
   artists: string[];
   tracksPerArtist?: number;
   isPublic: boolean;
+  /** Present only when an exclude flag was given. */
+  filter?: TrackFilterSpec;
 }
 
 export interface AlbumPlaylistArgs {
@@ -63,6 +70,63 @@ export interface AlbumPlaylistArgs {
   entries: string[];
   preference: AlbumPreference;
   isPublic: boolean;
+  /** Present only when an exclude or `--discs` flag was given. */
+  filter?: TrackFilterSpec;
+}
+
+/** Accumulates the filter flags shared by the playlist commands. */
+class FilterFlags {
+  readonly #excludeTracks: string[] = [];
+  readonly #excludeAlbums: string[] = [];
+  #discs: number[] | undefined;
+  #given = false;
+  readonly #allowDiscs: boolean;
+
+  constructor(allowDiscs: boolean) {
+    this.#allowDiscs = allowDiscs;
+  }
+
+  /**
+   * Consume the filter flag at `argv[i]`, if it is one, returning how many
+   * arguments it used (0 when `argv[i]` is not a filter flag). Terms and disc
+   * lists are validated here so a typo fails before sign-in.
+   *
+   * @throws {Error} if the flag has no value, or the value is invalid.
+   */
+  take(argv: readonly string[], i: number): number {
+    const flag = argv[i];
+    if (
+      flag !== "--exclude-track" &&
+      flag !== "--exclude-album" &&
+      !(flag === "--discs" && this.#allowDiscs)
+    ) {
+      return 0;
+    }
+    const value = argv[i + 1];
+    if (value === undefined) {
+      throw new Error(`${flag} requires a value`);
+    }
+    this.#given = true;
+    if (flag === "--discs") {
+      this.#discs = parseDiscList(value);
+    } else {
+      compileTerm(value);
+      (flag === "--exclude-track" ? this.#excludeTracks : this.#excludeAlbums).push(value);
+    }
+    return 2;
+  }
+
+  /** The spec, or undefined if no filter flag was given. */
+  spec(): TrackFilterSpec | undefined {
+    if (!this.#given) {
+      return undefined;
+    }
+    return {
+      excludeTracks: this.#excludeTracks,
+      excludeAlbums: this.#excludeAlbums,
+      ...(this.#discs !== undefined && { discs: this.#discs }),
+    };
+  }
 }
 
 /** Where the deduplicator should look for tracks. */
@@ -148,17 +212,25 @@ function isKeepStrategy(value: string | undefined): value is KeepStrategy {
  * Parse the arguments for the `playlist-from-artists` command.
  *
  * Recognised options: `--name <name>` (required), `--tracks <n>` (positive
- * integer), and `--public`. All remaining positional arguments are artist names.
+ * integer), `--public`, and the repeatable `--exclude-track <term>` and
+ * `--exclude-album <term>`. All remaining positional arguments are artist names.
  *
- * @throws {Error} if `--name` is missing or `--tracks` is not a positive integer.
+ * @throws {Error} if `--name` is missing, `--tracks` is not a positive integer,
+ *   or an exclude term is missing or an invalid `/regex/`.
  */
 export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
   let playlistName: string | undefined;
   let tracksPerArtist: number | undefined;
   let isPublic = false;
   const artists: string[] = [];
+  const filter = new FilterFlags(false);
 
   for (let i = 0; i < argv.length; i += 1) {
+    const used = filter.take(argv, i);
+    if (used > 0) {
+      i += used - 1;
+      continue;
+    }
     const arg = argv[i];
     switch (arg) {
       case "--name":
@@ -189,11 +261,13 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
     throw new Error("--name <playlist name> is required");
   }
 
+  const spec = filter.spec();
   return {
     playlistName,
     artists,
     isPublic,
     ...(tracksPerArtist !== undefined && { tracksPerArtist }),
+    ...(spec !== undefined && { filter: spec }),
   };
 }
 
@@ -201,18 +275,27 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
  * Parse the arguments for the `playlist-from-albums` command.
  *
  * Recognised options: `--name <name>` (required), `--prefer <preference>` (which
- * version to pick when an album has several; default `highest-quality`), and
- * `--public`. All remaining positional arguments are "Artist - Album" lines.
+ * version to pick when an album has several; default `highest-quality`),
+ * `--public`, `--discs <list>` (e.g. "1" or "1,3-4"), and the repeatable
+ * `--exclude-track <term>` and `--exclude-album <term>`. All remaining
+ * positional arguments are "Artist - Album" lines.
  *
- * @throws {Error} if `--name` is missing or `--prefer` is not a valid preference.
+ * @throws {Error} if `--name` is missing, `--prefer` is not a valid preference,
+ *   or a filter flag is missing its value or invalid.
  */
 export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   let playlistName: string | undefined;
   let preference: AlbumPreference = DEFAULT_ALBUM_PREFERENCE;
   let isPublic = false;
   const entries: string[] = [];
+  const filter = new FilterFlags(true);
 
   for (let i = 0; i < argv.length; i += 1) {
+    const used = filter.take(argv, i);
+    if (used > 0) {
+      i += used - 1;
+      continue;
+    }
     const arg = argv[i];
     switch (arg) {
       case "--name":
@@ -244,7 +327,14 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
     throw new Error("--name <playlist name> is required");
   }
 
-  return { playlistName, entries, preference, isPublic };
+  const spec = filter.spec();
+  return {
+    playlistName,
+    entries,
+    preference,
+    isPublic,
+    ...(spec !== undefined && { filter: spec }),
+  };
 }
 
 function isAlbumPreference(value: string | undefined): value is AlbumPreference {

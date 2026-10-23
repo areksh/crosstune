@@ -78,6 +78,38 @@ describe("parsePlaylistArgs", () => {
       parsePlaylistArgs(["--name", "x", "--tracks", "0", "A"]),
     ).toThrow(/tracks/i);
   });
+
+  it("collects repeated --exclude-track and --exclude-album terms", () => {
+    const parsed = parsePlaylistArgs([
+      "--name",
+      "x",
+      "--exclude-track",
+      "live",
+      "--exclude-album",
+      "greatest hits",
+      "--exclude-track",
+      "/remix|edit/",
+      "A",
+    ]);
+    expect(parsed.filter).toEqual({
+      excludeTracks: ["live", "/remix|edit/"],
+      excludeAlbums: ["greatest hits"],
+    });
+    expect(parsed.artists).toEqual(["A"]);
+  });
+
+  it("omits the filter when no exclude flag is given", () => {
+    expect(parsePlaylistArgs(["--name", "x", "A"]).filter).toBeUndefined();
+  });
+
+  it("rejects an exclude flag with no value or an invalid regex", () => {
+    expect(() => parsePlaylistArgs(["--name", "x", "--exclude-track"])).toThrow(
+      /--exclude-track/,
+    );
+    expect(() =>
+      parsePlaylistArgs(["--name", "x", "--exclude-album", "/(oops/", "A"]),
+    ).toThrow(/\/\(oops\//);
+  });
 });
 
 describe("parseAlbumArgs", () => {
@@ -114,6 +146,33 @@ describe("parseAlbumArgs", () => {
     expect(() =>
       parseAlbumArgs(["--name", "x", "--prefer", "cheapest", "A - B"]),
     ).toThrow(/prefer/i);
+  });
+
+  it("parses exclude terms and a --discs list into a filter", () => {
+    const parsed = parseAlbumArgs([
+      "--name",
+      "x",
+      "--discs",
+      "1,3-4",
+      "--exclude-track",
+      "demo",
+      "--exclude-album",
+      "live",
+      "A - B",
+    ]);
+    expect(parsed.filter).toEqual({
+      excludeTracks: ["demo"],
+      excludeAlbums: ["live"],
+      discs: [1, 3, 4],
+    });
+    expect(parsed.entries).toEqual(["A - B"]);
+  });
+
+  it("rejects a malformed or missing --discs list", () => {
+    expect(() => parseAlbumArgs(["--name", "x", "--discs", "two", "A - B"])).toThrow(
+      /disc/i,
+    );
+    expect(() => parseAlbumArgs(["--name", "x", "--discs"])).toThrow(/--discs/);
   });
 });
 
