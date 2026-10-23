@@ -339,6 +339,16 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+/* The live size estimate; large runs are shown as a warning. */
+.estimate {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.estimate.large {
+  color: var(--warn);
+}
+
 .similar-group {
   margin: 0.6rem 0 0.6rem 1.25rem;
 }

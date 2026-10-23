@@ -333,28 +333,28 @@ describe("filter in playlist requests", () => {
   });
 });
 
-describe("POST /api/similar/resolve", () => {
-  const similarService = () =>
-    service({
-      searchArtists: vi.fn(async (q: string) => [{ id: 1, name: q }]),
-      getSimilarArtists: vi.fn(async (id: number) =>
-        id === 1 ? [{ id: 11, name: "Mudhoney" }, { id: 12, name: "Hole" }] : [],
+const similarService = () =>
+  service({
+    searchArtists: vi.fn(async (q: string) => [{ id: 1, name: q }]),
+    getSimilarArtists: vi.fn(async (id: number) =>
+      id === 1 ? [{ id: 11, name: "Mudhoney" }, { id: 12, name: "Hole" }] : [],
+    ),
+    getArtistTopTracks: vi.fn(async (id: number, limit?: number) =>
+      Array.from({ length: 10 }, (_v, i) => ({ id: id * 100 + i, title: `t${i}` })).slice(
+        0,
+        limit,
       ),
-      getArtistTopTracks: vi.fn(async (id: number, limit?: number) =>
-        Array.from({ length: 10 }, (_v, i) => ({ id: id * 100 + i, title: `t${i}` })).slice(
-          0,
-          limit,
-        ),
-      ),
-      getPlaylistTracks: vi.fn(async () => [
-        { id: 5, title: "Lithium", artistId: 1, artist: "Nirvana" },
-      ]),
-    });
+    ),
+    getPlaylistTracks: vi.fn(async () => [
+      { id: 5, title: "Lithium", artistId: 1, artist: "Nirvana" },
+    ]),
+  });
 
-  it("plans from typed artists with the default counts", async () => {
+describe("POST /api/similar/walk", () => {
+  it("walks from typed artists with the default counts, fetching only seed tracks", async () => {
     const svc = similarService();
     const res = await handleApi(
-      request("POST", "/api/similar/resolve", {
+      request("POST", "/api/similar/walk", {
         source: { type: "artists", artists: ["Nirvana", "  "] },
       }),
       deps({ service: svc }),
@@ -362,67 +362,63 @@ describe("POST /api/similar/resolve", () => {
     expect(res.status).toBe(200);
     const body = res.body as {
       seeds: Array<{ artist: Artist; tracks: Track[] }>;
-      similar: Array<{ artist: Artist; tracks: Track[]; level: number }>;
+      found: Array<{ artist: Artist; level: number }>;
       truncated: boolean;
     };
-    // Defaults: 5 seed tracks, 3 similar per artist, 3 tracks each, depth 1.
+    // Defaults: 5 seed tracks, 3 similar per artist, depth 1.
     expect(body.seeds.map((s) => [s.artist.id, s.tracks.length])).toEqual([[1, 5]]);
-    expect(body.similar.map((s) => [s.artist.id, s.tracks.length, s.level])).toEqual([
-      [11, 3, 1],
-      [12, 3, 1],
+    expect(body.found.map((f) => [f.artist.id, f.level])).toEqual([
+      [11, 1],
+      [12, 1],
     ]);
     expect(svc.getSimilarArtists).toHaveBeenCalledWith(1, 500);
+    expect(svc.getArtistTopTracks).not.toHaveBeenCalledWith(11, expect.anything());
     expect(body.truncated).toBe(false);
   });
 
-  it("plans from a playlist, honouring the given counts and filter", async () => {
+  it("walks from a playlist, honouring depth", async () => {
     const svc = similarService();
     const res = await handleApi(
-      request("POST", "/api/similar/resolve", {
+      request("POST", "/api/similar/walk", {
         source: { type: "playlist", playlistId: 42, maxSeeds: 5 },
         similarPerArtist: 1,
         depth: 2,
-        tracksPerSimilar: 2,
-        filter: { excludeTracks: ["t0"] },
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     const body = res.body as {
       seeds: Array<{ artist: Artist; tracks: Track[] }>;
-      similar: Array<{ artist: Artist; tracks: Track[]; excluded: unknown[] }>;
+      found: Array<{ artist: Artist }>;
     };
     expect(svc.getPlaylistTracks).toHaveBeenCalledWith(42);
     expect(body.seeds).toEqual([
       { query: "Nirvana", artist: { id: 1, name: "Nirvana" }, tracks: [], excluded: [] },
     ]);
-    expect(body.similar.map((s) => s.artist.id)).toEqual([11]);
-    expect(body.similar[0]?.tracks.map((t) => t.id)).toEqual([1101, 1102]);
-    expect(body.similar[0]?.excluded).toHaveLength(1);
+    expect(body.found.map((f) => f.artist.id)).toEqual([11]);
     // Depth 2 looked up the level-1 artist too.
     expect(svc.getSimilarArtists).toHaveBeenCalledWith(11, 500);
   });
 
   it("accepts large counts, deep walks and a chosen artist cap", async () => {
-    const svc = similarService();
     const res = await handleApi(
-      request("POST", "/api/similar/resolve", {
+      request("POST", "/api/similar/walk", {
         source: { type: "artists", artists: ["Nirvana"] },
         similarPerArtist: 70,
         depth: 6,
         maxArtists: 1,
       }),
-      deps({ service: svc }),
+      deps({ service: similarService() }),
     );
     expect(res.status).toBe(200);
-    const body = res.body as { similar: unknown[]; truncated: boolean };
-    expect(body.similar).toHaveLength(1);
+    const body = res.body as { found: unknown[]; truncated: boolean };
+    expect(body.found).toHaveLength(1);
     expect(body.truncated).toBe(true);
   });
 
   it("accepts zero seed tracks", async () => {
     const res = await handleApi(
-      request("POST", "/api/similar/resolve", {
+      request("POST", "/api/similar/walk", {
         source: { type: "artists", artists: ["Nirvana"], tracksPerSeed: 0 },
       }),
       deps({ service: similarService() }),
@@ -448,7 +444,53 @@ describe("POST /api/similar/resolve", () => {
     ["31 tracks per similar artist", { source: { type: "artists", artists: ["A"] }, tracksPerSimilar: 31 }],
     ["a bad filter", { source: { type: "artists", artists: ["A"] }, filter: { discs: 1 } }],
   ])("rejects %s", async (_label, body) => {
-    const res = await handleApi(request("POST", "/api/similar/resolve", body), deps());
+    const res = await handleApi(request("POST", "/api/similar/walk", body), deps());
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/similar/tracks", () => {
+  it("fetches a batch of artists' top tracks with the filter, flagging empty ones", async () => {
+    const svc = similarService();
+    svc.getArtistTopTracks = vi.fn(async (id: number, limit?: number) =>
+      id === 12
+        ? []
+        : Array.from({ length: 10 }, (_v, i) => ({ id: id * 100 + i, title: `t${i}` })).slice(
+            0,
+            limit,
+          ),
+    );
+    const res = await handleApi(
+      request("POST", "/api/similar/tracks", {
+        artists: [
+          { id: 11, name: "Mudhoney" },
+          { id: 12, name: "Restricted" },
+        ],
+        tracksPerSimilar: 2,
+        filter: { excludeTracks: ["t0"] },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      fetched: Array<{ artist: Artist; tracks: Track[]; excluded: unknown[] }>;
+      emptyArtists: Array<{ artist: Artist }>;
+    };
+    expect(body.fetched.map((f) => [f.artist.id, f.tracks.map((t) => t.id)])).toEqual([
+      [11, [1101, 1102]],
+    ]);
+    expect(body.fetched[0]?.excluded).toHaveLength(1);
+    expect(body.emptyArtists.map((a) => a.artist.id)).toEqual([12]);
+  });
+
+  it.each([
+    ["no artists", { artists: [] }],
+    ["a malformed artist", { artists: [{ id: "x", name: "A" }] }],
+    ["too many artists", { artists: Array.from({ length: 51 }, (_v, i) => ({ id: i + 1, name: "A" })) }],
+    ["31 tracks", { artists: [{ id: 1, name: "A" }], tracksPerSimilar: 31 }],
+    ["a bad filter", { artists: [{ id: 1, name: "A" }], filter: "live" }],
+  ])("rejects %s", async (_label, body) => {
+    const res = await handleApi(request("POST", "/api/similar/tracks", body), deps());
     expect(res.status).toBe(400);
   });
 });

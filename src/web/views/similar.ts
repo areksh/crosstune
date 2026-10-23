@@ -1,12 +1,15 @@
 /**
  * Similar-artists view.
  *
- * Drives the resolve -> preview -> commit flow: send the seeds (typed artists
- * or a playlist) and walk settings to the server, show each seed with the
- * similar artists found from it (indented, labelled with who they were found
- * from), let the user untick or re-tick tracks, choose a destination, then
- * commit. This is DOM glue; the walk and the filtering live in the tested
- * server modules.
+ * Drives the estimate -> walk -> fetch tracks -> preview -> commit flow. As
+ * the settings change, the server estimates the run's largest outcome and the
+ * view shows it (a large run must be confirmed). The walk finds the similar
+ * artists in one request; their tracks are then fetched in small batches, so
+ * no single request runs long enough for the browser to abort it. The preview
+ * shows each seed with the similar artists found from it (indented, labelled
+ * with who they were found from); the user unticks or re-ticks tracks, chooses
+ * a destination, then commits. This is DOM glue; the walk, the estimate and the
+ * filtering live in the tested server modules.
  */
 
 import { api, type Artist, type Exclusion, type Playlist, type Track } from "../api.js";
@@ -35,6 +38,43 @@ interface UnderfilledArtist {
   requested: number;
 }
 
+type FoundArtist = Omit<SimilarGroup, "tracks" | "excluded">;
+
+interface WalkResponse {
+  seeds: SeedGroup[];
+  found: FoundArtist[];
+  unresolvedArtists: string[];
+  emptyArtists: UnderfilledArtist[];
+  partialArtists: UnderfilledArtist[];
+  truncated: boolean;
+}
+
+interface TracksResponse {
+  fetched: { artist: Artist; tracks: Track[]; excluded: SimilarGroup["excluded"] }[];
+  emptyArtists: UnderfilledArtist[];
+  partialArtists: UnderfilledArtist[];
+}
+
+interface EstimateResponse {
+  large: boolean;
+  summary: string;
+}
+
+/** Artists per `/api/similar/tracks` request: a few seconds of work each. */
+const TRACK_BATCH = 25;
+
+/** Inputs whose change alters the estimate. */
+const ESTIMATE_INPUTS = [
+  "similar-artists",
+  "similar-seed-tracks",
+  "similar-source-playlist",
+  "similar-max-seeds",
+  "similar-per-artist",
+  "similar-depth",
+  "similar-max-artists",
+  "similar-tracks",
+];
+
 interface PlanResponse {
   seeds: SeedGroup[];
   similar: SimilarGroup[];
@@ -60,6 +100,11 @@ export function initSimilarView(): void {
   for (const radio of document.querySelectorAll('input[name="similar-target"]')) {
     radio.addEventListener("change", onTargetChange);
   }
+  for (const id of ESTIMATE_INPUTS) {
+    el(id).addEventListener("input", scheduleEstimate);
+    el(id).addEventListener("change", scheduleEstimate);
+  }
+  scheduleEstimate();
 }
 
 function checkedValue(name: string, fallback: string): string {
@@ -77,22 +122,21 @@ function onSourceChange(): void {
   el("similar-artists-fields").hidden = fromPlaylist;
   el("similar-playlist-fields").hidden = !fromPlaylist;
   if (fromPlaylist) {
-    void loadPlaylists();
+    void loadPlaylists().then(scheduleEstimate);
   }
+  scheduleEstimate();
 }
 
-async function onResolve(): Promise<void> {
-  const button = el<HTMLButtonElement>("resolve-similar");
-  const errorNode = el("resolve-similar-error");
-  showError(errorNode, undefined);
-
-  const fromPlaylist = checkedValue("similar-source", "artists") === "playlist";
+/**
+ * The request body for the current settings, or a message saying what is
+ * missing. Number fields are sent as typed; the server validates them.
+ */
+function settingsBody(): { body: Record<string, unknown> } | { missing: string } {
   let source: unknown;
-  if (fromPlaylist) {
+  if (checkedValue("similar-source", "artists") === "playlist") {
     const playlistId = el<HTMLSelectElement>("similar-source-playlist").value;
     if (playlistId === "") {
-      showError(errorNode, "Choose a playlist.");
-      return;
+      return { missing: "Choose a playlist." };
     }
     source = {
       type: "playlist",
@@ -102,25 +146,88 @@ async function onResolve(): Promise<void> {
   } else {
     const artists = readTerms("similar-artists");
     if (artists.length === 0) {
-      showError(errorNode, "Enter at least one artist.");
-      return;
+      return { missing: "Enter at least one artist." };
     }
     source = { type: "artists", artists, tracksPerSeed: numberInput("similar-seed-tracks") };
   }
-
-  button.disabled = true;
-  button.textContent = "Searching...";
-  try {
-    const plan = await api<PlanResponse>("POST", "/api/similar/resolve", {
+  return {
+    body: {
       source,
       similarPerArtist: numberInput("similar-per-artist"),
       depth: numberInput("similar-depth"),
+      maxArtists: numberInput("similar-max-artists"),
       tracksPerSimilar: numberInput("similar-tracks"),
       filter: {
         excludeTracks: readTerms("similar-exclude-tracks"),
         excludeAlbums: readTerms("similar-exclude-albums"),
       },
-    });
+    },
+  };
+}
+
+let estimateTimer: ReturnType<typeof setTimeout> | undefined;
+let estimateRequest = 0;
+
+/** Refresh the estimate shortly after the settings stop changing. */
+function scheduleEstimate(): void {
+  clearTimeout(estimateTimer);
+  estimateTimer = setTimeout(() => void refreshEstimate(), 300);
+}
+
+/** Ask the server to size the current settings and show the result. */
+async function refreshEstimate(): Promise<EstimateResponse | undefined> {
+  const node = el("similar-estimate");
+  const settings = settingsBody();
+  if ("missing" in settings) {
+    node.hidden = true;
+    return undefined;
+  }
+  const request = (estimateRequest += 1);
+  try {
+    const estimate = await api<EstimateResponse>("POST", "/api/similar/estimate", settings.body);
+    if (request === estimateRequest) {
+      node.hidden = false;
+      node.classList.toggle("large", estimate.large);
+      node.textContent = estimate.large
+        ? `This is a very large run: ${estimate.summary}. You will be asked to confirm.`
+        : `This run could add ${estimate.summary}.`;
+    }
+    return estimate;
+  } catch (error) {
+    if (request === estimateRequest) {
+      // Invalid settings: say why here, before the user presses the button.
+      node.hidden = false;
+      node.classList.add("large");
+      node.textContent = (error as Error).message;
+    }
+    return undefined;
+  }
+}
+
+async function onResolve(): Promise<void> {
+  const button = el<HTMLButtonElement>("resolve-similar");
+  const errorNode = el("resolve-similar-error");
+  showError(errorNode, undefined);
+
+  const settings = settingsBody();
+  if ("missing" in settings) {
+    showError(errorNode, settings.missing);
+    return;
+  }
+  const fromPlaylist = checkedValue("similar-source", "artists") === "playlist";
+
+  button.disabled = true;
+  button.textContent = "Searching...";
+  try {
+    const estimate = await refreshEstimate();
+    if (
+      estimate?.large === true &&
+      !window.confirm(`This run could add ${estimate.summary}. Go ahead?`)
+    ) {
+      return;
+    }
+    const walk = await api<WalkResponse>("POST", "/api/similar/walk", settings.body);
+    const plan = await fetchTracksInBatches(walk, settings.body, button);
     renderPreview(plan, fromPlaylist);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -128,6 +235,51 @@ async function onResolve(): Promise<void> {
     button.disabled = false;
     button.textContent = "Find similar artists";
   }
+}
+
+/**
+ * Fetch the walked artists' top tracks a batch at a time (showing progress on
+ * the button), and join them into a plan. Artists with no tracks are dropped
+ * and flagged, as the server does for a seed.
+ */
+async function fetchTracksInBatches(
+  walk: WalkResponse,
+  body: Record<string, unknown>,
+  button: HTMLButtonElement,
+): Promise<PlanResponse> {
+  const byId = new Map<number, TracksResponse["fetched"][number]>();
+  const emptyArtists = [...walk.emptyArtists];
+  const partialArtists = [...walk.partialArtists];
+  const total = walk.found.length;
+  for (let start = 0; start < total; start += TRACK_BATCH) {
+    button.textContent = `Fetching tracks ${start}/${total}...`;
+    const batch = walk.found.slice(start, start + TRACK_BATCH).map((f) => f.artist);
+    const result = await api<TracksResponse>("POST", "/api/similar/tracks", {
+      artists: batch,
+      tracksPerSimilar: body["tracksPerSimilar"],
+      filter: body["filter"],
+    });
+    for (const entry of result.fetched) {
+      byId.set(entry.artist.id, entry);
+    }
+    emptyArtists.push(...result.emptyArtists);
+    partialArtists.push(...result.partialArtists);
+  }
+  const similar: SimilarGroup[] = [];
+  for (const node of walk.found) {
+    const entry = byId.get(node.artist.id);
+    if (entry !== undefined) {
+      similar.push({ ...node, tracks: entry.tracks, excluded: entry.excluded });
+    }
+  }
+  return {
+    seeds: walk.seeds,
+    similar,
+    unresolvedArtists: walk.unresolvedArtists,
+    emptyArtists,
+    partialArtists,
+    truncated: walk.truncated,
+  };
 }
 
 function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
@@ -143,7 +295,7 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
   showError(
     el("similar-truncated"),
     plan.truncated
-      ? "Stopped at 100 similar artists. Lower the depth or the similar artists per artist for a fuller walk."
+      ? `Stopped at ${numberInput("similar-max-artists")} similar artists. Raise that limit, or lower the depth or the similar artists per artist, for a fuller walk.`
       : undefined,
   );
   showError(

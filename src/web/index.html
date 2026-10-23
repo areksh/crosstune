@@ -364,11 +364,15 @@
             </div>
             <label class="field field-inline">
               <span>Similar artists per artist</span>
-              <input id="similar-per-artist" type="number" min="1" max="20" value="3" />
+              <input id="similar-per-artist" type="number" min="1" value="3" />
             </label>
             <label class="field field-inline">
               <span>Depth</span>
-              <input id="similar-depth" type="number" min="1" max="3" value="1" />
+              <input id="similar-depth" type="number" min="1" value="1" />
+            </label>
+            <label class="field field-inline">
+              <span>Stop after this many similar artists</span>
+              <input id="similar-max-artists" type="number" min="1" value="100" />
             </label>
             <label class="field field-inline">
               <span>Top tracks per similar artist</span>
@@ -376,10 +380,12 @@
             </label>
             <p class="hint">
               Depth 1 adds artists similar to yours; depth 2 also adds artists
-              similar to those, and so on. Each artist is used once, and at most
-              100 similar artists are taken. Artists already in a source
-              playlist are never suggested.
+              similar to those, and so on. Each artist is used once, artists
+              already in a source playlist are never suggested, and the walk
+              stops after the number of similar artists you set. Qobuz lists
+              about 70 similar artists for a well-known artist.
             </p>
+            <p id="similar-estimate" class="estimate" hidden></p>
             <details class="filters">
               <summary>Filters</summary>
               <div class="filter-grid">

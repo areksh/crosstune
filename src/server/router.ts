@@ -65,9 +65,10 @@ import {
 import {
   describeEstimate,
   estimateSimilar,
-  planFromArtists,
-  planFromPlaylist,
+  fetchArtistTracks,
   SIMILAR_SETTINGS,
+  walkFromArtists,
+  walkFromPlaylist,
   type SettingBounds,
   type WalkOptions,
 } from "../features/similar-artists.js";
@@ -183,8 +184,11 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.method === "POST" && req.path === "/api/similar/estimate") {
     return estimateSimilarRun(req.body);
   }
-  if (req.method === "POST" && req.path === "/api/similar/resolve") {
-    return resolveSimilar(req.body, deps);
+  if (req.method === "POST" && req.path === "/api/similar/walk") {
+    return walkSimilar(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/similar/tracks") {
+    return similarTracks(req.body, deps);
   }
   if (req.method === "POST" && req.path === "/api/deduplicate/scan") {
     return scan(req.body, deps);
@@ -270,28 +274,77 @@ async function albumTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
 }
 
 /**
- * Plan a playlist from similar artists, seeded from typed artists or an
- * existing playlist, without writing. The view commits via `/api/commit`.
+ * Walk the similar artists of typed artists or an existing playlist, without
+ * fetching the found artists' tracks (seeds' own tracks are included). The
+ * view then fetches tracks in batches via `/api/similar/tracks`, so no single
+ * request runs long enough for the browser to abort it, and commits via
+ * `/api/commit`.
  */
-async function resolveSimilar(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+async function walkSimilar(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const input = parseSimilarInput(body);
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
   const { source, walk } = input.value;
-  const plan =
+  const result =
     source.type === "artists"
-      ? await planFromArtists(deps.service, {
+      ? await walkFromArtists(deps.service, {
           ...walk,
           artists: source.artists,
           tracksPerSeed: source.tracksPerSeed,
         })
-      : await planFromPlaylist(deps.service, {
+      : await walkFromPlaylist(deps.service, {
           ...walk,
           playlistId: source.playlistId,
           maxSeeds: source.maxSeeds,
         });
-  return { status: 200, body: plan };
+  return { status: 200, body: result };
+}
+
+/** The most artists `/api/similar/tracks` takes per request. */
+const MAX_TRACK_BATCH = 50;
+
+/** Fetch the top tracks of a batch of (walked) artists. */
+async function similarTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (!isRecord(body)) {
+    return { status: 400, body: { error: "expected a JSON object" } };
+  }
+  const raw = body["artists"];
+  const artists = Array.isArray(raw)
+    ? raw.filter(
+        (a): a is Artist =>
+          isRecord(a) && Number.isSafeInteger(a["id"]) && typeof a["name"] === "string",
+      )
+    : [];
+  if (!Array.isArray(raw) || artists.length === 0 || artists.length !== raw.length) {
+    return { status: 400, body: { error: "artists must be a non-empty array of { id, name }" } };
+  }
+  if (artists.length > MAX_TRACK_BATCH) {
+    return {
+      status: 400,
+      body: { error: `at most ${MAX_TRACK_BATCH} artists per request` },
+    };
+  }
+  const tracksPerSimilar = intField(
+    body,
+    "tracksPerSimilar",
+    "tracksPerSimilar",
+    SIMILAR_SETTINGS.tracksPerSimilar,
+  );
+  if (!tracksPerSimilar.ok) {
+    return { status: 400, body: { error: tracksPerSimilar.error } };
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return { status: 400, body: { error: filter.error } };
+  }
+  const result = await fetchArtistTracks(
+    deps.service,
+    artists.map((a) => ({ id: a.id, name: a.name })),
+    tracksPerSimilar.value,
+    filter.value,
+  );
+  return { status: 200, body: result };
 }
 
 /**
