@@ -55,12 +55,19 @@ export interface TrackFilter {
   readonly discs: ReadonlySet<number>;
 }
 
-/** Why a track (or album release) was excluded. */
+/**
+ * Why a track (or album release) was excluded: by a filter term or the disc
+ * list, or -- by a plan-wide {@link ./song-picker.ts} option -- because it is
+ * already a favourite or is a later copy of a song the plan already has (`of`
+ * names the first copy).
+ */
 export type Exclusion =
   | { kind: "track"; term: string }
   | { kind: "album"; term: string }
   | { kind: "artist"; term: string }
-  | { kind: "disc"; disc: number };
+  | { kind: "disc"; disc: number }
+  | { kind: "favourite" }
+  | { kind: "repeat"; of: string };
 
 /** A track with the exclusion that caught it, if any. */
 export interface FilteredTrack {

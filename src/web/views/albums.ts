@@ -23,6 +23,7 @@ import {
 } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { coverSlot, setCover } from "../artwork.js";
+import { PlanControls } from "../plan.js";
 import { groupHead, readTerms, trackRow } from "../tracks.js";
 
 type Preference = "newest" | "oldest" | "highest-quality";
@@ -47,6 +48,8 @@ interface ResolveResponse {
 interface FetchResponse {
   fetched: { albumId: string; tracks: { track: Track; exclusion?: Exclusion }[] }[];
   failedAlbumIds?: string[];
+  /** The run's favourites and songs so far, to send with the next fetch. */
+  picker?: unknown;
 }
 
 type CommitTarget =
@@ -68,6 +71,16 @@ let unresolvedAlbums: string[] = [];
  */
 let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [], excludeArtists: [] };
 
+/**
+ * The "leave out" options as they stood when "Find albums" was pressed, and
+ * the run's picker state once the first fetch returned it: a retry carries it
+ * on, so the favourites are fetched once and "one copy" spans every album.
+ */
+let activePlanOptions = { skipFavourites: false, oneCopy: false };
+let pickerState: unknown;
+
+let controls: PlanControls;
+
 /** True once any fetch has run in this cycle (changes the button wording). */
 let fetchAttempted = false;
 
@@ -76,6 +89,16 @@ let committed = false;
 
 /** Wire up the albums view. Call once on load. */
 export function initAlbumsView(): void {
+  controls = new PlanControls({
+    prefix: "album",
+    countId: "albums-selected-count",
+    groups: () =>
+      groupsWithState("ready").map((group) => [
+        ...group.querySelectorAll<HTMLInputElement>(".album-tracks input[type=checkbox]"),
+      ]),
+    fit: "tail",
+    onUpdate: () => updateCommitButton(),
+  });
   el("resolve-albums").addEventListener("click", () => void onResolve());
   el("commit-albums").addEventListener("click", () => void onCommit());
   el("album-prefer").addEventListener("change", onPreferChange);
@@ -173,6 +196,11 @@ async function onResolve(): Promise<void> {
     const result = await api<ResolveResponse>("POST", request.path, request.body);
     resolvedAlbums = result.resolvedAlbums;
     activeFilter = filter;
+    activePlanOptions = {
+      skipFavourites: el<HTMLInputElement>("album-skip-favourites").checked,
+      oneCopy: el<HTMLInputElement>("album-one-copy").checked,
+    };
+    pickerState = undefined;
     renderPreview(result);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -211,6 +239,7 @@ function renderPreview(result: ResolveResponse): void {
   // A fresh preview starts a new cycle: nothing fetched or written yet.
   fetchAttempted = false;
   committed = false;
+  el("album-plan").hidden = true;
 
   el("albums-preview").hidden = false;
   showError(el("commit-albums-error"), undefined);
@@ -380,27 +409,11 @@ function groupsWithState(state: string): HTMLElement[] {
   return allGroups().filter((group) => group.dataset["state"] === state);
 }
 
-/** The unique, ticked track ids across all fetched albums, in display order. */
-function selectedTrackIds(): number[] {
-  const ids: number[] = [];
-  const seen = new Set<number>();
-  for (const box of document.querySelectorAll<HTMLInputElement>(
-    "#album-groups .album-tracks input[type=checkbox]:checked",
-  )) {
-    const id = Number(box.dataset["trackId"]);
-    if (!seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  }
-  return ids;
-}
-
 function updateSelectedCount(): void {
   const node = el("albums-selected-count");
   if (groupsWithState("ready").length > 0) {
-    const count = selectedTrackIds().length;
-    node.textContent = `${count} track${count === 1 ? "" : "s"} ticked.`;
+    // "N tracks, 1 h 5 min", and the "Plays as" line.
+    controls.refresh();
   } else {
     const count = resolvedAlbums.length;
     node.textContent = `${count} album${count === 1 ? "" : "s"} selected.`;
@@ -499,7 +512,11 @@ async function fetchPending(button: HTMLButtonElement, resultNode: HTMLElement):
   const result = await api<FetchResponse>("POST", "/api/album-tracks", {
     albumIds: toFetch.map((item) => item.id),
     filter: activeFilter,
+    ...(pickerState === undefined ? activePlanOptions : { picker: pickerState }),
   });
+  if (result.picker !== undefined) {
+    pickerState = result.picker;
+  }
 
   const byAlbum = new Map(result.fetched.map((f) => [f.albumId, f.tracks]));
   for (const { group, id } of toFetch) {
@@ -512,6 +529,11 @@ async function fetchPending(button: HTMLButtonElement, resultNode: HTMLElement):
     }
   }
   reportFetchProgress(resultNode);
+  if (pendingGroups().length === 0 && groupsWithState("ready").length > 0) {
+    // Every album is in: offer the order and length, and fit to it.
+    el("album-plan").hidden = false;
+    controls.reset();
+  }
 }
 
 /** Write the ticked tracks of every fetched album to the chosen destination. */
@@ -520,7 +542,8 @@ async function writePlaylist(node: HTMLElement): Promise<void> {
     showError(el("commit-albums-error"), "None of the albums could be fetched.");
     return;
   }
-  const trackIds = selectedTrackIds();
+  // The ticked tracks, each once, in the chosen play order.
+  const trackIds = controls.orderedTrackIds();
   if (trackIds.length === 0) {
     showError(el("commit-albums-error"), "Tick at least one track.");
     return;
@@ -586,7 +609,7 @@ function markGroupReady(
   setGroupStatus(
     group,
     excluded > 0
-      ? `Fetched ${tracks.length} tracks; ${excluded} excluded by your filters (unticked)`
+      ? `Fetched ${tracks.length} tracks; ${excluded} left out (unticked)`
       : `Fetched ${tracks.length} tracks`,
   );
 }
@@ -673,7 +696,7 @@ function updateCommitButton(): void {
     return;
   }
   button.textContent = writeLabel();
-  button.disabled = groupsWithState("ready").length > 0 && selectedTrackIds().length === 0;
+  button.disabled = groupsWithState("ready").length > 0 && controls.count() === 0;
 }
 
 function buildTarget(): CommitTarget | undefined {

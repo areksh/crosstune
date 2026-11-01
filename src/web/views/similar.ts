@@ -16,6 +16,7 @@
 
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { PlanControls } from "../plan.js";
 import {
   groupHead,
   inRankOrder,
@@ -68,12 +69,15 @@ interface WalkResponse {
   partialArtists: UnderfilledArtist[];
   truncated: boolean;
   excludedArtists: Artist[];
+  /** The run's favourites and songs so far, to send with each track batch. */
+  picker?: unknown;
 }
 
 interface TracksResponse {
   fetched: { artist: Artist; tracks: Track[]; excluded: SimilarGroup["excluded"] }[];
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
+  picker?: unknown;
 }
 
 interface EstimateResponse {
@@ -112,9 +116,27 @@ type CommitTarget =
   | { type: "existing"; playlistId: number };
 
 let playlistsLoaded = false;
+let controls: PlanControls;
 
 /** Wire up the similar-artists view. Call once on load. */
 export function initSimilarView(): void {
+  controls = new PlanControls({
+    prefix: "similar",
+    countId: "similar-selected-count",
+    // One group per artist: a seed's own rows, then each similar artist's.
+    groups: () =>
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          "#similar-groups .artist-group, #similar-groups .similar-group",
+        ),
+      ].map((group) => [
+        ...group.querySelectorAll<HTMLInputElement>(":scope > .track > input[type=checkbox]"),
+      ]),
+    fit: "fair",
+    onUpdate: () => {
+      el<HTMLButtonElement>("commit-similar").disabled = controls.count() === 0;
+    },
+  });
   el("resolve-similar").addEventListener("click", () => void onResolve());
   el("commit-similar").addEventListener("click", () => void onCommit());
   for (const radio of document.querySelectorAll('input[name="similar-source"]')) {
@@ -182,6 +204,9 @@ function settingsBody(): { body: Record<string, unknown> } | { missing: string }
       maxArtists: numberInput("similar-max-artists"),
       tracksPerSimilar: numberInput("similar-tracks"),
       replaceRepeats: el<HTMLInputElement>("similar-replace-repeats").checked,
+      skipFavouriteArtists: el<HTMLInputElement>("similar-skip-favourite-artists").checked,
+      skipFavourites: el<HTMLInputElement>("similar-skip-favourites").checked,
+      oneCopy: el<HTMLInputElement>("similar-one-copy").checked,
       filter: {
         excludeTracks: readTerms("similar-exclude-tracks"),
         excludeAlbums: readTerms("similar-exclude-albums"),
@@ -277,6 +302,9 @@ async function fetchTracksInBatches(
   const emptyArtists = [...walk.emptyArtists];
   const partialArtists = [...walk.partialArtists];
   const total = walk.found.length;
+  // The favourites and songs taken so far travel from batch to batch, so the
+  // favourites are fetched once and "one copy" spans the whole plan.
+  let picker = walk.picker;
   for (let start = 0; start < total; start += TRACK_BATCH) {
     button.textContent = `Fetching tracks ${start}/${total}...`;
     const batch = walk.found.slice(start, start + TRACK_BATCH).map((f) => f.artist);
@@ -284,7 +312,9 @@ async function fetchTracksInBatches(
       artists: batch,
       tracksPerSimilar: body["tracksPerSimilar"],
       filter: body["filter"],
+      ...(picker !== undefined && { picker }),
     });
+    picker = result.picker;
     for (const entry of result.fetched) {
       byId.set(entry.artist.id, entry);
     }
@@ -372,7 +402,7 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
   setStep("similar-steps", 1);
   showError(el("commit-similar-error"), undefined);
   showError(el("commit-similar-result"), undefined);
-  updateSelectedCount();
+  controls.reset();
 }
 
 /**
@@ -452,26 +482,8 @@ function rowOptions(track: Track): { meta?: string; onChange: () => void } {
   return { ...(meta !== undefined && { meta }), onChange: updateSelectedCount };
 }
 
-/** The unique, ticked track ids in display order (seed, then its similar artists). */
-function selectedTrackIds(): number[] {
-  const ids: number[] = [];
-  const seen = new Set<number>();
-  for (const box of document.querySelectorAll<HTMLInputElement>(
-    "#similar-groups input[type=checkbox]:checked",
-  )) {
-    const id = Number(box.dataset["trackId"]);
-    if (!seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  }
-  return ids;
-}
-
 function updateSelectedCount(): void {
-  const count = selectedTrackIds().length;
-  el("similar-selected-count").textContent = `${count} track${count === 1 ? "" : "s"} selected.`;
-  el<HTMLButtonElement>("commit-similar").disabled = count === 0;
+  controls.refresh();
 }
 
 function onTargetChange(): void {
@@ -540,7 +552,8 @@ async function onCommit(): Promise<void> {
   showError(errorNode, undefined);
   showError(resultNode, undefined);
 
-  const trackIds = selectedTrackIds();
+  // The ticked tracks, each once, in the chosen play order.
+  const trackIds = controls.orderedTrackIds();
   if (trackIds.length === 0) {
     showError(errorNode, "Select at least one track.");
     return;

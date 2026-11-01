@@ -30,12 +30,17 @@ export interface Track {
   duration?: number;
 }
 
-/** Why the server's filter excluded a track (see src/features/track-filter.ts). */
+/**
+ * Why the server excluded a track: a filter, or a plan option (already a
+ * favourite, or a later copy of a song) -- see src/features/track-filter.ts.
+ */
 export type Exclusion =
   | { kind: "track"; term: string }
   | { kind: "album"; term: string }
   | { kind: "artist"; term: string }
-  | { kind: "disc"; disc: number };
+  | { kind: "disc"; disc: number }
+  | { kind: "favourite" }
+  | { kind: "repeat"; of: string };
 
 /**
  * A track the filter excluded from an artist's top tracks, with `position`: its

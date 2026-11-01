@@ -11,6 +11,7 @@
 
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { PlanControls } from "../plan.js";
 import {
   groupHead,
   inRankOrder,
@@ -51,9 +52,22 @@ type CommitTarget =
   | { type: "existing"; playlistId: number };
 
 let playlistsLoaded = false;
+let controls: PlanControls;
 
 /** Wire up the playlist view. Call once on load. */
 export function initPlaylistView(): void {
+  controls = new PlanControls({
+    prefix: "playlist",
+    countId: "selected-count",
+    groups: () =>
+      [...document.querySelectorAll<HTMLElement>("#artist-groups .artist-group")].map((group) => [
+        ...group.querySelectorAll<HTMLInputElement>("input[type=checkbox]"),
+      ]),
+    fit: "fair",
+    onUpdate: () => {
+      el<HTMLButtonElement>("commit").disabled = controls.count() === 0;
+    },
+  });
   el("resolve").addEventListener("click", () => void onResolve());
   el("commit").addEventListener("click", () => void onCommit());
   for (const radio of document.querySelectorAll('input[name="target"]')) {
@@ -82,6 +96,8 @@ async function onResolve(): Promise<void> {
     const result = await api<ResolveResponse>("POST", "/api/resolve", {
       artists,
       tracksPerArtist,
+      skipFavourites: el<HTMLInputElement>("skip-favourites").checked,
+      oneCopy: el<HTMLInputElement>("one-copy").checked,
       filter: {
         excludeTracks: readTerms("exclude-tracks"),
         excludeAlbums: readTerms("exclude-albums"),
@@ -136,7 +152,7 @@ function renderPreview(result: ResolveResponse): void {
   setStep("playlist-steps", 1);
   showError(el("commit-error"), undefined);
   showError(el("commit-result"), undefined);
-  updateSelectedCount();
+  controls.reset();
 }
 
 /** The artist's name, noting the typed query when it differs from the match. */
@@ -174,27 +190,8 @@ function rowOptions(track: Track): { meta?: string; onChange: () => void } {
   return { ...(meta !== undefined && { meta }), onChange: updateSelectedCount };
 }
 
-/** The unique, ticked track ids in display order. */
-function selectedTrackIds(): number[] {
-  const ids: number[] = [];
-  const seen = new Set<number>();
-  const boxes = document.querySelectorAll<HTMLInputElement>(
-    "#artist-groups input[type=checkbox]:checked",
-  );
-  boxes.forEach((box) => {
-    const id = Number(box.dataset["trackId"]);
-    if (!seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  });
-  return ids;
-}
-
 function updateSelectedCount(): void {
-  const count = selectedTrackIds().length;
-  el("selected-count").textContent = `${count} track${count === 1 ? "" : "s"} selected.`;
-  el<HTMLButtonElement>("commit").disabled = count === 0;
+  controls.refresh();
 }
 
 function onTargetChange(): void {
@@ -252,7 +249,8 @@ async function onCommit(): Promise<void> {
   showError(errorNode, undefined);
   showError(resultNode, undefined);
 
-  const trackIds = selectedTrackIds();
+  // The ticked tracks, each once, in the chosen play order.
+  const trackIds = controls.orderedTrackIds();
   if (trackIds.length === 0) {
     showError(errorNode, "Select at least one track.");
     return;

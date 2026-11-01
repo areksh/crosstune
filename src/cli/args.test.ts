@@ -930,3 +930,62 @@ describe("parseUpgradeArgs", () => {
     expect(() => parseUpgradeArgs(["--favourites", "--keep", "x"])).toThrow(/Unknown argument/);
   });
 });
+
+describe("playlist plan flags", () => {
+  it("parses order, skip-favourites, one-copy and fit for playlist-from-artists", () => {
+    const parsed = parsePlaylistArgs([
+      "--name",
+      "Mix",
+      "--order",
+      "take-turns",
+      "--skip-favourites",
+      "--one-copy",
+      "--fit",
+      "60",
+      "Portishead",
+    ]);
+    expect(parsed.artists).toEqual(["Portishead"]);
+    expect(parsed.plan).toEqual({
+      order: "take-turns",
+      skipFavourites: true,
+      oneCopy: true,
+      fitMinutes: 60,
+    });
+  });
+
+  it("leaves the plan unset without plan flags", () => {
+    expect(parsePlaylistArgs(["--name", "Mix", "Wire"]).plan).toBeUndefined();
+  });
+
+  it("rejects a bad order or length", () => {
+    expect(() => parsePlaylistArgs(["--name", "x", "--order", "random", "A"])).toThrow(
+      /--order must be one of: by-artist, take-turns, shuffle/,
+    );
+    expect(() => parsePlaylistArgs(["--name", "x", "--order"])).toThrow(/--order/);
+    expect(() => parsePlaylistArgs(["--name", "x", "--fit", "abc", "A"])).toThrow(/minutes/);
+    expect(() => parsePlaylistArgs(["--name", "x", "--fit"])).toThrow(/--fit/);
+  });
+
+  it("takes as-listed or shuffle as the albums order", () => {
+    const parsed = parseAlbumArgs(["--name", "x", "--order", "shuffle", "--fit", "45", "A - B"]);
+    expect(parsed.entries).toEqual(["A - B"]);
+    expect(parsed.plan).toEqual({ order: "shuffle", skipFavourites: false, oneCopy: false, fitMinutes: 45 });
+    expect(() => parseAlbumArgs(["--name", "x", "--order", "take-turns", "A - B"])).toThrow(
+      /--order must be one of: as-listed, shuffle/,
+    );
+  });
+
+  it("accepts the plan flags and --skip-favourite-artists for similar-artists", () => {
+    const parsed = parseSimilarArgs([
+      "--playlist",
+      "42",
+      "--order",
+      "shuffle",
+      "--one-copy",
+      "--skip-favourite-artists",
+    ]);
+    expect(parsed.plan).toEqual({ order: "shuffle", skipFavourites: false, oneCopy: true });
+    expect(parsed.skipFavouriteArtists).toBe(true);
+    expect(parseSimilarArgs(["--name", "x", "A"]).skipFavouriteArtists).toBeUndefined();
+  });
+});

@@ -9,6 +9,8 @@ import {
   selectAlbumVersion,
   type AlbumPlaylistBuilderClient,
 } from "./playlist-from-albums.js";
+import { seededRandom } from "./combine.js";
+import { SongPicker } from "./song-picker.js";
 import { compileTrackFilter } from "./track-filter.js";
 
 /** Build an album, overriding just the fields a test cares about. */
@@ -21,6 +23,7 @@ function stubClient(config: {
   albumsByQuery?: Record<string, Album[]>;
   tracksByAlbum?: Record<string, Track[]>;
   playlist?: Playlist;
+  favourites?: Track[];
 }): AlbumPlaylistBuilderClient & {
   searchAlbums: ReturnType<typeof vi.fn>;
   getAlbumTracks: ReturnType<typeof vi.fn>;
@@ -28,6 +31,7 @@ function stubClient(config: {
   addTracksToPlaylist: ReturnType<typeof vi.fn>;
 } {
   return {
+    getFavoriteTracks: vi.fn(async () => config.favourites ?? []),
     searchAlbums: vi.fn(async (query: string) => config.albumsByQuery?.[query] ?? []),
     getAlbumTracks: vi.fn(async (albumId: string) => config.tracksByAlbum?.[albumId] ?? []),
     createPlaylist: vi.fn(async (name: string) => config.playlist ?? { id: 1, name }),
@@ -397,6 +401,99 @@ describe("buildPlaylistFromAlbums with a filter", () => {
       ["cd", 1, 1],
     ]);
     expect(result.excludedAlbums).toEqual(["Pink Floyd - Pulse"]);
+  });
+});
+
+describe("fetchAlbumTracks with a song picker", () => {
+  it("marks favourites and later copies of a song, in request order", async () => {
+    const client = stubClient({
+      tracksByAlbum: {
+        // The second album's lookup finishes first; the first still wins.
+        a: [
+          { id: 1, title: "Song", artist: "X", isrc: "I1" },
+          { id: 2, title: "Fav", artist: "X" },
+        ],
+        b: [{ id: 3, title: "Song", version: "2011 Remaster", artist: "X" }],
+      },
+    });
+    client.getAlbumTracks.mockImplementation(async (albumId: string) => {
+      await new Promise((resolve) => setTimeout(resolve, albumId === "a" ? 20 : 0));
+      return albumId === "a"
+        ? [
+            { id: 1, title: "Song", artist: "X", isrc: "I1" },
+            { id: 2, title: "Fav", artist: "X" },
+          ]
+        : [{ id: 3, title: "Song", version: "2011 Remaster", artist: "X" }];
+    });
+    const picker = SongPicker.fromFavourites([{ id: 2, title: "Fav" }], { oneCopy: true });
+
+    const result = await fetchAlbumTracks(client, ["a", "b"], undefined, picker);
+
+    expect(result.fetched.map((f) => f.tracks.map((t) => [t.track.id, t.exclusion]))).toEqual([
+      [
+        [1, undefined],
+        [2, { kind: "favourite" }],
+      ],
+      [[3, { kind: "repeat", of: "Song" }]],
+    ]);
+  });
+});
+
+describe("buildPlaylistFromAlbums with plan options", () => {
+  const albumsByQuery = {
+    "A One": [album({ id: "one", title: "One", artist: "A" })],
+    "B Two": [album({ id: "two", title: "Two", artist: "B" })],
+  };
+  const tracksByAlbum: Record<string, Track[]> = {
+    one: [
+      { id: 1, title: "s1", artist: "A", duration: 200 },
+      { id: 2, title: "s2", artist: "A", duration: 200 },
+    ],
+    two: [
+      { id: 3, title: "s1", artist: "A", duration: 200 },
+      { id: 4, title: "t2", artist: "B", duration: 200 },
+      { id: 5, title: "t3", artist: "B", duration: 200 },
+    ],
+  };
+  const entries = [
+    { artist: "A", album: "One" },
+    { artist: "B", album: "Two" },
+  ];
+
+  it("skips repeats and favourites, then trims the end of the list to fit", async () => {
+    const client = stubClient({
+      albumsByQuery,
+      tracksByAlbum,
+      favourites: [{ id: 2, title: "s2", artist: "A" }],
+    });
+    const result = await buildPlaylistFromAlbums(client, {
+      entries,
+      playlistName: "P",
+      skipFavourites: true,
+      oneCopy: true,
+      fitMinutes: 7,
+    });
+    // Left: 1, 4, 5 (600s); 7 minutes trims the last track.
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(1, [1, 4]);
+    expect(result.resolvedAlbums.map((r) => [r.trackCount, r.excludedCount])).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
+    expect(result.droppedToFit).toBe(1);
+    expect(result.durationSeconds).toBe(400);
+  });
+
+  it("shuffles when asked", async () => {
+    const client = stubClient({ albumsByQuery, tracksByAlbum });
+    await buildPlaylistFromAlbums(client, {
+      entries,
+      playlistName: "P",
+      order: "shuffle",
+      random: seededRandom(5),
+    });
+    const written = client.addTracksToPlaylist.mock.calls[0]![1] as number[];
+    expect([...written].sort()).toEqual([1, 2, 3, 4, 5]);
+    expect(client.getFavoriteTracks).not.toHaveBeenCalled();
   });
 });
 

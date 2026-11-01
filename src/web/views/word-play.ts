@@ -9,6 +9,7 @@
  * src/features/word-play.ts.
  */
 
+import { formatDuration, totalSeconds } from "../../features/playlist-shape.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, setStep, showError } from "../dom.js";
@@ -435,27 +436,34 @@ function renderSplitOptions(): void {
 
 /** The picked songs' track ids, in order, each once. */
 function selectedTrackIds(): number[] {
-  const ids: number[] = [];
+  return selectedTracks().map((track) => track.id);
+}
+
+/** The picked songs, in order, each once. */
+function selectedTracks(): Track[] {
+  const tracks: Track[] = [];
   const seen = new Set<number>();
   plan?.splits[splitIndex]?.slots.forEach((_, index) => {
-    const id = pickedCandidate(index)?.track.id;
-    if (id !== undefined && !seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
+    const track = pickedCandidate(index)?.track;
+    if (track !== undefined && !seen.has(track.id)) {
+      seen.add(track.id);
+      tracks.push(track);
     }
   });
-  return ids;
+  return tracks;
 }
 
 function updateCount(): void {
-  const count = selectedTrackIds().length;
+  const tracks = selectedTracks();
+  const count = tracks.length;
+  const length = formatDuration(totalSeconds(tracks, (track) => track.duration));
   const order =
     plan?.mode === "sentence"
       ? ", in sentence order"
       : plan?.mode === "acrostic" || plan?.mode === "a-to-z"
         ? ", in letter order"
         : "";
-  el("wp-selected-count").textContent = `${count} song${count === 1 ? "" : "s"}${order}`;
+  el("wp-selected-count").textContent = `${count} song${count === 1 ? "" : "s"}, ${length}${order}`;
   el<HTMLButtonElement>("wp-commit").disabled = count === 0;
 }
 

@@ -1793,3 +1793,140 @@ describe("POST /api/new-releases/commit", () => {
     }
   });
 });
+
+describe("playlist plan options", () => {
+  const fav: Track = { id: 100, title: "Roads", artist: "Portishead" };
+
+  it("skips favourites and repeats when resolving artists, fetching favourites once", async () => {
+    const svc = service({
+      searchArtists: vi.fn(async (q: string) => [{ id: q === "A" ? 1 : 2, name: q }]),
+      getArtistTopTracks: vi.fn(async (id: number) =>
+        id === 1
+          ? [fav, { id: 101, title: "Glory Box", artist: "Portishead", isrc: "G" }]
+          : [
+              { id: 201, title: "Glory Box (Live)", artist: "Other", isrc: "G" },
+              { id: 202, title: "Teardrop", artist: "Other" },
+            ],
+      ),
+      getFavoriteTracks: vi.fn(async () => [fav]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve", {
+        artists: ["A", "B"],
+        tracksPerArtist: 1,
+        skipFavourites: true,
+        oneCopy: true,
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ exclusion: unknown }> }>;
+    };
+    expect(body.resolvedArtists.map((r) => r.tracks.map((t) => t.id))).toEqual([[101], [202]]);
+    expect(body.resolvedArtists.map((r) => r.excluded.map((e) => e.exclusion))).toEqual([
+      [{ kind: "favourite" }],
+      [{ kind: "repeat", of: "Glory Box" }],
+    ]);
+    expect(svc.getFavoriteTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch favourites unless asked", async () => {
+    const svc = similarService();
+    await handleApi(request("POST", "/api/resolve", { artists: ["A"] }), deps({ service: svc }));
+    expect(svc.getFavoriteTracks).not.toHaveBeenCalled();
+  });
+
+  it("returns the picker from a similar walk and carries it through track batches", async () => {
+    const svc = similarService();
+    svc.getFavoriteTracks = vi.fn(async () => [{ id: 1100, title: "t0" }]);
+    svc.getFavoriteArtists = vi.fn(async () => [{ id: 11, name: "Mudhoney" }]);
+    const walk = await handleApi(
+      request("POST", "/api/similar/walk", {
+        source: { type: "artists", artists: ["Nirvana"], tracksPerSeed: 1 },
+        similarPerArtist: 1,
+        replaceRepeats: true,
+        skipFavourites: true,
+        oneCopy: true,
+        skipFavouriteArtists: true,
+      }),
+      deps({ service: svc }),
+    );
+    expect(walk.status).toBe(200);
+    const walked = walk.body as { found: Array<{ artist: Artist }>; picker: unknown };
+    // Mudhoney is a favourite artist, so Hole takes its place.
+    expect(walked.found.map((f) => f.artist.id)).toEqual([12]);
+    expect(walked.picker).toMatchObject({ oneCopy: true });
+
+    const batch = await handleApi(
+      request("POST", "/api/similar/tracks", {
+        artists: [{ id: 11, name: "Mudhoney" }],
+        tracksPerSimilar: 1,
+        picker: walked.picker,
+      }),
+      deps({ service: svc }),
+    );
+    expect(batch.status).toBe(200);
+    const fetched = batch.body as {
+      fetched: Array<{ tracks: Track[]; excluded: Array<{ exclusion: unknown }> }>;
+      picker: { seen: unknown[] };
+    };
+    // 1100 is a favourite (from the walk's state), so 1101 replaces it.
+    expect(fetched.fetched[0]?.tracks.map((t) => t.id)).toEqual([1101]);
+    expect(fetched.fetched[0]?.excluded.map((e) => e.exclusion)).toEqual([{ kind: "favourite" }]);
+    expect(fetched.picker.seen.length).toBeGreaterThan(0);
+    // Favourites were fetched once, by the walk.
+    expect(svc.getFavoriteTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks favourites and repeats in album tracks and returns the picker", async () => {
+    const svc = service({
+      getAlbumTracks: vi.fn(async (id: string) =>
+        id === "a"
+          ? [fav, { id: 2, title: "Song", artist: "X" }]
+          : [{ id: 3, title: "Song", artist: "X" }],
+      ),
+      getFavoriteTracks: vi.fn(async () => [fav]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/album-tracks", {
+        albumIds: ["a", "b"],
+        skipFavourites: true,
+        oneCopy: true,
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      fetched: Array<{ tracks: Array<{ exclusion?: unknown }> }>;
+      picker: unknown;
+    };
+    expect(body.fetched.map((f) => f.tracks.map((t) => t.exclusion))).toEqual([
+      [{ kind: "favourite" }, undefined],
+      [{ kind: "repeat", of: "Song" }],
+    ]);
+
+    // A retry carries the picker on: "Song" is still a repeat.
+    const retry = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["b"], picker: body.picker }),
+      deps({ service: svc }),
+    );
+    const retried = retry.body as { fetched: Array<{ tracks: Array<{ exclusion?: unknown }> }> };
+    expect(retried.fetched[0]?.tracks[0]?.exclusion).toEqual({ kind: "repeat", of: "Song" });
+    expect(svc.getFavoriteTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["/api/resolve", { artists: ["A"], skipFavourites: "yes" }],
+    ["/api/resolve", { artists: ["A"], oneCopy: 1 }],
+    ["/api/album-tracks", { albumIds: ["a"], picker: { oneCopy: "no" } }],
+    ["/api/similar/tracks", { artists: [{ id: 1, name: "A" }], picker: [] }],
+    [
+      "/api/similar/walk",
+      { source: { type: "artists", artists: ["A"] }, skipFavouriteArtists: "on" },
+    ],
+  ])("rejects malformed plan options on %s", async (path, body) => {
+    const res = await handleApi(request("POST", path, body), deps());
+    expect(res.status).toBe(400);
+  });
+});

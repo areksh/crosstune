@@ -17,7 +17,12 @@
  * choosing versions by a single {@link AlbumPreference}. An optional
  * {@link TrackFilter} drops releases whose title matches an album term before a
  * version is chosen, and marks tracks on unwanted discs or matching a track term
- * as excluded (left out by the CLI; shown unticked by the web UI). Each function depends
+ * as excluded (left out by the CLI; shown unticked by the web UI). An optional
+ * {@link SongPicker} marks tracks already in the favourites, and later copies of
+ * a song an earlier album has, the same way (an album keeps its other tracks:
+ * nothing replaces them). The composed build can shuffle the playlist and trim
+ * it to a length from the end, keeping whole albums from the top of the list.
+ * Each function depends
  * only on the small client surface it needs, so all are unit-testable against
  * stubs; QobuzClient satisfies them structurally.
  */
@@ -29,6 +34,13 @@ import {
   createPlaylistWithTracks,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
+import { shapePlaylist, uniqueGroups, type AlbumOrder } from "./playlist-shape.js";
+import {
+  createSongPicker,
+  type FavouriteTracksClient,
+  type SongPicker,
+  type SongPickerOptions,
+} from "./song-picker.js";
 import {
   albumExclusion,
   applyTrackFilter,
@@ -333,8 +345,9 @@ export interface FetchAlbumTracksResult {
 
 /**
  * Fetch each album's tracks, returning the tracks per album (in request order,
- * each marked with any exclusion from `filter`) alongside the ids of any album
- * that could not be fetched.
+ * each marked with any exclusion from `filter`, then from `picker` -- consulted
+ * in request order, and updated so a retry can carry the run on) alongside the
+ * ids of any album that could not be fetched.
  *
  * Deliberately does no writing and no cross-album de-duplication: the caller
  * assembles the final ordered track list once *every* album has been fetched, so
@@ -345,6 +358,7 @@ export async function fetchAlbumTracks(
   client: AlbumTracksClient,
   albumIds: readonly string[],
   filter: TrackFilter = NO_FILTER,
+  picker?: SongPicker,
 ): Promise<FetchAlbumTracksResult> {
   // Fetch each unique album once, in request order, through a bounded pool. The
   // pool keeps a large list fast without holding a single web request open long
@@ -379,18 +393,47 @@ export async function fetchAlbumTracks(
     if ("failed" in outcome) {
       failedAlbumIds.push(outcome.albumId);
     } else {
-      fetched.push(outcome);
+      fetched.push(
+        picker === undefined ? outcome : { ...outcome, tracks: pickTracks(outcome.tracks, picker) },
+      );
     }
   }
   return { fetched, failedAlbumIds };
 }
 
+/**
+ * Mark the tracks the picker excludes (favourites, later copies of a song),
+ * telling it what was kept and skipped. Tracks the filter already excluded
+ * are left as they are.
+ */
+function pickTracks(tracks: readonly FilteredTrack[], picker: SongPicker): FilteredTrack[] {
+  return tracks.map((entry) => {
+    if (entry.exclusion !== undefined) {
+      return entry;
+    }
+    const exclusion = picker.exclusion(entry.track);
+    if (exclusion === undefined) {
+      picker.take(entry.track);
+      return entry;
+    }
+    picker.skip(entry.track);
+    return { track: entry.track, exclusion };
+  });
+}
+
 /** The full surface {@link buildPlaylistFromAlbums} depends on. */
 export type AlbumPlaylistBuilderClient = AlbumResolverClient &
   AlbumTracksClient &
-  PlaylistWriterClient;
+  PlaylistWriterClient &
+  FavouriteTracksClient;
 
-export interface BuildAlbumPlaylistOptions {
+export interface BuildAlbumPlaylistOptions extends SongPickerOptions {
+  /** Default `as-listed`. */
+  order?: AlbumOrder;
+  /** Trim to at most about this many minutes, from the end of the list. */
+  fitMinutes?: number;
+  /** Random source for `shuffle`; default `Math.random`. */
+  random?: () => number;
   /** Artist/album entries to include. */
   entries: AlbumEntry[];
   /** Name for the new playlist. */
@@ -410,7 +453,7 @@ export interface ResolvedAlbumSummary {
   query: string;
   album: Album;
   trackCount: number;
-  /** Tracks of the chosen version that the filter left out. */
+  /** Tracks of the chosen version that the filter or the picker left out. */
   excludedCount: number;
 }
 
@@ -423,6 +466,10 @@ export interface BuildAlbumPlaylistResult {
   /** Entries whose chosen version's tracks could not be fetched from Qobuz. */
   failedAlbums: string[];
   trackCount: number;
+  /** Total length of the tracks written, in seconds (unknown ones as the average). */
+  durationSeconds: number;
+  /** Tracks dropped to fit the length asked for (0 without one). */
+  droppedToFit: number;
 }
 
 /**
@@ -452,22 +499,20 @@ export async function buildPlaylistFromAlbums(
  * mode (see ./discography.ts).
  */
 export async function writeAlbumPlaylist(
-  client: AlbumTracksClient & PlaylistWriterClient,
+  client: AlbumTracksClient & PlaylistWriterClient & FavouriteTracksClient,
   resolution: ResolveAlbumsResult,
   options: Omit<BuildAlbumPlaylistOptions, "entries">,
 ): Promise<BuildAlbumPlaylistResult> {
   const preference = options.preference ?? DEFAULT_ALBUM_PREFERENCE;
   const filter = options.filter ?? NO_FILTER;
+  const picker = await createSongPicker(client, options);
   const { resolvedAlbums, unresolvedAlbums, excludedAlbums } = resolution;
 
-  // Pick a version per album, gather its tracks, and de-duplicate across albums
-  // while counting how many tracks each contributed. An album whose tracks fail
+  // Pick a version per album and gather its tracks. An album whose tracks fail
   // to fetch is reported rather than fatal, so one bad album does not sink the
   // whole playlist.
-  const summaries: ResolvedAlbumSummary[] = [];
+  const fetched: { query: string; album: Album; tracks: FilteredTrack[] }[] = [];
   const failedAlbums: string[] = [];
-  const trackIds: number[] = [];
-  const seen = new Set<number>();
   for (const resolved of resolvedAlbums) {
     const album = selectAlbumVersion(resolved.versions, preference)!;
     let tracks: Track[];
@@ -477,19 +522,34 @@ export async function writeAlbumPlaylist(
       failedAlbums.push(resolved.query);
       continue;
     }
-    let added = 0;
-    let excludedCount = 0;
-    for (const { track, exclusion } of applyTrackFilter(tracks, filter)) {
-      if (exclusion !== undefined) {
-        excludedCount += 1;
-      } else if (!seen.has(track.id)) {
-        seen.add(track.id);
-        trackIds.push(track.id);
-        added += 1;
-      }
-    }
-    summaries.push({ query: resolved.query, album, trackCount: added, excludedCount });
+    fetched.push({
+      query: resolved.query,
+      album,
+      tracks: pickTracks(applyTrackFilter(tracks, filter), picker),
+    });
   }
+
+  // De-duplicate across albums, trim the end of the list to fit, and order,
+  // counting how many tracks each album contributed.
+  const groups = uniqueGroups(
+    fetched.map((entry) =>
+      entry.tracks.filter((t) => t.exclusion === undefined).map((t) => t.track),
+    ),
+    (track) => track.id,
+  );
+  const shaped = shapePlaylist(groups, (track) => track.duration, {
+    order: options.order ?? "as-listed",
+    fit: "tail",
+    ...(options.fitMinutes !== undefined && { fitMinutes: options.fitMinutes }),
+    ...(options.random !== undefined && { random: options.random }),
+  });
+  const trackIds = shaped.ordered.map((track) => track.id);
+  const summaries: ResolvedAlbumSummary[] = fetched.map((entry, index) => ({
+    query: entry.query,
+    album: entry.album,
+    trackCount: shaped.kept[index]?.length ?? 0,
+    excludedCount: entry.tracks.filter((t) => t.exclusion !== undefined).length,
+  }));
 
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
@@ -505,5 +565,7 @@ export async function writeAlbumPlaylist(
     excludedAlbums,
     failedAlbums,
     trackCount: trackIds.length,
+    durationSeconds: shaped.seconds,
+    droppedToFit: shaped.dropped.length,
   };
 }

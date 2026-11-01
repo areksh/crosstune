@@ -23,6 +23,12 @@
  * names the user typed (and a playlist's own artists) are explicit input --
  * though their own tracks are filtered like any other.
  *
+ * Extra artists never to suggest (the user's favourite artists, see
+ * {@link favouriteArtistIds}) count like a playlist's own. An optional
+ * SongPicker (./song-picker.ts) leaves out tracks already in the favourites and
+ * later copies of a song, seeds first, then the similar artists in plan order;
+ * like filtered tracks they are replaced by the next most popular.
+ *
  * Like the other tools this is the *resolve* half: it returns a plan to review.
  * Committing reuses {@link createPlaylistWithTracks} and
  * {@link addTracksToExistingPlaylist} with {@link similarTrackIds}.
@@ -31,14 +37,17 @@
 import type { Artist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import {
-  fetchTopTracks,
+  fetchTopTrackPool,
   resolveArtistTracks,
+  takeTopTracks,
   type ArtistResolverClient,
   type ExcludedTrack,
   type ResolvedArtistTracks,
   type UnderfilledArtist,
 } from "./playlist-from-artists.js";
-import { artistExclusion, NO_FILTER, type TrackFilter } from "./track-filter.js";
+import { uniqueGroups } from "./playlist-shape.js";
+import type { SongPicker } from "./song-picker.js";
+import { artistExclusion, isFilterActive, NO_FILTER, type TrackFilter } from "./track-filter.js";
 
 /** The client surface needed to walk similar artists and fetch their tracks. */
 export interface SimilarArtistsClient {
@@ -353,22 +362,30 @@ export async function walkSimilarArtists(
 }
 
 /**
- * Fetch each artist's top tracks (in input order, through a bounded pool),
- * leaving out artists Qobuz returned no tracks for and flagging short ones.
+ * Fetch each artist's top tracks (through a bounded pool), leaving out artists
+ * Qobuz returned no tracks for and flagging short ones. The tracks are taken
+ * in input order, so a `picker` (favourites, one copy of each song) sees the
+ * artists in plan order whichever fetch finished first; it may carry on a run
+ * from an earlier batch.
  */
 export async function fetchArtistTracks(
   client: Pick<SimilarArtistsClient, "getArtistTopTracks">,
   artists: readonly Artist[],
   tracksPerArtist: number,
   filter: TrackFilter = NO_FILTER,
+  picker?: SongPicker,
 ): Promise<{
   fetched: ArtistTracks[];
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
 }> {
-  const outcomes = await mapWithConcurrency(artists, DEFAULT_CONCURRENCY, async (artist) => ({
+  const deep = isFilterActive(filter) || picker?.active === true;
+  const pools = await mapWithConcurrency(artists, DEFAULT_CONCURRENCY, (artist) =>
+    fetchTopTrackPool(client, artist.id, tracksPerArtist, deep),
+  );
+  const outcomes = artists.map((artist, index) => ({
     artist,
-    ...(await fetchTopTracks(client, artist.id, tracksPerArtist, filter)),
+    ...takeTopTracks(pools[index] ?? [], tracksPerArtist, filter, picker),
   }));
   const fetched: ArtistTracks[] = [];
   const emptyArtists: UnderfilledArtist[] = [];
@@ -456,26 +473,42 @@ export function similarTrackIds(
   similar: readonly { artist: Artist; tracks: readonly Track[] }[],
   appearances: readonly { artist: Artist; seed: Artist }[],
 ): number[] {
+  return similarTrackGroups(seeds, similar, appearances)
+    .flat()
+    .map((track) => track.id);
+}
+
+/**
+ * A plan's tracks grouped by artist, in the order {@link similarTrackIds}
+ * lists them -- each seed, then the similar artists under it -- with each
+ * artist and each track once, ready to be fitted to a length and ordered (see
+ * ./playlist-shape.ts). Artists left with nothing are dropped.
+ */
+export function similarTrackGroups(
+  seeds: readonly { artist: Artist; tracks: readonly Track[] }[],
+  similar: readonly { artist: Artist; tracks: readonly Track[] }[],
+  appearances: readonly { artist: Artist; seed: Artist }[],
+): Track[][] {
   const tracksOf = new Map(similar.map((entry) => [entry.artist.id, entry.tracks]));
-  const ids: number[] = [];
-  const seen = new Set<number>();
-  const add = (tracks: readonly Track[]): void => {
-    for (const track of tracks) {
-      if (!seen.has(track.id)) {
-        seen.add(track.id);
-        ids.push(track.id);
-      }
-    }
-  };
+  const groups: (readonly Track[])[] = [];
+  const listed = new Set<number>();
   for (const seed of seeds) {
-    add(seed.tracks);
+    groups.push(seed.tracks);
     for (const appearance of appearances) {
-      if (appearance.seed.id === seed.artist.id) {
-        add(tracksOf.get(appearance.artist.id) ?? []);
+      if (appearance.seed.id === seed.artist.id && !listed.has(appearance.artist.id)) {
+        listed.add(appearance.artist.id);
+        groups.push(tracksOf.get(appearance.artist.id) ?? []);
       }
     }
   }
-  return ids;
+  return uniqueGroups(groups, (track) => track.id).filter((group) => group.length > 0);
+}
+
+/** The ids of the user's favourite artists, to skip when walking. */
+export async function favouriteArtistIds(client: {
+  getFavoriteArtists(): Promise<Artist[]>;
+}): Promise<Set<number>> {
+  return new Set((await client.getFavoriteArtists()).map((artist) => artist.id));
 }
 
 /** The walk settings shared by both sources. */
@@ -488,6 +521,13 @@ export interface WalkOptions {
   /** Replace artists that already came up with the next most similar (default false). */
   replaceRepeats?: boolean;
   filter?: TrackFilter;
+  /**
+   * More artists never to suggest (e.g. the user's favourite artists, see
+   * {@link favouriteArtistIds}); they count like a playlist's own artists.
+   */
+  skipArtistIds?: ReadonlySet<number>;
+  /** Favourites and repeats to exclude from the tracks, seeds first. */
+  picker?: SongPicker;
 }
 
 /** The walk of a plan: seeds and the artists found, before their tracks are fetched. */
@@ -527,6 +567,7 @@ export async function walkFromArtists(
     artists: options.artists,
     tracksPerArtist: options.tracksPerSeed,
     ...(options.filter !== undefined && { filter: options.filter }),
+    ...(options.picker !== undefined && { picker: options.picker }),
   });
   // Seeds in input order, including those that matched but had no tracks.
   const byQuery = new Map<string, ResolvedArtistTracks>();
@@ -572,7 +613,7 @@ export async function walkFromPlaylist(
   const walk = await walkSimilarArtists(client, {
     ...options,
     seeds,
-    skipArtistIds: presentIds,
+    skipArtistIds: new Set([...presentIds, ...(options.skipArtistIds ?? [])]),
   });
   return {
     seeds: seeds.map((artist) => ({ query: artist.name, artist, tracks: [], excluded: [] })),
@@ -614,6 +655,7 @@ async function completePlan(
       walk.found.map((node) => node.artist),
       options.tracksPerSimilar,
       options.filter,
+      options.picker,
     ),
   );
   const { found: _found, ...rest } = walk;

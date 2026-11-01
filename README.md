@@ -208,6 +208,34 @@ artist takes its place; the left-out artists are listed at the end. The seeds
 themselves -- artists you typed, or a source playlist's artists -- are always
 walked from, though their own tracks are still filtered.
 
+#### Order, favourites, repeats and length
+
+The playlist builders share four plan options:
+
+```sh
+# Take turns between the artists, skip songs you already have in your
+# favourites, one copy of each song, and stop at about an hour
+npm run dev -- playlist-from-artists --name "Trip Hop Hour" --order take-turns \
+  --skip-favourites --one-copy --fit 60 "Portishead" "Massive Attack" "Tricky"
+
+# Albums shuffled together, trimmed to about 80 minutes
+npm run dev -- playlist-from-albums --name "Shuffled" --order shuffle --fit 80 \
+  "Portishead - Dummy" "Massive Attack - Mezzanine"
+```
+
+| Option | Artists | Similar artists | Albums |
+| --- | --- | --- | --- |
+| `--order` | `by-artist` (default), `take-turns` (round-robin between the artists), `shuffle` | the same, artists in plan order (each seed, then its similar artists) | `as-listed` (default) or `shuffle` |
+| `--skip-favourites` | a track already in your favourite tracks is left out and the next most popular takes its place | the same | the track is left out of its album |
+| `--one-copy` | a later copy of a song already in the playlist (same ISRC, or the same artist and title, remasters included; live takes and remixes stay apart) is left out and replaced | the same, across seeds and similar artists | a song an earlier album already has is left out |
+| `--fit <minutes>` | trims to at most about that length, dropping from the end of each artist's tracks in turn so each keeps its most popular | the same | trims from the end of the list, keeping whole albums from the top |
+
+Favourites are fetched once per run and matched the way the deduplicator
+matches songs, so a remaster of a favourite counts too. A track of unknown
+length counts as the average. `similar-artists` also takes
+`--skip-favourite-artists`, which treats your favourite artists like a source
+playlist's own: never suggested.
+
 ```sh
 # Metallica's top tracks, plus 3 tracks from each of 3 similar artists, plus
 # 3 similar to each of those (depth 2), in a new playlist
@@ -234,7 +262,8 @@ take `--similar N` (similar artists per artist, default 3; Qobuz lists about 70
 for a well-known artist), `--depth D` (default 1: depth 2 also takes artists
 similar to the similar artists), `--max-artists A` (stop after A similar
 artists, default 100), `--tracks M` (top tracks per similar artist, 1-30,
-default 3), `--yes`, and the [filters](#filters)
+default 3), `--yes`, `--skip-favourite-artists`, the
+[plan options](#order-favourites-repeats-and-length) and the [filters](#filters)
 `--exclude-track`/`--exclude-album`/`--exclude-artist`. With `--name`: `--seed-tracks K` (the given
 artists' own top tracks, 0-100, default 5; 0 for none) and `--public`. With
 `--playlist`: `--seeds S` (start from its S most frequent artists, 1-50,
@@ -615,11 +644,18 @@ browser.
 
 1. Paste one artist per line and choose how many top tracks to take from each.
    Optionally open *Filters* to exclude tracks, albums or artists by term (one
-   per line).
+   per line). Under *Leave out*, tick *Skip tracks already in my Favourites*
+   and *One copy of each song* (on by default).
 2. Preview the tracks grouped by artist, and untick any you do not want. Tracks
-   the filters excluded are replaced by the next most popular, and listed
+   the filters excluded -- or already in your favourites ("Already in your
+   Favourites"), or another copy of a song listed above ("Same song as ...
+   above") -- are replaced by the next most popular, and listed
    unticked with the reason where they rank, so you can tick one back on in
-   its place. Names that matched
+   its place. Above the list, choose the *Order* (by artist, take turns -- the
+   default -- or shuffle; "Plays as ..." previews the first few tracks) and
+   *Fit to length* (any length, or about 30 to 120 minutes), which unticks
+   tracks from the end of each artist's list in turn. The save bar shows the
+   ticked tracks' count and total length. Names that matched
    nothing, artists Qobuz returned no tracks for (skipped from the list), and
    artists that yielded fewer tracks than requested are each called out above
    the preview.
@@ -635,7 +671,8 @@ browser.
    album's editions into one entry (untick it to list every release). Pick a
    default version preference (highest quality, newest, or oldest).
    Optionally open *Filters* to exclude releases, tracks or artists by term,
-   or to include only some discs.
+   or to include only some discs, and choose what to *Leave out* (favourites,
+   repeated songs).
 2. Find the albums: each shows a dropdown to choose which version to use when
    several exist (defaulting to your preference), with the chosen release's
    quality and date shown alongside. Releases matching a release filter are not
@@ -644,7 +681,9 @@ browser.
 3. Fetch the tracks: each album lists its tracks (by disc, when it has more
    than one). Tracks on a disc you did not include, or matching a track or
    artist filter, start unticked with the reason; tick or untick any. If a version cannot be
-   fetched, the next-best one is selected for you to retry.
+   fetched, the next-best one is selected for you to retry. Once every album
+   is in, choose the *Order* (as listed or shuffle) and *Fit to length*, which
+   unticks tracks from the end of the list.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped) -- and save the ticked tracks.
 
@@ -658,18 +697,21 @@ browser.
    limit: an estimate under the settings shows the largest possible outcome,
    turning orange for a very large run, which you are asked to confirm. Tick
    *Replace artists that already came up* to substitute the next most similar
-   artist for repeats (see the CLI's `--replace-repeats`). Optionally open
-   *Filters*; similar artists matching an excluded artist are skipped in
-   favour of the next most similar.
+   artist for repeats (see the CLI's `--replace-repeats`), and *Skip artists
+   already in my favourite artists* to never suggest those. Under *Leave out*,
+   skip tracks already in your favourites and keep one copy of each song.
+   Optionally open *Filters*; similar artists matching an excluded artist are
+   skipped in favour of the next most similar.
 2. Find similar artists: the artists are found first, then their tracks are
    fetched in batches, with progress shown on the button.
 3. Preview: each starting artist is listed with the similar artists that came
    up for it nested underneath, each labelled with every artist it is similar
    to. An artist shared between several is listed under each but added once,
    and ticking or unticking one of its tracks updates every copy. Untick any
-   tracks you do not want; tracks the filters excluded are listed unticked
-   where they rank. Similar artists the filters left out are named above the
-   preview.
+   tracks you do not want; tracks the filters excluded (or left out as
+   favourites or repeats) are listed unticked where they rank. Similar artists
+   the filters left out are named above the preview. Choose the *Order* and
+   *Fit to length* as for playlist from artists.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped; when starting from a playlist, that playlist is preselected)
    -- and commit.

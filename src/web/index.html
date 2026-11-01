@@ -186,6 +186,17 @@
               <span>Top tracks per artist</span>
               <input id="per-artist" type="number" min="1" max="100" value="10" />
             </label>
+            <fieldset class="choice-group">
+              <legend>Leave out</legend>
+              <label class="checkbox">
+                <input id="skip-favourites" type="checkbox" />
+                Skip tracks already in my Favourites
+              </label>
+              <label class="checkbox">
+                <input id="one-copy" type="checkbox" checked />
+                One copy of each song (no remaster repeats)
+              </label>
+            </fieldset>
             <details class="filters">
               <summary>Filters</summary>
               <div class="filter-grid">
@@ -232,6 +243,39 @@
           <section id="preview" class="review" hidden>
             <h2>Review</h2>
             <p class="hint">Untick any track you do not want.</p>
+            <section id="playlist-plan" class="plan-strip" aria-label="Playlist settings">
+              <div class="plan-settings">
+                <div class="field">
+                  <span>Order</span>
+                  <div class="segmented" role="radiogroup" aria-label="Playlist order">
+                    <label>
+                      <input type="radio" name="playlist-order" value="by-artist" />
+                      By artist
+                    </label>
+                    <label>
+                      <input type="radio" name="playlist-order" value="take-turns" checked />
+                      Take turns
+                    </label>
+                    <label>
+                      <input type="radio" name="playlist-order" value="shuffle" />
+                      Shuffle
+                    </label>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Fit to length</span>
+                  <select id="playlist-fit" title="Leaves out tracks from the end of each artist's list in turn, so each keeps its most popular.">
+                    <option value="">Any length</option>
+                    <option value="30">About 30 minutes</option>
+                    <option value="45">About 45 minutes</option>
+                    <option value="60">About 60 minutes</option>
+                    <option value="80">About 80 minutes</option>
+                    <option value="120">About 120 minutes</option>
+                  </select>
+                </label>
+              </div>
+              <p id="playlist-plays-as" class="plays-as" aria-live="polite"></p>
+            </section>
             <div id="unresolved" class="unresolved" hidden></div>
             <div id="empty-artists" class="warning" hidden></div>
             <div id="partial-artists" class="info" hidden></div>
@@ -356,6 +400,17 @@
                 <option value="oldest">oldest release</option>
               </select>
             </label>
+            <fieldset class="choice-group">
+              <legend>Leave out</legend>
+              <label class="checkbox">
+                <input id="album-skip-favourites" type="checkbox" />
+                Skip tracks already in my Favourites
+              </label>
+              <label class="checkbox">
+                <input id="album-one-copy" type="checkbox" checked />
+                One copy of each song (no remaster repeats)
+              </label>
+            </fieldset>
             <details class="filters">
               <summary>Filters</summary>
               <div class="filter-grid">
@@ -412,6 +467,35 @@
             </p>
             <div id="albums-unresolved" class="unresolved" hidden></div>
             <div id="albums-excluded" class="warning" hidden></div>
+            <section id="album-plan" class="plan-strip" aria-label="Playlist settings" hidden>
+              <div class="plan-settings">
+                <div class="field">
+                  <span>Order</span>
+                  <div class="segmented" role="radiogroup" aria-label="Playlist order">
+                    <label>
+                      <input type="radio" name="album-order" value="as-listed" checked />
+                      As listed
+                    </label>
+                    <label>
+                      <input type="radio" name="album-order" value="shuffle" />
+                      Shuffle
+                    </label>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Fit to length</span>
+                  <select id="album-fit" title="Leaves out tracks from the end of the list, keeping whole albums from the top.">
+                    <option value="">Any length</option>
+                    <option value="30">About 30 minutes</option>
+                    <option value="45">About 45 minutes</option>
+                    <option value="60">About 60 minutes</option>
+                    <option value="80">About 80 minutes</option>
+                    <option value="120">About 120 minutes</option>
+                  </select>
+                </label>
+              </div>
+              <p id="album-plays-as" class="plays-as" aria-live="polite"></p>
+            </section>
             <div id="album-groups"></div>
 
             <div class="commit-bar">
@@ -527,6 +611,10 @@
               <input id="similar-replace-repeats" type="checkbox" />
               Replace artists that already came up with the next most similar one
             </label>
+            <label class="checkbox">
+              <input id="similar-skip-favourite-artists" type="checkbox" />
+              Skip artists already in my favourite artists
+            </label>
             <p class="hint">
               Depth 1 adds artists similar to yours; depth 2 also adds artists
               similar to those, and so on. By default each artist keeps to its
@@ -539,6 +627,17 @@
               artist.
             </p>
             <p id="similar-estimate" class="estimate" hidden></p>
+            <fieldset class="choice-group">
+              <legend>Leave out</legend>
+              <label class="checkbox">
+                <input id="similar-skip-favourites" type="checkbox" />
+                Skip tracks already in my Favourites
+              </label>
+              <label class="checkbox">
+                <input id="similar-one-copy" type="checkbox" checked />
+                One copy of each song (no remaster repeats)
+              </label>
+            </fieldset>
             <details class="filters">
               <summary>Filters</summary>
               <div class="filter-grid">
@@ -586,6 +685,39 @@
           <section id="similar-preview" class="review" hidden>
             <h2>Review</h2>
             <p class="hint">Untick any track you do not want.</p>
+            <section id="similar-plan" class="plan-strip" aria-label="Playlist settings">
+              <div class="plan-settings">
+                <div class="field">
+                  <span>Order</span>
+                  <div class="segmented" role="radiogroup" aria-label="Playlist order">
+                    <label>
+                      <input type="radio" name="similar-order" value="by-artist" />
+                      By artist
+                    </label>
+                    <label>
+                      <input type="radio" name="similar-order" value="take-turns" checked />
+                      Take turns
+                    </label>
+                    <label>
+                      <input type="radio" name="similar-order" value="shuffle" />
+                      Shuffle
+                    </label>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Fit to length</span>
+                  <select id="similar-fit" title="Leaves out tracks from the end of each artist's list in turn, so each keeps its most popular.">
+                    <option value="">Any length</option>
+                    <option value="30">About 30 minutes</option>
+                    <option value="45">About 45 minutes</option>
+                    <option value="60">About 60 minutes</option>
+                    <option value="80">About 80 minutes</option>
+                    <option value="120">About 120 minutes</option>
+                  </select>
+                </label>
+              </div>
+              <p id="similar-plays-as" class="plays-as" aria-live="polite"></p>
+            </section>
             <div id="similar-unresolved" class="unresolved" hidden></div>
             <div id="similar-truncated" class="warning" hidden></div>
             <div id="similar-left-out" class="info" hidden></div>

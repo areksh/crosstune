@@ -816,6 +816,68 @@ button:disabled {
   opacity: 0.62;
 }
 
+/* A row with a known length gets a fifth column for it. */
+.track.has-length {
+  grid-template-columns: 22px 46px minmax(0, 1fr) minmax(4.5rem, auto) 3rem;
+  grid-template-areas:
+    "check cover text pill length"
+    "check cover reason pill length";
+}
+
+.track.no-cover.has-length {
+  grid-template-columns: 22px minmax(0, 1fr) minmax(4.5rem, auto) 3rem;
+  grid-template-areas:
+    "check text pill length"
+    "check reason pill length";
+}
+
+.track > .length {
+  grid-area: length;
+  justify-self: end;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A track left out to fit the chosen length: dimmed like an excluded one,
+   saying so in place of any other reason. */
+.track.fit-dropped > :not(.reason) {
+  opacity: 0.62;
+}
+
+.track.fit-dropped > .reason:not(.fit-reason) {
+  display: none;
+}
+
+/* The review's plan settings: order, length, and how the playlist plays. */
+.plan-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 18px 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.plan-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 18px 36px;
+}
+
+.plan-settings .field {
+  margin: 0;
+}
+
+.plays-as {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* Cover slots: a neutral square, filled only while "Show artwork" is on (the
    image has no src until then, so nothing is requested). */
 .cover {
@@ -1691,6 +1753,14 @@ button.small {
 
   .track.no-cover {
     grid-template-columns: 22px minmax(0, 1fr) auto;
+  }
+
+  .track.has-length {
+    grid-template-columns: 22px 40px minmax(0, 1fr) auto 2.6rem;
+  }
+
+  .track.no-cover.has-length {
+    grid-template-columns: 22px minmax(0, 1fr) auto 2.6rem;
   }
 
   .track > .cover {

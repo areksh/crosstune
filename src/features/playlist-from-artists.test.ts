@@ -11,6 +11,8 @@ import {
   TOP_TRACKS_POOL,
   type PlaylistBuilderClient,
 } from "./playlist-from-artists.js";
+import { seededRandom } from "./combine.js";
+import { SongPicker } from "./song-picker.js";
 import { compileTrackFilter } from "./track-filter.js";
 
 /** A configurable stub of the client surface the builder depends on. */
@@ -18,12 +20,15 @@ function stubClient(config: {
   artistsByQuery?: Record<string, Artist[]>;
   tracksByArtist?: Record<number, Track[]>;
   playlist?: Playlist;
+  favourites?: Track[];
 }): PlaylistBuilderClient & {
   createPlaylist: ReturnType<typeof vi.fn>;
   addTracksToPlaylist: ReturnType<typeof vi.fn>;
   getArtistTopTracks: ReturnType<typeof vi.fn>;
+  getFavoriteTracks: ReturnType<typeof vi.fn>;
 } {
   return {
+    getFavoriteTracks: vi.fn(async () => config.favourites ?? []),
     searchArtists: vi.fn(async (query: string) => config.artistsByQuery?.[query] ?? []),
     // Honour the limit like the real client, so pool sizes are observable.
     getArtistTopTracks: vi.fn(async (artistId: number, limit?: number) =>
@@ -476,6 +481,148 @@ describe("buildPlaylistFromArtists with a filter", () => {
     expect(result.resolvedArtists).toEqual([
       { query: "A", artist: { id: 1, name: "A" }, trackCount: 1, excludedCount: 1 },
     ]);
+  });
+});
+
+describe("resolveArtistTracks with a song picker", () => {
+  const artistsByQuery = {
+    Portishead: [{ id: 1, name: "Portishead" }],
+    Beth: [{ id: 2, name: "Beth Gibbons" }],
+  };
+  const tracksByArtist: Record<number, Track[]> = {
+    1: [
+      { id: 10, title: "Roads", artist: "Portishead", isrc: "R1" },
+      { id: 11, title: "Glory Box", artist: "Portishead" },
+      { id: 12, title: "Sour Times", artist: "Portishead" },
+    ],
+    2: [
+      { id: 20, title: "Roads", version: "Live", artist: "Beth Gibbons", isrc: "R1" },
+      { id: 21, title: "Tom the Model", artist: "Beth Gibbons" },
+      { id: 22, title: "Mysteries", artist: "Beth Gibbons" },
+    ],
+  };
+
+  it("replaces a later copy of a song with the next most popular track", async () => {
+    const client = stubClient({ artistsByQuery, tracksByArtist });
+    const result = await resolveArtistTracks(client, {
+      artists: ["Portishead", "Beth"],
+      tracksPerArtist: 2,
+      picker: new SongPicker({ oneCopy: true }),
+    });
+    expect(result.resolvedArtists[0]!.tracks.map((t) => t.id)).toEqual([10, 11]);
+    expect(result.resolvedArtists[1]!.tracks.map((t) => t.id)).toEqual([21, 22]);
+    expect(result.resolvedArtists[1]!.excluded).toEqual([
+      {
+        track: tracksByArtist[2]![0],
+        exclusion: { kind: "repeat", of: "Roads" },
+        position: 0,
+      },
+    ]);
+    // The pool is fetched so excluded tracks can be replaced.
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, TOP_TRACKS_POOL);
+  });
+
+  it("takes in input order however the lookups finish", async () => {
+    const client = stubClient({ artistsByQuery, tracksByArtist });
+    // Portishead's lookup finishes last; its Roads is still the first copy.
+    client.getArtistTopTracks.mockImplementation(async (artistId: number) => {
+      await new Promise((resolve) => setTimeout(resolve, artistId === 1 ? 20 : 0));
+      return tracksByArtist[artistId] ?? [];
+    });
+    const result = await resolveArtistTracks(client, {
+      artists: ["Portishead", "Beth"],
+      tracksPerArtist: 1,
+      picker: new SongPicker({ oneCopy: true }),
+    });
+    expect(result.resolvedArtists.map((r) => r.tracks.map((t) => t.id))).toEqual([[10], [21]]);
+  });
+
+  it("replaces favourites, listing them excluded", async () => {
+    const client = stubClient({ artistsByQuery, tracksByArtist });
+    const result = await resolveArtistTracks(client, {
+      artists: ["Portishead"],
+      tracksPerArtist: 2,
+      picker: SongPicker.fromFavourites([{ id: 99, title: "Glory Box", artist: "Portishead" }], {
+        oneCopy: false,
+      }),
+    });
+    const [portishead] = result.resolvedArtists;
+    expect(portishead!.tracks.map((t) => t.id)).toEqual([10, 12]);
+    expect(portishead!.excluded).toEqual([
+      { track: tracksByArtist[1]![1], exclusion: { kind: "favourite" }, position: 1 },
+    ]);
+  });
+});
+
+describe("buildPlaylistFromArtists with plan options", () => {
+  const artistsByQuery = {
+    A: [{ id: 1, name: "A" }],
+    B: [{ id: 2, name: "B" }],
+  };
+  const tracksByArtist: Record<number, Track[]> = {
+    1: [
+      { id: 10, title: "a1", artist: "A", duration: 100 },
+      { id: 11, title: "a2", artist: "A", duration: 100 },
+      { id: 12, title: "a3", artist: "A", duration: 100 },
+    ],
+    2: [
+      { id: 20, title: "b1", artist: "B", duration: 100 },
+      { id: 21, title: "b2", artist: "B", duration: 100 },
+    ],
+  };
+
+  it("writes the tracks taking turns between the artists", async () => {
+    const client = stubClient({ artistsByQuery, tracksByArtist });
+    const result = await buildPlaylistFromArtists(client, {
+      artists: ["A", "B"],
+      playlistName: "P",
+      tracksPerArtist: 3,
+      order: "take-turns",
+    });
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(1, [10, 20, 11, 21, 12]);
+    expect(result.durationSeconds).toBe(500);
+    expect(client.getFavoriteTracks).not.toHaveBeenCalled();
+  });
+
+  it("skips favourites (fetched once) and fits to length fairly", async () => {
+    const client = stubClient({
+      artistsByQuery,
+      tracksByArtist,
+      favourites: [{ id: 11, title: "a2", artist: "A" }],
+    });
+    const result = await buildPlaylistFromArtists(client, {
+      artists: ["A", "B"],
+      playlistName: "P",
+      tracksPerArtist: 3,
+      skipFavourites: true,
+      fitMinutes: 4,
+    });
+    expect(client.getFavoriteTracks).toHaveBeenCalledTimes(1);
+    // A keeps a1 and a3 (a2 is a favourite); fitting 400s to 240s drops b2 and
+    // a3, the deepest ranks, last artist first.
+    expect(client.addTracksToPlaylist).toHaveBeenCalledWith(1, [10, 20]);
+    expect(result.trackCount).toBe(2);
+    expect(result.droppedToFit).toBe(2);
+    expect(result.durationSeconds).toBe(200);
+    expect(result.resolvedArtists.map((r) => [r.artist.name, r.trackCount, r.excludedCount])).toEqual(
+      [
+        ["A", 1, 1],
+        ["B", 1, 0],
+      ],
+    );
+  });
+
+  it("shuffles with the random source given", async () => {
+    const client = stubClient({ artistsByQuery, tracksByArtist });
+    await buildPlaylistFromArtists(client, {
+      artists: ["A", "B"],
+      playlistName: "P",
+      tracksPerArtist: 3,
+      order: "shuffle",
+      random: seededRandom(1),
+    });
+    const written = client.addTracksToPlaylist.mock.calls[0]![1] as number[];
+    expect([...written].sort()).toEqual([10, 11, 12, 20, 21]);
   });
 });
 

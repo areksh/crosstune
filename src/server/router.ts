@@ -75,8 +75,16 @@ import {
 } from "../features/import-export.js";
 import { createZip } from "../features/zip.js";
 import {
+  createSongPicker,
+  parseSongPickerState,
+  SongPicker,
+  type SongPickerOptions,
+  type SongPickerState,
+} from "../features/song-picker.js";
+import {
   describeEstimate,
   estimateSimilar,
+  favouriteArtistIds,
   fetchArtistTracks,
   SIMILAR_SETTINGS,
   walkFromArtists,
@@ -317,10 +325,15 @@ async function resolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
+  const plan = parsePlanOptions(body);
+  if (!plan.ok) {
+    return { status: 400, body: { error: plan.error } };
+  }
   const result = await resolveArtistTracks(deps.service, {
     artists: input.value.artists,
     tracksPerArtist: input.value.tracksPerArtist,
     filter: input.value.filter,
+    picker: await pickerFor(deps.service, plan.value),
   });
   return { status: 200, body: result };
 }
@@ -366,12 +379,18 @@ async function albumTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
+  const plan = parsePlanOptions(body);
+  if (!plan.ok) {
+    return { status: 400, body: { error: plan.error } };
+  }
+  const picker = await pickerFor(deps.service, plan.value);
   const result = await fetchAlbumTracks(
     deps.service,
     input.value.albumIds,
     input.value.filter,
+    picker,
   );
-  return { status: 200, body: result };
+  return { status: 200, body: withPicker(result, picker) };
 }
 
 /**
@@ -386,20 +405,31 @@ async function walkSimilar(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
-  const { source, walk } = input.value;
+  const plan = parsePlanOptions(body);
+  if (!plan.ok) {
+    return { status: 400, body: { error: plan.error } };
+  }
+  const { source, walk, skipFavouriteArtists } = input.value;
+  const picker = await pickerFor(deps.service, plan.value);
+  const extras = {
+    ...(picker !== undefined && { picker }),
+    ...(skipFavouriteArtists && { skipArtistIds: await favouriteArtistIds(deps.service) }),
+  };
   const result =
     source.type === "artists"
       ? await walkFromArtists(deps.service, {
           ...walk,
+          ...extras,
           artists: source.artists,
           tracksPerSeed: source.tracksPerSeed,
         })
       : await walkFromPlaylist(deps.service, {
           ...walk,
+          ...extras,
           playlistId: source.playlistId,
           maxSeeds: source.maxSeeds,
         });
-  return { status: 200, body: result };
+  return { status: 200, body: withPicker(result, picker) };
 }
 
 /** The most artists `/api/similar/tracks` takes per request. */
@@ -439,13 +469,62 @@ async function similarTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse>
   if (!filter.ok) {
     return { status: 400, body: { error: filter.error } };
   }
+  const plan = parsePlanOptions(body);
+  if (!plan.ok) {
+    return { status: 400, body: { error: plan.error } };
+  }
+  const picker = await pickerFor(deps.service, plan.value);
   const result = await fetchArtistTracks(
     deps.service,
     artists.map((a) => ({ id: a.id, name: a.name })),
     tracksPerSimilar.value,
     filter.value,
+    picker,
   );
-  return { status: 200, body: result };
+  return { status: 200, body: withPicker(result, picker) };
+}
+
+/**
+ * The plan-wide options of a playlist request: `skipFavourites` and `oneCopy`
+ * (booleans) start a run; `picker`, the state a previous response returned,
+ * carries one on across requests (so favourites are fetched once per run).
+ */
+type PlanOptions = { type: "start"; options: SongPickerOptions } | { type: "resume"; state: SongPickerState };
+
+function parsePlanOptions(body: unknown): Parsed<PlanOptions> {
+  if (!isRecord(body)) {
+    return { ok: true, value: { type: "start", options: {} } };
+  }
+  if (body["picker"] !== undefined) {
+    try {
+      return { ok: true, value: { type: "resume", state: parseSongPickerState(body["picker"]) } };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+  const skipFavourites = body["skipFavourites"] ?? false;
+  const oneCopy = body["oneCopy"] ?? false;
+  if (typeof skipFavourites !== "boolean" || typeof oneCopy !== "boolean") {
+    return { ok: false, error: "skipFavourites and oneCopy must be booleans" };
+  }
+  return { ok: true, value: { type: "start", options: { skipFavourites, oneCopy } } };
+}
+
+/** The picker for these options, or undefined when it would exclude nothing. */
+async function pickerFor(
+  service: QobuzApiService,
+  plan: PlanOptions,
+): Promise<SongPicker | undefined> {
+  const picker =
+    plan.type === "resume"
+      ? SongPicker.fromState(plan.state)
+      : await createSongPicker(service, plan.options);
+  return picker.active ? picker : undefined;
+}
+
+/** Add the picker's state to a response body, for the next request of the run. */
+function withPicker<T extends object>(body: T, picker: SongPicker | undefined): T {
+  return picker === undefined ? body : { ...body, picker: picker.state() };
 }
 
 /**
@@ -766,7 +845,9 @@ type SimilarSource =
 
 interface SimilarInput {
   source: SimilarSource;
-  walk: Required<WalkOptions>;
+  walk: Required<Omit<WalkOptions, "skipArtistIds" | "picker">>;
+  /** Never suggest the user's favourite artists. */
+  skipFavouriteArtists: boolean;
 }
 
 function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
@@ -843,6 +924,10 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
   if (typeof replaceRepeats !== "boolean") {
     return { ok: false, error: "replaceRepeats must be a boolean" };
   }
+  const skipFavouriteArtists = body["skipFavouriteArtists"] ?? false;
+  if (typeof skipFavouriteArtists !== "boolean") {
+    return { ok: false, error: "skipFavouriteArtists must be a boolean" };
+  }
   const filter = parseFilterInput(body["filter"]);
   if (!filter.ok) {
     return filter;
@@ -850,6 +935,7 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
   return {
     ok: true,
     value: {
+      skipFavouriteArtists,
       source,
       walk: {
         similarPerArtist: similarPerArtist.value,

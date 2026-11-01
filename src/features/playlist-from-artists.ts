@@ -12,13 +12,25 @@
  * {@link buildPlaylistFromArtists} composes both phases in one call for the CLI.
  * An optional {@link TrackFilter} excludes tracks by title or album; excluded
  * tracks are replaced by the artist's next most popular ones, and those passed
- * over are reported so the web UI can offer them unticked.
+ * over are reported so the web UI can offer them unticked. An optional
+ * {@link SongPicker} does the same for tracks already in the user's favourites
+ * and for later copies of a song the plan already has; it is consulted in
+ * input order, so the first artist listed keeps a shared song. The CLI's
+ * composed build then fits the plan to a length and orders it (see
+ * ./playlist-shape.ts); the web UI does both in its review.
  * Each function depends only on the small client surface it needs, so all are
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
+import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
+import {
+  createSongPicker,
+  type FavouriteTracksClient,
+  type SongPicker,
+  type SongPickerOptions,
+} from "./song-picker.js";
 import {
   isFilterActive,
   NO_FILTER,
@@ -55,7 +67,9 @@ export interface ExistingPlaylistClient {
 }
 
 /** The full surface {@link buildPlaylistFromArtists} depends on. */
-export type PlaylistBuilderClient = ArtistResolverClient & PlaylistWriterClient;
+export type PlaylistBuilderClient = ArtistResolverClient &
+  PlaylistWriterClient &
+  FavouriteTracksClient;
 
 /**
  * A track the filter excluded, with the reason and its `position`: the index it
@@ -115,9 +129,24 @@ export interface ResolveArtistsOptions {
   tracksPerArtist?: number;
   /** Tracks to exclude; excluded tracks are replaced by the next most popular. */
   filter?: TrackFilter;
+  /**
+   * Favourites and repeats to exclude (replaced like filtered tracks). It is
+   * updated with the tracks taken, so a later request can carry the run on.
+   */
+  picker?: SongPicker;
 }
 
-export interface BuildPlaylistOptions {
+/** How the composed builds shape the plan: song exclusions, length and order. */
+export interface PlanShapeOptions extends SongPickerOptions {
+  /** Default `by-artist`. */
+  order?: PlaylistOrder;
+  /** Trim to at most about this many minutes. */
+  fitMinutes?: number;
+  /** Random source for `shuffle`; default `Math.random`. */
+  random?: () => number;
+}
+
+export interface BuildPlaylistOptions extends PlanShapeOptions {
   /** Artist names to include. */
   artists: string[];
   /** Name for the new playlist. */
@@ -137,7 +166,7 @@ export interface ResolvedArtist {
   query: string;
   artist: Artist;
   trackCount: number;
-  /** Tracks the filter left out (those ranked above the last one added). */
+  /** Tracks the filter or picker left out (those ranked above the last one added). */
   excludedCount: number;
 }
 
@@ -150,6 +179,10 @@ export interface BuildPlaylistResult {
   /** Matched artists that yielded fewer tracks than requested. */
   partialArtists: UnderfilledArtist[];
   trackCount: number;
+  /** Total length of the tracks written, in seconds (unknown ones as the average). */
+  durationSeconds: number;
+  /** Tracks dropped to fit the length asked for (0 without one). */
+  droppedToFit: number;
 }
 
 /** How many search results to consider when looking for an exact-name match. */
@@ -174,28 +207,36 @@ export async function resolveArtistTracks(
 ): Promise<ResolveArtistsResult> {
   const tracksPerArtist = options.tracksPerArtist ?? DEFAULT_TRACKS_PER_ARTIST;
   const filter = options.filter ?? NO_FILTER;
+  const deep = isFilterActive(filter) || options.picker?.active === true;
 
-  // Resolve with a bounded pool, then split the outcomes. Results come back in
-  // input order (see mapWithConcurrency), so the grouped-by-artist preview keeps
-  // the order the user typed regardless of which lookups finished first.
-  const outcomes = await mapWithConcurrency(
+  // Look up and fetch with a bounded pool. Results come back in input order
+  // (see mapWithConcurrency), so the grouped-by-artist preview keeps the order
+  // the user typed regardless of which lookups finished first.
+  const lookups = await mapWithConcurrency(
     options.artists,
     DEFAULT_CONCURRENCY,
-    async (query): Promise<ResolvedArtistTracks | undefined> => {
+    async (query): Promise<{ artist: Artist; pool: Track[] } | undefined> => {
       const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
       const artist = pickArtist(candidates, query);
       if (artist === undefined) {
         return undefined;
       }
       if (tracksPerArtist === 0) {
-        return { query, artist, tracks: [], excluded: [] };
+        return { artist, pool: [] };
       }
-      return {
-        query,
-        artist,
-        ...(await fetchTopTracks(client, artist.id, tracksPerArtist, filter)),
-      };
+      return { artist, pool: await fetchTopTrackPool(client, artist.id, tracksPerArtist, deep) };
     },
+  );
+  // Then take each artist's tracks in input order: the picker's "first copy"
+  // must not depend on which fetch finished first.
+  const outcomes = lookups.map((lookup, index): ResolvedArtistTracks | undefined =>
+    lookup === undefined
+      ? undefined
+      : {
+          query: options.artists[index]!,
+          artist: lookup.artist,
+          ...takeTopTracks(lookup.pool, tracksPerArtist, filter, options.picker),
+        },
   );
 
   const resolvedArtists: ResolvedArtistTracks[] = [];
@@ -242,29 +283,45 @@ export async function resolveArtistTracks(
  * Fetch an artist's `count` most popular tracks that the filter allows, plus
  * the excluded ones passed over on the way (most popular first).
  *
- * With an active filter the whole top-track pool is fetched, so excluded tracks
- * can be replaced by the next most popular ones; without one only `count` are
- * requested.
+ * With an active filter (or picker) the whole top-track pool is fetched, so
+ * excluded tracks can be replaced by the next most popular ones; without one
+ * only `count` are requested.
  */
 export async function fetchTopTracks(
   client: Pick<ArtistResolverClient, "getArtistTopTracks">,
   artistId: number,
   count: number,
   filter: TrackFilter = NO_FILTER,
+  picker?: SongPicker,
 ): Promise<{ tracks: Track[]; excluded: ExcludedTrack[] }> {
-  const fetchCount = isFilterActive(filter) ? Math.max(count, TOP_TRACKS_POOL) : count;
-  const pool = await client.getArtistTopTracks(artistId, fetchCount);
-  return takeTopTracks(pool, count, filter);
+  const deep = isFilterActive(filter) || picker?.active === true;
+  const pool = await fetchTopTrackPool(client, artistId, count, deep);
+  return takeTopTracks(pool, count, filter, picker);
+}
+
+/**
+ * Fetch an artist's top tracks, most popular first: `count` of them, or the
+ * whole pool when `deep` (so excluded tracks can be replaced).
+ */
+export async function fetchTopTrackPool(
+  client: Pick<ArtistResolverClient, "getArtistTopTracks">,
+  artistId: number,
+  count: number,
+  deep: boolean,
+): Promise<Track[]> {
+  return client.getArtistTopTracks(artistId, deep ? Math.max(count, TOP_TRACKS_POOL) : count);
 }
 
 /**
  * Walk a popularity-ordered pool, keeping the first `count` tracks the filter
- * allows and collecting the excluded ones passed over on the way.
+ * and the picker allow and collecting the excluded ones passed over on the
+ * way. The picker is told what was taken and skipped.
  */
-function takeTopTracks(
+export function takeTopTracks(
   pool: readonly Track[],
   count: number,
   filter: TrackFilter,
+  picker?: SongPicker,
 ): { tracks: Track[]; excluded: ExcludedTrack[] } {
   const tracks: Track[] = [];
   const excluded: ExcludedTrack[] = [];
@@ -272,11 +329,16 @@ function takeTopTracks(
     if (tracks.length >= count) {
       break;
     }
-    const exclusion = trackExclusion(track, filter);
+    const filtered = trackExclusion(track, filter);
+    const exclusion = filtered ?? picker?.exclusion(track);
     if (exclusion === undefined) {
       tracks.push(track);
+      picker?.take(track);
     } else {
       excluded.push({ track, exclusion, position: tracks.length + excluded.length });
+      if (filtered === undefined) {
+        picker?.skip(track);
+      }
     }
   }
   return { tracks, excluded };
@@ -365,6 +427,7 @@ export async function buildPlaylistFromArtists(
     throw new Error("At least one artist is required");
   }
 
+  const picker = await createSongPicker(client, options);
   const { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists } =
     await resolveArtistTracks(client, {
       artists: options.artists,
@@ -372,28 +435,22 @@ export async function buildPlaylistFromArtists(
         tracksPerArtist: options.tracksPerArtist,
       }),
       ...(options.filter !== undefined && { filter: options.filter }),
+      picker,
     });
 
-  // De-duplicate across artists, counting how many each contributed.
-  const trackIds: number[] = [];
-  const seen = new Set<number>();
-  const summaries: ResolvedArtist[] = [];
-  for (const resolved of resolvedArtists) {
-    let added = 0;
-    for (const track of resolved.tracks) {
-      if (!seen.has(track.id)) {
-        seen.add(track.id);
-        trackIds.push(track.id);
-        added += 1;
-      }
-    }
-    summaries.push({
-      query: resolved.query,
-      artist: resolved.artist,
-      trackCount: added,
-      excludedCount: resolved.excluded.length,
-    });
-  }
+  // De-duplicate across artists, fit to length and order, counting how many
+  // tracks each artist contributed.
+  const shaped = shapeArtistGroups(
+    resolvedArtists.map((resolved) => resolved.tracks),
+    options,
+  );
+  const trackIds = shaped.ordered.map((track) => track.id);
+  const summaries: ResolvedArtist[] = resolvedArtists.map((resolved, index) => ({
+    query: resolved.query,
+    artist: resolved.artist,
+    trackCount: shaped.kept[index]?.length ?? 0,
+    excludedCount: resolved.excluded.length,
+  }));
 
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
@@ -409,7 +466,25 @@ export async function buildPlaylistFromArtists(
     emptyArtists,
     partialArtists,
     trackCount: trackIds.length,
+    durationSeconds: shaped.seconds,
+    droppedToFit: shaped.dropped.length,
   };
+}
+
+/**
+ * Shape per-artist track groups into the playlist the CLI writes: each track
+ * once (under the first artist with it), fitted fairly to the length asked
+ * for, in the order asked for.
+ */
+export function shapeArtistGroups(
+  groups: readonly (readonly Track[])[],
+  options: Pick<PlanShapeOptions, "order" | "fitMinutes" | "random">,
+): ReturnType<typeof shapePlaylist<Track>> {
+  return shapePlaylist(uniqueGroups(groups, (track) => track.id), (track) => track.duration, {
+    order: options.order ?? "by-artist",
+    ...(options.fitMinutes !== undefined && { fitMinutes: options.fitMinutes }),
+    ...(options.random !== undefined && { random: options.random }),
+  });
 }
 
 /** Prefer an exact (case-insensitive) name match, else the first (most relevant) result. */

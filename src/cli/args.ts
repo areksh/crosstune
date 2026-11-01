@@ -31,6 +31,13 @@ import {
   DEFAULT_ALBUM_PREFERENCE,
   type AlbumPreference,
 } from "../features/playlist-from-albums.js";
+import {
+  ALBUM_ORDERS,
+  parseFitMinutes,
+  PLAYLIST_ORDERS,
+  type AlbumOrder,
+  type PlaylistOrder,
+} from "../features/playlist-shape.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import type { StatsSource } from "../features/stats.js";
 import type { UpgradeSource } from "../features/upgrade.js";
@@ -99,6 +106,8 @@ export interface PlaylistArgs {
   isPublic: boolean;
   /** Present only when an exclude flag was given. */
   filter?: TrackFilterSpec;
+  /** Present only when a plan flag (`--order`, `--fit`, ...) was given. */
+  plan?: PlanArgs;
 }
 
 export interface AlbumPlaylistArgs {
@@ -117,6 +126,8 @@ export interface AlbumPlaylistArgs {
   isPublic: boolean;
   /** Present only when an exclude or `--discs` flag was given. */
   filter?: TrackFilterSpec;
+  /** Present only when a plan flag (`--order`, `--fit`, ...) was given. */
+  plan?: PlanArgs<AlbumOrder>;
 }
 
 /** Accumulates the filter flags shared by the playlist commands. */
@@ -180,6 +191,84 @@ class FilterFlags {
   }
 }
 
+/**
+ * The plan-shaping flags shared by the playlist builders: `--order`,
+ * `--skip-favourites`, `--one-copy` and `--fit <minutes>`. `O` is the order
+ * type the command takes.
+ */
+export interface PlanArgs<O extends string = PlaylistOrder> {
+  order?: O;
+  skipFavourites: boolean;
+  oneCopy: boolean;
+  fitMinutes?: number;
+}
+
+/** Accumulates the plan flags of a playlist builder. */
+class PlanFlags<O extends string> {
+  readonly #orders: readonly O[];
+  #order: O | undefined;
+  #skipFavourites = false;
+  #oneCopy = false;
+  #fitMinutes: number | undefined;
+  #given = false;
+
+  constructor(orders: readonly O[]) {
+    this.#orders = orders;
+  }
+
+  /**
+   * Consume the plan flag at `argv[i]`, if it is one, returning how many
+   * arguments it used (0 when it is not a plan flag).
+   *
+   * @throws {Error} if a flag's value is missing or invalid.
+   */
+  take(argv: readonly string[], i: number): number {
+    const flag = argv[i];
+    const value = argv[i + 1];
+    switch (flag) {
+      case "--skip-favourites":
+        this.#given = true;
+        this.#skipFavourites = true;
+        return 1;
+      case "--one-copy":
+        this.#given = true;
+        this.#oneCopy = true;
+        return 1;
+      case "--order":
+        if (value === undefined || !(this.#orders as readonly string[]).includes(value)) {
+          throw new Error(
+            `--order must be one of: ${this.#orders.join(", ")}${value === undefined ? "" : ` (got "${value}")`}`,
+          );
+        }
+        this.#given = true;
+        this.#order = value as O;
+        return 2;
+      case "--fit":
+        if (value === undefined) {
+          throw new Error("--fit requires a number of minutes");
+        }
+        this.#given = true;
+        this.#fitMinutes = parseFitMinutes(value);
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  /** The plan, or undefined if no plan flag was given. */
+  args(): PlanArgs<O> | undefined {
+    if (!this.#given) {
+      return undefined;
+    }
+    return {
+      ...(this.#order !== undefined && { order: this.#order }),
+      skipFavourites: this.#skipFavourites,
+      oneCopy: this.#oneCopy,
+      ...(this.#fitMinutes !== undefined && { fitMinutes: this.#fitMinutes }),
+    };
+  }
+}
+
 /** Arguments for the `similar-artists` command. */
 export interface SimilarArgs {
   source:
@@ -200,8 +289,12 @@ export interface SimilarArgs {
   yes: boolean;
   /** Replace artists that already came up with the next most similar. */
   replaceRepeats: boolean;
+  /** Never suggest the user's favourite artists. */
+  skipFavouriteArtists?: boolean;
   /** Present only when an exclude flag was given. */
   filter?: TrackFilterSpec;
+  /** Present only when a plan flag (`--order`, `--fit`, ...) was given. */
+  plan?: PlanArgs;
 }
 
 /** Where the deduplicator should look for tracks. */
@@ -308,7 +401,8 @@ function isKeepStrategy(value: string | undefined): value is KeepStrategy {
  * Recognised options: `--name <name>` (required), `--tracks <n>` (positive
  * integer), `--public`, and the repeatable `--exclude-track <term>`,
  * `--exclude-album <term>` and `--exclude-artist <name>`. All remaining
- * positional arguments are artist names.
+ * positional arguments are artist names. The plan flags (`--order`,
+ * `--skip-favourites`, `--one-copy`, `--fit <minutes>`) are {@link PlanFlags}.
  *
  * @throws {Error} if `--name` is missing, `--tracks` is not a positive integer,
  *   or an exclude term is missing or an invalid `/regex/`.
@@ -319,9 +413,10 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
   let isPublic = false;
   const artists: string[] = [];
   const filter = new FilterFlags(false);
+  const plan = new PlanFlags(PLAYLIST_ORDERS);
 
   for (let i = 0; i < argv.length; i += 1) {
-    const used = filter.take(argv, i);
+    const used = filter.take(argv, i) || plan.take(argv, i);
     if (used > 0) {
       i += used - 1;
       continue;
@@ -357,12 +452,14 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
   }
 
   const spec = filter.spec();
+  const planArgs = plan.args();
   return {
     playlistName,
     artists,
     isPublic,
     ...(tracksPerArtist !== undefined && { tracksPerArtist }),
     ...(spec !== undefined && { filter: spec }),
+    ...(planArgs !== undefined && { plan: planArgs }),
   };
 }
 
@@ -378,7 +475,8 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
  * takes that artist's releases instead (no lines then), narrowed by
  * `--include <kinds>` (comma-separated albums, eps, live, compilations;
  * default albums) and, with `--all-versions`, listing every edition of an
- * album rather than one.
+ * album rather than one. The plan flags are {@link PlanFlags}, with
+ * `--order as-listed|shuffle`.
  *
  * @throws {Error} if `--name` is missing, `--prefer` is not a valid preference,
  *   a filter flag is missing its value or invalid, `--include` is invalid, or
@@ -393,9 +491,10 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   let allVersions = false;
   const entries: string[] = [];
   const filter = new FilterFlags(true);
+  const plan = new PlanFlags(ALBUM_ORDERS);
 
   for (let i = 0; i < argv.length; i += 1) {
-    const used = filter.take(argv, i);
+    const used = filter.take(argv, i) || plan.take(argv, i);
     if (used > 0) {
       i += used - 1;
       continue;
@@ -454,11 +553,13 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   }
 
   const spec = filter.spec();
+  const planArgs = plan.args();
   return {
     playlistName,
     entries,
     preference,
     isPublic,
+    ...(planArgs !== undefined && { plan: planArgs }),
     ...(discographyArtist !== undefined && {
       discography: {
         artist: discographyArtist,
@@ -762,7 +863,9 @@ const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
  * even when estimated to be very large), `--replace-repeats` (replace artists
  * that already came up with the next most similar), and the repeatable
  * `--exclude-track`/`--exclude-album`/`--exclude-artist` (an excluded artist is
- * also never walked to). Artists source only: `--seed-tracks K`
+ * also never walked to), `--skip-favourite-artists` (never suggest your
+ * favourite artists) and the plan flags ({@link PlanFlags}). Artists source
+ * only: `--seed-tracks K`
  * (0 for none) and `--public`. Playlist source only: `--seeds S` and `--apply`.
  * Ranges and defaults are {@link SIMILAR_SETTINGS}.
  *
@@ -784,12 +887,14 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
   let apply = false;
   let yes = false;
   let replaceRepeats = false;
+  let skipFavouriteArtists = false;
   const used = new Set<string>();
   const positional: string[] = [];
   const filter = new FilterFlags(false);
+  const plan = new PlanFlags(PLAYLIST_ORDERS);
 
   for (let i = 0; i < argv.length; i += 1) {
-    const consumed = filter.take(argv, i);
+    const consumed = filter.take(argv, i) || plan.take(argv, i);
     if (consumed > 0) {
       i += consumed - 1;
       continue;
@@ -833,6 +938,9 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
       case "--replace-repeats":
         replaceRepeats = true;
         break;
+      case "--skip-favourite-artists":
+        skipFavouriteArtists = true;
+        break;
       case "--seed-tracks":
         settings.tracksPerSeed = boundedInt(arg, value, SIMILAR_SETTINGS.tracksPerSeed);
         i += 1;
@@ -859,6 +967,7 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     throw new Error("Give only one of --name or --playlist");
   }
   const spec = filter.spec();
+  const planArgs = plan.args();
   const shared = {
     similarPerArtist: settings.similarPerArtist,
     depth: settings.depth,
@@ -866,7 +975,9 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     maxArtists: settings.maxArtists,
     yes,
     replaceRepeats,
+    ...(skipFavouriteArtists && { skipFavouriteArtists }),
     ...(spec !== undefined && { filter: spec }),
+    ...(planArgs !== undefined && { plan: planArgs }),
   };
 
   if (playlistId !== undefined) {

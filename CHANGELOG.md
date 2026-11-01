@@ -72,7 +72,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [--format ...]` writes one file per playlist, named after it (unsafe
   characters replaced, duplicate names numbered); in the web UI, "Every
   playlist" downloads them as a single .zip.
-
+- Plan options for the playlist builders (playlist from artists, similar
+  artists, playlist from albums), on the CLI and in the web UI:
+  - *Order*: by artist, take turns between the artists, or shuffle
+    (`--order by-artist|take-turns|shuffle`; albums take `as-listed|shuffle`).
+    The CLI keeps by-artist as its default; the web UI starts on take turns
+    and previews the order ("Plays as ..., and so on.").
+  - *Skip tracks already in my Favourites* (`--skip-favourites`): matched as
+    songs (ISRC or artist and title), with your favourites fetched once per
+    run. In the top-track tools the next most popular track takes the place;
+    the skipped one is listed unticked as "Already in your Favourites".
+  - *One copy of each song* (`--one-copy`): a later copy of a song already in
+    the plan (a remaster, or the same recording under another artist) is left
+    out as "Same song as ... above" and, in the top-track tools, replaced by
+    the next most popular. Live takes and remixes stay separate songs.
+  - *Fit to length* (`--fit <minutes>`): trims the plan to at most about that
+    length, dropping from the end of each artist's tracks in turn so each keeps
+    its most popular (albums: from the end of the list). Tracks of unknown
+    length count as the average.
+  - Similar artists can also skip your favourite artists
+    (`--skip-favourite-artists`), treating them like a source playlist's own.
+  - Every builder's save bar (including word play's) now shows the total
+    length next to the track count, and track rows show each track's length.
 - Library stats (`stats` on the CLI, and in the web UI under a new *Explore*
   group): for your favourites, a playlist, or everything (favourites and all
   playlists, each track once), the track and artist counts and hours of music,

@@ -147,6 +147,12 @@ export function trackRow(
   checkbox.type = "checkbox";
   checkbox.checked = options.exclusion === undefined;
   checkbox.dataset["trackId"] = String(track.id);
+  // Read back by the plan settings (src/web/plan.ts): the play-order preview
+  // and the length.
+  checkbox.dataset["title"] = titleOf(track);
+  if (track.duration !== undefined) {
+    checkbox.dataset["duration"] = String(track.duration);
+  }
   checkbox.addEventListener("change", options.onChange);
   row.appendChild(checkbox);
 
@@ -158,6 +164,13 @@ export function trackRow(
   if (pill !== undefined) {
     row.appendChild(pill);
   }
+  if (track.duration !== undefined) {
+    const length = document.createElement("span");
+    row.classList.add("has-length");
+    length.className = "length";
+    length.textContent = clockTime(track.duration);
+    row.appendChild(length);
+  }
   if (options.exclusion !== undefined) {
     row.classList.add("excluded");
     const reason = document.createElement("span");
@@ -168,9 +181,19 @@ export function trackRow(
   return row;
 }
 
+/** A length in seconds as "4:51". */
+function clockTime(seconds: number): string {
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
 /** A short explanation of why a track was excluded. */
 function exclusionLabel(exclusion: Exclusion): string {
   switch (exclusion.kind) {
+    case "favourite":
+      return "Already in your Favourites";
+    case "repeat":
+      return `Same song as ${exclusion.of} above`;
     case "disc":
       return `excluded: disc ${exclusion.disc}`;
     case "track":

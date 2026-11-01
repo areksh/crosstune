@@ -4,6 +4,7 @@ import type { Artist, Track } from "../qobuz/index.js";
 import {
   describeEstimate,
   estimateSimilar,
+  favouriteArtistIds,
   fetchArtistTracks,
   LARGE_RUN,
   planFromArtists,
@@ -11,12 +12,14 @@ import {
   resolveSimilarArtists,
   seedsFromPlaylist,
   SIMILAR_CANDIDATE_LIMIT,
+  similarTrackGroups,
   similarTrackIds,
   walkFromArtists,
   walkFromPlaylist,
   walkSimilarArtists,
   type SimilarArtistsClient,
 } from "./similar-artists.js";
+import { SongPicker } from "./song-picker.js";
 import { compileTrackFilter } from "./track-filter.js";
 
 const artist = (id: number, name = `Artist ${id}`): Artist => ({ id, name });
@@ -754,6 +757,118 @@ describe("planFromPlaylist", () => {
     // Five's most similar artist is Seven, already in the playlist: nothing new.
     expect(plan.similar).toEqual([]);
     expect(plan.appearances).toEqual([]);
+  });
+});
+
+describe("plan options", () => {
+  it("never suggests an artist in the extra skip list (e.g. favourite artists)", async () => {
+    const client = stubClient({
+      searches: { Nirvana: [artist(1, "Nirvana")] },
+      similar: { 1: [artist(11), artist(12)] },
+    });
+
+    const plan = await planFromArtists(client, {
+      artists: ["Nirvana"],
+      tracksPerSeed: 0,
+      similarPerArtist: 1,
+      depth: 1,
+      tracksPerSimilar: 1,
+      replaceRepeats: true,
+      skipArtistIds: new Set([11]),
+    });
+
+    expect(plan.similar.map((s) => s.artist.id)).toEqual([12]);
+  });
+
+  it("adds the extra skip list to a playlist's own artists", async () => {
+    const client = stubClient({
+      playlist: [{ id: 1, title: "a", artistId: 5, artist: "Five" }],
+      similar: { 5: [artist(5), artist(50), artist(51)] },
+    });
+
+    const walk = await walkFromPlaylist(client, {
+      playlistId: 42,
+      maxSeeds: 1,
+      similarPerArtist: 1,
+      depth: 1,
+      replaceRepeats: true,
+      skipArtistIds: new Set([50]),
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([51]);
+  });
+
+  it("runs the picker over the seeds, then the similar artists, in plan order", async () => {
+    const shared: Track = { id: 900, title: "Shared", artist: "X", isrc: "S1" };
+    const client = stubClient({
+      searches: { Seed: [artist(1, "Seed")] },
+      similar: { 1: [artist(11), artist(12)] },
+      tracks: {
+        1: [shared, { id: 101, title: "Own", artist: "Seed" }],
+        11: [{ ...shared, id: 1100 }, { id: 1101, title: "Next", artist: "Eleven" }],
+        12: [{ id: 1200, title: "Fav", artist: "Twelve" }, { id: 1201, title: "B", artist: "Twelve" }],
+      },
+    });
+
+    const plan = await planFromArtists(client, {
+      artists: ["Seed"],
+      tracksPerSeed: 1,
+      similarPerArtist: 2,
+      depth: 1,
+      tracksPerSimilar: 1,
+      picker: SongPicker.fromFavourites([{ id: 1200, title: "Fav" }], { oneCopy: true }),
+    });
+
+    expect(plan.seeds[0]?.tracks.map((t) => t.id)).toEqual([900]);
+    const [eleven, twelve] = plan.similar;
+    expect(eleven?.tracks.map((t) => t.id)).toEqual([1101]);
+    expect(eleven?.excluded.map((e) => e.exclusion)).toEqual([{ kind: "repeat", of: "Shared" }]);
+    expect(twelve?.tracks.map((t) => t.id)).toEqual([1201]);
+    expect(twelve?.excluded.map((e) => e.exclusion)).toEqual([{ kind: "favourite" }]);
+  });
+
+  it("fetches a batch with a picker carried over from an earlier request", async () => {
+    const client = stubClient({
+      similar: {},
+      tracks: {
+        11: [{ id: 1, title: "Song", artist: "A" }, { id: 2, title: "Other", artist: "A" }],
+        12: [{ id: 3, title: "Song", artist: "A" }, { id: 4, title: "Third", artist: "A" }],
+      },
+    });
+    const picker = new SongPicker({ oneCopy: true });
+
+    const first = await fetchArtistTracks(client, [artist(11)], 1, undefined, picker);
+    const resumed = SongPicker.fromState(picker.state());
+    const second = await fetchArtistTracks(client, [artist(12)], 1, undefined, resumed);
+
+    expect(first.fetched[0]?.tracks.map((t) => t.id)).toEqual([1]);
+    expect(second.fetched[0]?.tracks.map((t) => t.id)).toEqual([4]);
+  });
+});
+
+describe("similarTrackGroups", () => {
+  it("groups the tracks by artist in plan order, each track once", () => {
+    const seeds = [{ artist: artist(1), tracks: tracksFor(1, 2) }];
+    const similar = [
+      { artist: artist(11), tracks: [...tracksFor(11), tracksFor(1)[0]!] },
+      { artist: artist(12), tracks: tracksFor(12) },
+    ];
+    const appearances = [
+      { artist: artist(11), seed: artist(1) },
+      { artist: artist(12), seed: artist(1) },
+      { artist: artist(11), seed: artist(1) },
+    ];
+
+    expect(
+      similarTrackGroups(seeds, similar, appearances).map((group) => group.map((t) => t.id)),
+    ).toEqual([[100, 101], [1100], [1200]]);
+  });
+});
+
+describe("favouriteArtistIds", () => {
+  it("collects the ids of the user's favourite artists", async () => {
+    const client = { getFavoriteArtists: vi.fn(async () => [artist(3), artist(4)]) };
+    expect(await favouriteArtistIds(client)).toEqual(new Set([3, 4]));
   });
 });
 

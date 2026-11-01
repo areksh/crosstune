@@ -20,11 +20,16 @@
  *
  *   qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] \
  *       [--exclude-track <term>]... [--exclude-album <term>]... \
- *       [--exclude-artist <name>]... "Artist One" "Artist Two" ...
+ *       [--exclude-artist <name>]... [--order by-artist|take-turns|shuffle] \
+ *       [--skip-favourites] [--one-copy] [--fit <minutes>] "Artist One" ...
  *       Build a playlist from the given artists' top tracks. Artist names may
  *       also be piped on stdin, one per line. Tracks whose title, album's
- *       title or performer matches an exclude term are replaced by the
- *       artist's next most popular tracks.
+ *       title or performer matches an exclude term -- or, with
+ *       --skip-favourites, already in your favourites, or with --one-copy, a
+ *       later copy of a song already in the playlist -- are replaced by the
+ *       artist's next most popular tracks. --fit trims the playlist to at most
+ *       about that many minutes, from the end of each artist's tracks in turn;
+ *       --order chooses how it plays (default by-artist).
  *
  *   qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] \
  *       [--public] [--discs <list>] [--exclude-track <term>]... \
@@ -35,7 +40,9 @@
  *       several versions, --prefer picks one: highest-quality (default), newest,
  *       or oldest. Releases matching --exclude-album are never picked; tracks
  *       matching --exclude-track or --exclude-artist, or on a disc outside
- *       --discs, are left out.
+ *       --discs, are left out. --skip-favourites, --one-copy, --fit <minutes>
+ *       (trimming the end of the list) and --order as-listed|shuffle work as
+ *       for playlist-from-artists, without replacements.
  *
  *   qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" \
  *       [--include albums,eps,live,compilations] [--all-versions] \
@@ -102,6 +109,9 @@
  *       is refused unless --yes is given. A similar artist matching
  *       --exclude-artist is left out (and not walked from), and the next most
  *       similar one takes its place; seeds are used regardless.
+ *       --skip-favourite-artists treats your favourite artists like the
+ *       playlist's own; --order, --skip-favourites, --one-copy and --fit work
+ *       as for playlist-from-artists.
  *
  *   qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] \
  *       [--mode merge|only-first|common] [--order sequential|interleave|shuffle] \
@@ -203,13 +213,17 @@ import {
   addTracksToExistingPlaylist,
   buildPlaylistFromArtists,
   createPlaylistWithTracks,
+  shapeArtistGroups,
 } from "./features/playlist-from-artists.js";
+import { formatDuration } from "./features/playlist-shape.js";
+import { createSongPicker } from "./features/song-picker.js";
 import {
   describeEstimate,
   estimateSimilar,
+  favouriteArtistIds,
   planFromArtists,
   planFromPlaylist,
-  similarTrackIds,
+  similarTrackGroups,
   type SimilarPlan,
 } from "./features/similar-artists.js";
 import { compileTrackFilter } from "./features/track-filter.js";
@@ -482,17 +496,19 @@ function planPlaylistFromArtists(
         tracksPerArtist: parsed.tracksPerArtist,
       }),
       ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
+      ...parsed.plan,
     });
-    output.assign({ applied: true, result });
+    output.assign({ applied: true, order: parsed.plan?.order ?? "by-artist", result });
 
     logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks (${formatDuration(result.durationSeconds)}):`,
     );
     for (const resolved of result.resolvedArtists) {
       logger.info(
         `  ${resolved.artist.name}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
       );
     }
+    logFitNote(result.droppedToFit, parsed.plan?.fitMinutes);
     for (const partial of result.partialArtists) {
       logger.info(
         `  (only ${partial.trackCount} of ${partial.requested} available for ${partial.artist.name})`,
@@ -536,8 +552,9 @@ function planPlaylistFromAlbums(
         preference: parsed.preference,
         isPublic: parsed.isPublic,
         ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
+        ...parsed.plan,
       });
-      reportAlbumPlaylist(result);
+      reportAlbumPlaylist(result, parsed.plan?.fitMinutes);
       if (result.truncated) {
         logger.warn(
           `${result.artist.name} has more releases than were fetched; the oldest may be missing.`,
@@ -582,16 +599,17 @@ function planPlaylistFromAlbums(
       preference: parsed.preference,
       isPublic: parsed.isPublic,
       ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
+      ...parsed.plan,
     });
-    reportAlbumPlaylist(result);
+    reportAlbumPlaylist(result, parsed.plan?.fitMinutes);
   };
 }
 
 /** Log the outcome of an album playlist build (from album lines or a discography). */
-function reportAlbumPlaylist(result: BuildAlbumPlaylistResult): void {
+function reportAlbumPlaylist(result: BuildAlbumPlaylistResult, fitMinutes?: number): void {
   output.assign({ applied: true, result });
   logger.info(
-    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
+    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks (${formatDuration(result.durationSeconds)}):`,
   );
   for (const resolved of result.resolvedAlbums) {
     const version =
@@ -600,6 +618,7 @@ function reportAlbumPlaylist(result: BuildAlbumPlaylistResult): void {
       `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
     );
   }
+  logFitNote(result.droppedToFit, fitMinutes);
   if (result.unresolvedAlbums.length > 0) {
     logger.warn(`not found: ${result.unresolvedAlbums.join(", ")}`);
   }
@@ -659,21 +678,47 @@ function planSimilarArtists(
     logger.info(
       `Finding ${parsed.similarPerArtist} similar artist${parsed.similarPerArtist === 1 ? "" : "s"} per artist, ${parsed.depth} level${parsed.depth === 1 ? "" : "s"} deep (${describeEstimate(estimate)})...`,
     );
+    const picker = await createSongPicker(client, parsed.plan ?? {});
+    const extras = {
+      picker,
+      ...(parsed.skipFavouriteArtists === true && {
+        skipArtistIds: await favouriteArtistIds(client),
+      }),
+    };
     const plan =
       source.type === "artists"
-        ? await planFromArtists(client, { ...walk, artists, tracksPerSeed: source.tracksPerSeed })
+        ? await planFromArtists(client, {
+            ...walk,
+            ...extras,
+            artists,
+            tracksPerSeed: source.tracksPerSeed,
+          })
         : await planFromPlaylist(client, {
             ...walk,
+            ...extras,
             playlistId: source.playlistId,
             maxSeeds: source.maxSeeds,
           });
-    const trackIds = similarTrackIds(plan.seeds, plan.similar, plan.appearances);
-    output.assign({ source, plan, trackIds, applied: false });
+    const shaped = shapeArtistGroups(
+      similarTrackGroups(plan.seeds, plan.similar, plan.appearances),
+      parsed.plan ?? {},
+    );
+    const trackIds = shaped.ordered.map((track) => track.id);
+    output.assign({
+      source,
+      plan,
+      trackIds,
+      order: parsed.plan?.order ?? "by-artist",
+      durationSeconds: shaped.seconds,
+      droppedToFit: shaped.dropped.length,
+      applied: false,
+    });
     reportSimilarPlan(
       plan,
       source.type === "artists" && source.tracksPerSeed > 0,
       parsed.maxArtists,
     );
+    logFitNote(shaped.dropped.length, parsed.plan?.fitMinutes);
     if (trackIds.length === 0) {
       logger.warn("No tracks found to add.");
       return;
@@ -687,13 +732,13 @@ function planSimilarArtists(
       });
       output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
       logger.info(
-        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`,
+        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks (${formatDuration(shaped.seconds)}).`,
       );
       return;
     }
     if (!source.apply) {
       logger.info(
-        `\n(dry run -- pass --apply to add up to ${trackIds.length} tracks to the playlist)`,
+        `\n(dry run -- pass --apply to add up to ${trackIds.length} tracks, ${formatDuration(shaped.seconds)}, to the playlist)`,
       );
       return;
     }
@@ -760,6 +805,15 @@ function reportSimilarPlan(
   }
   if (plan.unresolvedArtists.length > 0) {
     logger.warn(`not found: ${plan.unresolvedArtists.join(", ")}`);
+  }
+}
+
+/** Say how many tracks were dropped to fit the length asked for, if any. */
+function logFitNote(dropped: number, fitMinutes: number | undefined): void {
+  if (fitMinutes !== undefined && dropped > 0) {
+    logger.info(
+      `  (${dropped} track${dropped === 1 ? "" : "s"} left out to fit about ${fitMinutes} minutes)`,
+    );
   }
 }
 
@@ -1493,11 +1547,11 @@ function printUsage(): void {
       "  qobuz-helper logout",
       "  qobuz-helper ui",
       "  qobuz-helper check",
-      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist - Album" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]...',
-      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
-      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
+      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist - Album" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options]',
+      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
+      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--apply]",
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
       "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
@@ -1519,6 +1573,7 @@ function printUsage(): void {
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
       "--exclude-artist matches the whole artist name, ignoring case and accents (\"Drake\" skips Drake, not Nick Drake); /pattern/ is a regex on the name. similar-artists never walks to an excluded artist.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
+      "Plan options (playlist-from-artists, similar-artists, playlist-from-albums): --order by-artist|take-turns|shuffle (albums: as-listed|shuffle; default by-artist/as-listed), --skip-favourites (leave out tracks already in your favourites), --one-copy (one copy of each song, remasters included), --fit <minutes> (trim to at most about that length).",
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest; join several with commas to break ties (e.g. highest-quality,oldest).",
       "deduplicate reports only unless --apply is given.",

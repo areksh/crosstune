@@ -29,6 +29,7 @@ import {
   type ResolvedAlbumVersions,
 } from "./playlist-from-albums.js";
 import { pickArtist, type PlaylistWriterClient } from "./playlist-from-artists.js";
+import type { FavouriteTracksClient } from "./song-picker.js";
 import { albumExclusion, NO_FILTER, type TrackFilter } from "./track-filter.js";
 
 /** The client surface needed to list an artist's releases. */
@@ -194,7 +195,8 @@ export async function resolveDiscography(
 /** The full surface {@link buildPlaylistFromDiscography} depends on. */
 export type DiscographyPlaylistClient = DiscographyResolverClient &
   AlbumTracksClient &
-  PlaylistWriterClient;
+  PlaylistWriterClient &
+  FavouriteTracksClient;
 
 export interface BuildDiscographyPlaylistResult extends BuildAlbumPlaylistResult {
   artist: Artist;
