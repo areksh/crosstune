@@ -20,8 +20,8 @@ import {
   type Playlist,
   type Track,
 } from "../api.js";
-import { el, showError } from "../dom.js";
-import { readTerms, trackRow } from "../tracks.js";
+import { el, setStep, showError } from "../dom.js";
+import { groupHead, readTerms, trackRow } from "../tracks.js";
 
 type Preference = "newest" | "oldest" | "highest-quality";
 
@@ -162,9 +162,10 @@ function renderAlbumGroup(resolved: ResolvedAlbum, index: number): HTMLElement {
   group.className = "album-group";
   group.dataset["index"] = String(index);
 
-  const heading = document.createElement("h4");
-  heading.textContent = resolved.query;
-  group.appendChild(heading);
+  const count = resolved.versions.length;
+  group.appendChild(
+    groupHead("h3", resolved.query, { count: `${count} version${count === 1 ? "" : "s"}` }),
+  );
 
   // The dropdown lists the actual releases; the global preference just chooses
   // which one is selected by default. The user can pick a specific version.
@@ -558,8 +559,25 @@ function writeLabel(): string {
   return selectedTarget() === "new" ? "Create playlist" : "Add to playlist";
 }
 
+/**
+ * Show the step reached: albums, versions (some still to fetch), tracks (all
+ * fetched, ready to review), or every step done once saved.
+ */
+function updateSteps(): void {
+  let step = 0;
+  if (committed) {
+    step = 4;
+  } else if (pendingGroups().length === 0 && groupsWithState("ready").length > 0) {
+    step = 2;
+  } else if (allGroups().length > 0) {
+    step = 1;
+  }
+  setStep("albums-steps", step);
+}
+
 /** Set the commit button's label and enabled state from the remaining work. */
 function updateCommitButton(): void {
+  updateSteps();
   const button = el<HTMLButtonElement>("commit-albums");
   if (committed) {
     button.disabled = true;

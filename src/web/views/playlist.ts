@@ -10,8 +10,15 @@
  */
 
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
-import { el, showError } from "../dom.js";
-import { inRankOrder, readTerms, trackRow } from "../tracks.js";
+import { el, setStep, showError } from "../dom.js";
+import {
+  groupHead,
+  inRankOrder,
+  readTerms,
+  trackCountLabel,
+  trackRow,
+  trackSubline,
+} from "../tracks.js";
 
 interface Artist {
   id: number;
@@ -126,6 +133,7 @@ function renderPreview(result: ResolveResponse): void {
   }
 
   el("preview").hidden = false;
+  setStep("playlist-steps", 1);
   showError(el("commit-error"), undefined);
   showError(el("commit-result"), undefined);
   updateSelectedCount();
@@ -143,18 +151,14 @@ function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
   const group = document.createElement("div");
   group.className = "artist-group";
 
-  const heading = document.createElement("h4");
-  heading.textContent = resolvedArtist.artist.name;
-  if (
-    resolvedArtist.artist.name.toLowerCase() !==
-    resolvedArtist.query.toLowerCase()
-  ) {
-    const matched = document.createElement("span");
-    matched.className = "matched";
-    matched.textContent = ` (matched "${resolvedArtist.query}")`;
-    heading.appendChild(matched);
-  }
-  group.appendChild(heading);
+  const renamed =
+    resolvedArtist.artist.name.toLowerCase() !== resolvedArtist.query.toLowerCase();
+  group.appendChild(
+    groupHead("h3", resolvedArtist.artist.name, {
+      ...(renamed && { note: `matched "${resolvedArtist.query}"` }),
+      count: trackCountLabel(resolvedArtist),
+    }),
+  );
 
   // In popularity order, the excluded tracks unticked where they ranked.
   for (const { track, exclusion } of inRankOrder(resolvedArtist.tracks, resolvedArtist.excluded)) {
@@ -166,10 +170,8 @@ function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
 }
 
 function rowOptions(track: Track): { meta?: string; onChange: () => void } {
-  return {
-    ...(track.album !== undefined && { meta: track.album }),
-    onChange: updateSelectedCount,
-  };
+  const meta = trackSubline(track);
+  return { ...(meta !== undefined && { meta }), onChange: updateSelectedCount };
 }
 
 /** The unique, ticked track ids in display order. */
@@ -272,6 +274,7 @@ async function onCommit(): Promise<void> {
       skipped: number[];
     }>("POST", "/api/commit", { target, trackIds });
     showResult(resultNode, target, result);
+    setStep("playlist-steps", 3);
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {

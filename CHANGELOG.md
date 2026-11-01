@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a second click saves them. Previously the whole of each album was written
   without a track list. The destination is no longer locked once tracks have
   been fetched, since nothing is written until you save.
+- The web UI has a new look ("Console"): warm charcoal with a single amber
+  accent, set in Archivo (self-hosted, so the page still makes no third-party
+  requests). The sidebar groups the tools (Build, Tidy up, Your data) and the
+  home page lists them by group. Multi-step tools show which step you are on;
+  while reviewing, the destination and save button stay docked at the bottom of
+  the window with the number of selected tracks. Track rows show the album and
+  year, and a quality badge ("24/96", lit up for hi-res). Buttons and controls
+  are at least 44px tall, focus is always visible, motion respects the
+  reduced-motion setting, and on a phone the sidebar stacks above the content.
 
 ### Added
 

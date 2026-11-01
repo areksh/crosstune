@@ -310,7 +310,11 @@ npm run ui            # build the frontend, then serve it and open the browser
 
 `qobuz-helper ui` starts a small web server on `127.0.0.1`, opens your browser
 at it, and runs until you stop it with Ctrl-C. A sidebar switches between the
-tools; a home page introduces each.
+tools, grouped as *Build*, *Tidy up* and *Your data*; a home page introduces
+each. Multi-step tools show the step you are on at the top, and while you review
+a selection the destination and save button stay docked at the bottom of the
+window. Track rows show a quality badge such as "24/96" (bit depth / sampling
+rate in kHz), lit up for hi-res.
 
 **Playlist from artists:**
 

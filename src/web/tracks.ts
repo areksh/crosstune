@@ -40,6 +40,94 @@ export function inRankOrder(
   return merged;
 }
 
+/**
+ * A group's header: the name as a heading, then an optional muted note (e.g.
+ * what it matched) and an optional muted count.
+ */
+export function groupHead(
+  tag: "h3" | "h4",
+  name: string,
+  options: { note?: string; count?: string } = {},
+): HTMLElement {
+  const head = document.createElement("header");
+  head.className = "group-head";
+  const heading = document.createElement(tag);
+  heading.textContent = name;
+  head.appendChild(heading);
+  if (options.note !== undefined && options.note.length > 0) {
+    const note = document.createElement("span");
+    note.className = "matched";
+    note.textContent = options.note;
+    head.appendChild(note);
+  }
+  if (options.count !== undefined) {
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = options.count;
+    head.appendChild(count);
+  }
+  return head;
+}
+
+/** "5 tracks", or "5 tracks, 1 excluded" when the filters excluded some. */
+export function trackCountLabel(entry: {
+  tracks: readonly unknown[];
+  excluded: readonly unknown[];
+}): string {
+  const kept = entry.tracks.length;
+  const label = `${kept} track${kept === 1 ? "" : "s"}`;
+  return entry.excluded.length > 0 ? `${label}, ${entry.excluded.length} excluded` : label;
+}
+
+/** A track's muted sub-line: its album and release year, when known. */
+export function trackSubline(track: Track): string | undefined {
+  const parts = [track.album, track.releaseDate?.slice(0, 4)].filter(
+    (part): part is string => part !== undefined && part.length > 0,
+  );
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+/**
+ * A quality badge such as "24/96" (bit depth / sampling rate in kHz), lit up
+ * for hi-res; undefined when the quality is unknown.
+ */
+export function qualityPill(quality: {
+  bitDepth?: number;
+  samplingRate?: number;
+}): HTMLElement | undefined {
+  const { bitDepth, samplingRate } = quality;
+  if (bitDepth === undefined || samplingRate === undefined) {
+    return undefined;
+  }
+  const pill = document.createElement("span");
+  pill.className = bitDepth > 16 || samplingRate > 48 ? "quality hires" : "quality";
+  pill.textContent = `${bitDepth}/${samplingRate}`;
+  pill.title = `${bitDepth}-bit / ${samplingRate} kHz`;
+  return pill;
+}
+
+/** A track's title (with its version label) over an optional muted sub-line. */
+export function trackText(title: string, sub: string | undefined): HTMLElement {
+  const text = document.createElement("span");
+  text.className = "track-text";
+  const main = document.createElement("span");
+  main.className = "title";
+  main.textContent = title;
+  text.appendChild(main);
+  if (sub !== undefined) {
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = sub;
+    text.appendChild(meta);
+  }
+  return text;
+}
+
+/** A track's title with its version label, e.g. "Roads (Live)". */
+export function titleOf(track: Track): string {
+  return track.version === undefined ? track.title : `${track.title} (${track.version})`;
+}
+
 /** A checkbox row for a track; excluded tracks start unticked, with the reason. */
 export function trackRow(
   track: Track,
@@ -55,17 +143,10 @@ export function trackRow(
   checkbox.addEventListener("change", options.onChange);
   row.appendChild(checkbox);
 
-  const title = document.createElement("span");
-  title.className = "title";
-  title.textContent =
-    track.version === undefined ? track.title : `${track.title} (${track.version})`;
-  row.appendChild(title);
-
-  if (options.meta !== undefined) {
-    const meta = document.createElement("span");
-    meta.className = "meta";
-    meta.textContent = options.meta;
-    row.appendChild(meta);
+  row.appendChild(trackText(titleOf(track), options.meta));
+  const pill = qualityPill(track);
+  if (pill !== undefined) {
+    row.appendChild(pill);
   }
   if (options.exclusion !== undefined) {
     row.classList.add("excluded");

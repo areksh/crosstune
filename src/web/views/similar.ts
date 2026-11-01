@@ -15,8 +15,15 @@
  */
 
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
-import { el, showError } from "../dom.js";
-import { inRankOrder, readTerms, trackRow } from "../tracks.js";
+import { el, setStep, showError } from "../dom.js";
+import {
+  groupHead,
+  inRankOrder,
+  readTerms,
+  trackCountLabel,
+  trackRow,
+  trackSubline,
+} from "../tracks.js";
 
 interface SeedGroup {
   query: string;
@@ -362,6 +369,7 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
   }
 
   el("similar-preview").hidden = false;
+  setStep("similar-steps", 1);
   showError(el("commit-similar-error"), undefined);
   showError(el("commit-similar-result"), undefined);
   updateSelectedCount();
@@ -381,17 +389,13 @@ function renderSeed(
   const group = document.createElement("div");
   group.className = "artist-group";
 
-  const heading = document.createElement("h4");
-  heading.textContent = seed.artist.name;
-  const note = document.createElement("span");
-  note.className = "matched";
-  note.textContent = fromPlaylist
-    ? " (in the playlist)"
-    : seed.tracks.length === 0 && seed.excluded.length === 0
-      ? " (none of its own tracks)"
-      : "";
-  heading.appendChild(note);
-  group.appendChild(heading);
+  const ownTracks = seed.tracks.length > 0 || seed.excluded.length > 0;
+  group.appendChild(
+    groupHead("h3", seed.artist.name, {
+      note: fromPlaylist ? "in the playlist" : ownTracks ? "" : "none of its own tracks",
+      ...(ownTracks && { count: trackCountLabel(seed) }),
+    }),
+  );
   appendTracks(group, seed);
 
   for (const appearance of appearances) {
@@ -401,16 +405,15 @@ function renderSeed(
     }
     const sub = document.createElement("div");
     sub.className = "similar-group";
-    const title = document.createElement("h5");
-    title.textContent = entry.artist.name;
-    const from = document.createElement("span");
-    from.className = "matched";
     const names = entry.similarTo.map((a) => a.name).join(", ");
     const branch = appearance.level > 1 ? ` (on ${appearance.seed.name}'s branch)` : "";
-    const repeat = listed.has(entry.artist.id) ? " -- also listed above; added once" : "";
-    from.textContent = ` -- similar to ${names}${branch}${repeat}`;
-    title.appendChild(from);
-    sub.appendChild(title);
+    const repeat = listed.has(entry.artist.id) ? "; also listed above, added once" : "";
+    sub.appendChild(
+      groupHead("h4", entry.artist.name, {
+        note: `similar to ${names}${branch}${repeat}`,
+        count: trackCountLabel(entry),
+      }),
+    );
     appendTracks(sub, entry);
     group.appendChild(sub);
     listed.add(entry.artist.id);
@@ -445,10 +448,8 @@ function appendTracks(
 }
 
 function rowOptions(track: Track): { meta?: string; onChange: () => void } {
-  return {
-    ...(track.album !== undefined && { meta: track.album }),
-    onChange: updateSelectedCount,
-  };
+  const meta = trackSubline(track);
+  return { ...(meta !== undefined && { meta }), onChange: updateSelectedCount };
 }
 
 /** The unique, ticked track ids in display order (seed, then its similar artists). */
@@ -560,6 +561,7 @@ async function onCommit(): Promise<void> {
       { target, trackIds },
     );
     resultNode.hidden = false;
+    setStep("similar-steps", 3);
     const added = `${result.added.length} track${result.added.length === 1 ? "" : "s"}`;
     resultNode.textContent =
       target.type === "new"

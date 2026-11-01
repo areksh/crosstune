@@ -9,7 +9,8 @@
  */
 
 import { api, type Playlist } from "../api.js";
-import { el, showError } from "../dom.js";
+import { el, setStep, showError } from "../dom.js";
+import { qualityPill, trackText } from "../tracks.js";
 
 interface DedupTrack {
   id: number;
@@ -140,6 +141,8 @@ function renderGroups(groups: ResolvedGroup[]): void {
   const container = el("dedup-groups");
   container.textContent = "";
   el("dedup-results").hidden = false;
+  el("dedup-bar").hidden = groups.length === 0;
+  setStep("dedup-steps", 1);
 
   if (groups.length === 0) {
     summary.textContent = "No duplicates found.";
@@ -191,7 +194,7 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
 
 function renderGroupTrack(track: DedupTrack, keepId: number): HTMLElement {
   const row = document.createElement("label");
-  row.className = "dedup-track";
+  row.className = "track dedup-track";
   row.dataset["trackId"] = String(track.id);
 
   const checkbox = document.createElement("input");
@@ -204,31 +207,22 @@ function renderGroupTrack(track: DedupTrack, keepId: number): HTMLElement {
   });
   row.appendChild(checkbox);
 
-  const title = document.createElement("span");
-  title.className = "title";
-  title.textContent = `${track.artist ? `${track.artist} - ` : ""}${track.title}`;
-  row.appendChild(title);
-
-  const meta = document.createElement("span");
-  meta.className = "meta";
-  meta.textContent = trackMeta(track);
-  row.appendChild(meta);
-
+  row.appendChild(
+    trackText(`${track.artist ? `${track.artist} - ` : ""}${track.title}`, trackMeta(track)),
+  );
+  const pill = qualityPill(track);
+  if (pill !== undefined) {
+    row.appendChild(pill);
+  }
   return row;
 }
 
-function trackMeta(track: DedupTrack): string {
-  const parts: string[] = [];
-  if (track.album !== undefined) {
-    parts.push(track.album);
-  }
-  if (track.bitDepth !== undefined && track.samplingRate !== undefined) {
-    parts.push(`${track.bitDepth}-bit/${track.samplingRate}kHz`);
-  }
-  if (track.releaseDate !== undefined) {
-    parts.push(track.releaseDate);
-  }
-  return parts.join("  -  ");
+/** The copy's album and release date, which tell the copies apart. */
+function trackMeta(track: DedupTrack): string | undefined {
+  const parts = [track.album, track.releaseDate].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
 /** Mark each track row keep/drop from its checkbox (green when kept, red when not). */
@@ -304,6 +298,7 @@ async function onApply(): Promise<void> {
     );
     resultNode.hidden = false;
     resultNode.textContent = `Removed ${result.removed} track${result.removed === 1 ? "" : "s"}. Re-scan to confirm.`;
+    setStep("dedup-steps", 3);
     // The scan is now stale; make the user re-scan before applying again.
     scannedGroups = [];
     el("dedup-groups").textContent = "";

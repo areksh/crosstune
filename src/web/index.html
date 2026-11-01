@@ -5,29 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="qobuz-nonce" content="__QOBUZ_NONCE__" />
     <title>qobuz-helper</title>
+    <link
+      rel="preload"
+      href="fonts/archivo-latin-wdth.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand">qobuz-helper</div>
-        <nav class="nav">
-          <a class="nav-link" data-view="home" href="#/home">Home</a>
-          <a class="nav-link" data-view="playlist" href="#/playlist">
-            Playlist from artists
-          </a>
-          <a class="nav-link" data-view="albums" href="#/albums">
-            Playlist from albums
-          </a>
-          <a class="nav-link" data-view="similar" href="#/similar">
-            Similar artists
-          </a>
-          <a class="nav-link" data-view="deduplicate" href="#/deduplicate">
-            Deduplicator
-          </a>
-          <a class="nav-link" data-view="import-export" href="#/import-export">
-            Import &amp; export
-          </a>
+        <a class="brand" href="#/home">
+          <span class="brand-dot" aria-hidden="true"></span>qobuz-helper
+        </a>
+        <!-- Each tool is one nav-link line in its group (plus a VIEWS entry in main.ts). -->
+        <nav class="nav" aria-label="Tools">
+          <div class="nav-group">
+            <span class="nav-label">Build</span>
+            <a class="nav-link" data-view="home" href="#/home">Home</a>
+            <a class="nav-link" data-view="playlist" href="#/playlist">Playlist from artists</a>
+            <a class="nav-link" data-view="albums" href="#/albums">Playlist from albums</a>
+            <a class="nav-link" data-view="similar" href="#/similar">Similar artists</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-label">Tidy up</span>
+            <a class="nav-link" data-view="deduplicate" href="#/deduplicate">Deduplicator</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-label">Your data</span>
+            <a class="nav-link" data-view="import-export" href="#/import-export">Import &amp; export</a>
+          </div>
         </nav>
         <div class="sidebar-footer">
           <span class="session-label">Signed in as</span>
@@ -39,67 +48,75 @@
         <!-- Home -->
         <section id="view-home" class="view">
           <header class="view-header">
-            <h1>qobuz-helper</h1>
-            <p class="lede">
-              Local-first utilities for your Qobuz account. Pick a tool to begin.
-            </p>
+            <div class="view-title">
+              <h1>qobuz-helper</h1>
+              <p class="lede">
+                Local-first utilities for your Qobuz account. Pick a tool to begin.
+              </p>
+            </div>
           </header>
-          <div class="cards">
-            <a class="card" href="#/playlist">
-              <h3>Playlist from artists</h3>
-              <p>
-                Give a list of artists and build a playlist from each one's most
-                popular tracks. Preview and edit the selection before creating a
-                new playlist or adding to an existing one.
-              </p>
-              <span class="card-cta">Open tool -&gt;</span>
-            </a>
-            <a class="card" href="#/albums">
-              <h3>Playlist from albums</h3>
-              <p>
-                Give a list of albums as "Artist - Album" and build a playlist
-                from them. When an album has several versions, choose which to
-                use -- newest, oldest, or highest quality.
-              </p>
-              <span class="card-cta">Open tool -&gt;</span>
-            </a>
-            <a class="card" href="#/similar">
-              <h3>Similar artists</h3>
-              <p>
-                Discover music through Qobuz's similar artists. Start from a
-                list of artists or one of your playlists, go one or more levels
-                deep, and add the top tracks of artists like them.
-              </p>
-              <span class="card-cta">Open tool -&gt;</span>
-            </a>
-            <a class="card" href="#/deduplicate">
-              <h3>Deduplicator</h3>
-              <p>
-                Find duplicate tracks in a playlist or your favourites --
-                including remasters and the same song on different albums --
-                choose which copy to keep, and remove the rest.
-              </p>
-              <span class="card-cta">Open tool -&gt;</span>
-            </a>
-            <a class="card" href="#/import-export">
-              <h3>Import &amp; export</h3>
-              <p>
-                Export favourites or a playlist as JSON, CSV, plain text or M3U,
-                back up your whole account, and import lists back in -- matching
-                each entry to Qobuz.
-              </p>
-              <span class="card-cta">Open tool -&gt;</span>
-            </a>
+          <!-- Each tool is one tool-link block in its group. -->
+          <div class="tool-groups">
+            <section class="tool-group">
+              <h2>Build</h2>
+              <a class="tool-link" href="#/playlist">
+                <span class="tool-name">Playlist from artists</span>
+                <span class="tool-desc">
+                  Each artist's most popular tracks, reviewed before you save.
+                </span>
+              </a>
+              <a class="tool-link" href="#/albums">
+                <span class="tool-name">Playlist from albums</span>
+                <span class="tool-desc">
+                  Whole albums from "Artist - Album" lines, choosing which version
+                  of each to use.
+                </span>
+              </a>
+              <a class="tool-link" href="#/similar">
+                <span class="tool-name">Similar artists</span>
+                <span class="tool-desc">
+                  Grow a list of artists or a playlist through the artists like
+                  them.
+                </span>
+              </a>
+            </section>
+            <section class="tool-group">
+              <h2>Tidy up</h2>
+              <a class="tool-link" href="#/deduplicate">
+                <span class="tool-name">Deduplicator</span>
+                <span class="tool-desc">
+                  Find repeats in a playlist or your favourites, remasters
+                  included, and choose which copy to keep.
+                </span>
+              </a>
+            </section>
+            <section class="tool-group">
+              <h2>Your data</h2>
+              <a class="tool-link" href="#/import-export">
+                <span class="tool-name">Import &amp; export</span>
+                <span class="tool-desc">
+                  Favourites and playlists in and out as JSON, CSV, text or M3U,
+                  and whole-account backups.
+                </span>
+              </a>
+            </section>
           </div>
         </section>
 
         <!-- Playlist from artists -->
         <section id="view-playlist" class="view" hidden>
           <header class="view-header">
-            <h1>Playlist from artists</h1>
-            <p class="lede">
-              One artist per line. Each artist contributes its most popular tracks.
-            </p>
+            <div class="view-title">
+              <h1>Playlist from artists</h1>
+              <p class="lede">
+                One artist per line. Each artist contributes its most popular tracks.
+              </p>
+            </div>
+            <ol id="playlist-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Artists</li>
+              <li>2 Review</li>
+              <li>3 Save</li>
+            </ol>
           </header>
 
           <section class="panel">
@@ -158,63 +175,69 @@
             <p id="resolve-error" class="error" hidden></p>
           </section>
 
-          <section id="preview" class="panel" hidden>
-            <h2>Preview</h2>
-            <p class="hint">
-              Untick any track you do not want. <span id="selected-count"></span>
-            </p>
+          <section id="preview" class="review" hidden>
+            <h2>Review</h2>
+            <p class="hint">Untick any track you do not want.</p>
             <div id="unresolved" class="unresolved" hidden></div>
             <div id="empty-artists" class="warning" hidden></div>
             <div id="partial-artists" class="info" hidden></div>
             <div id="artist-groups"></div>
 
-            <h3>Destination</h3>
-            <div class="destination">
-              <label class="radio">
-                <input type="radio" name="target" value="new" checked />
-                Create a new playlist
-              </label>
-              <div id="new-fields" class="target-fields">
-                <label class="field">
-                  <span>Name</span>
-                  <input id="playlist-name" type="text" placeholder="My playlist" />
-                </label>
-                <label class="checkbox">
-                  <input id="playlist-public" type="checkbox" />
-                  Make it public
-                </label>
+            <div class="commit-bar">
+              <p id="selected-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="segmented" role="radiogroup" aria-label="Save to">
+                  <label>
+                    <input type="radio" name="target" value="new" checked />
+                    New playlist
+                  </label>
+                  <label>
+                    <input type="radio" name="target" value="existing" />
+                    Existing playlist
+                  </label>
+                </div>
+                <div id="new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="playlist-name" type="text" placeholder="My playlist" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+                <div id="existing-fields" class="target-fields" hidden>
+                  <label class="field field-inline">
+                    <span>Playlist</span>
+                    <select id="playlist-select">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-
-              <label class="radio">
-                <input type="radio" name="target" value="existing" />
-                Add to an existing playlist
-              </label>
-              <div id="existing-fields" class="target-fields" hidden>
-                <label class="field">
-                  <span>Playlist</span>
-                  <select id="playlist-select">
-                    <option value="">Loading...</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div class="actions">
               <button id="commit" type="button">Create playlist</button>
+              <p id="commit-error" class="error" hidden></p>
+              <p id="commit-result" class="result" hidden></p>
             </div>
-            <p id="commit-error" class="error" hidden></p>
-            <p id="commit-result" class="result" hidden></p>
           </section>
         </section>
 
         <!-- Playlist from albums -->
         <section id="view-albums" class="view" hidden>
           <header class="view-header">
-            <h1>Playlist from albums</h1>
-            <p class="lede">
-              One album per line as "Artist - Album". Each album contributes all
-              of its tracks.
-            </p>
+            <div class="view-title">
+              <h1>Playlist from albums</h1>
+              <p class="lede">
+                One album per line as "Artist - Album". Each album contributes all
+                of its tracks.
+              </p>
+            </div>
+            <ol id="albums-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Albums</li>
+              <li>2 Versions</li>
+              <li>3 Tracks</li>
+              <li>4 Save</li>
+            </ol>
           </header>
 
           <section class="panel">
@@ -282,76 +305,79 @@
             <p id="resolve-albums-error" class="error" hidden></p>
           </section>
 
-          <section id="albums-preview" class="panel" hidden>
-            <h2>Preview</h2>
+          <section id="albums-preview" class="review" hidden>
+            <h2>Review</h2>
             <p class="hint">
               Pick which version of each album to use, then fetch the tracks to
-              review them. <span id="albums-selected-count"></span>
+              review them.
             </p>
             <div id="albums-unresolved" class="unresolved" hidden></div>
             <div id="albums-excluded" class="warning" hidden></div>
             <div id="album-groups"></div>
 
-            <h3>Destination</h3>
-            <div class="destination">
-              <label class="radio">
-                <input type="radio" name="album-target" value="new" checked />
-                Create a new playlist
-              </label>
-              <div id="album-new-fields" class="target-fields">
-                <label class="field">
-                  <span>Name</span>
-                  <input
-                    id="album-playlist-name"
-                    type="text"
-                    placeholder="My playlist"
-                  />
-                </label>
-                <label class="checkbox">
-                  <input id="album-playlist-public" type="checkbox" />
-                  Make it public
-                </label>
+            <div class="commit-bar">
+              <p id="albums-selected-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="segmented" role="radiogroup" aria-label="Save to">
+                  <label>
+                    <input type="radio" name="album-target" value="new" checked />
+                    New playlist
+                  </label>
+                  <label>
+                    <input type="radio" name="album-target" value="existing" />
+                    Existing playlist
+                  </label>
+                </div>
+                <div id="album-new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="album-playlist-name" type="text" placeholder="My playlist" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="album-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+                <div id="album-existing-fields" class="target-fields" hidden>
+                  <label class="field field-inline">
+                    <span>Playlist</span>
+                    <select id="album-playlist-select">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-
-              <label class="radio">
-                <input type="radio" name="album-target" value="existing" />
-                Add to an existing playlist
-              </label>
-              <div id="album-existing-fields" class="target-fields" hidden>
-                <label class="field">
-                  <span>Playlist</span>
-                  <select id="album-playlist-select">
-                    <option value="">Loading...</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div class="actions">
               <button id="commit-albums" type="button">Fetch tracks</button>
+              <p id="commit-albums-error" class="error" hidden></p>
+              <p id="commit-albums-result" class="result" hidden></p>
             </div>
-            <p id="commit-albums-error" class="error" hidden></p>
-            <p id="commit-albums-result" class="result" hidden></p>
           </section>
         </section>
 
         <!-- Similar artists -->
         <section id="view-similar" class="view" hidden>
           <header class="view-header">
-            <h1>Similar artists</h1>
-            <p class="lede">
-              Start from a list of artists or one of your playlists, and add the
-              top tracks of the artists Qobuz lists as similar to them.
-            </p>
+            <div class="view-title">
+              <h1>Similar artists</h1>
+              <p class="lede">
+                Start from a list of artists or one of your playlists, and add the
+                top tracks of the artists Qobuz lists as similar to them.
+              </p>
+            </div>
+            <ol id="similar-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Start</li>
+              <li>2 Review</li>
+              <li>3 Save</li>
+            </ol>
           </header>
 
           <section class="panel">
-            <div class="source-toggle">
-              <label class="radio">
+            <div class="segmented source-toggle" role="radiogroup" aria-label="Start from">
+              <label>
                 <input type="radio" name="similar-source" value="artists" checked />
                 Start from artists
               </label>
-              <label class="radio">
+              <label>
                 <input type="radio" name="similar-source" value="playlist" />
                 Start from a playlist
               </label>
@@ -458,12 +484,9 @@
             <p id="resolve-similar-error" class="error" hidden></p>
           </section>
 
-          <section id="similar-preview" class="panel" hidden>
-            <h2>Preview</h2>
-            <p class="hint">
-              Untick any track you do not want.
-              <span id="similar-selected-count"></span>
-            </p>
+          <section id="similar-preview" class="review" hidden>
+            <h2>Review</h2>
+            <p class="hint">Untick any track you do not want.</p>
             <div id="similar-unresolved" class="unresolved" hidden></div>
             <div id="similar-truncated" class="warning" hidden></div>
             <div id="similar-left-out" class="info" hidden></div>
@@ -471,53 +494,60 @@
             <div id="similar-partial" class="info" hidden></div>
             <div id="similar-groups"></div>
 
-            <h3>Destination</h3>
-            <div class="destination">
-              <label class="radio">
-                <input type="radio" name="similar-target" value="new" checked />
-                Create a new playlist
-              </label>
-              <div id="similar-new-fields" class="target-fields">
-                <label class="field">
-                  <span>Name</span>
-                  <input id="similar-playlist-name" type="text" placeholder="My playlist" />
-                </label>
-                <label class="checkbox">
-                  <input id="similar-playlist-public" type="checkbox" />
-                  Make it public
-                </label>
+            <div class="commit-bar">
+              <p id="similar-selected-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="segmented" role="radiogroup" aria-label="Save to">
+                  <label>
+                    <input type="radio" name="similar-target" value="new" checked />
+                    New playlist
+                  </label>
+                  <label>
+                    <input type="radio" name="similar-target" value="existing" />
+                    Existing playlist
+                  </label>
+                </div>
+                <div id="similar-new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="similar-playlist-name" type="text" placeholder="My playlist" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="similar-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+                <div id="similar-existing-fields" class="target-fields" hidden>
+                  <label class="field field-inline">
+                    <span>Playlist</span>
+                    <select id="similar-playlist-select">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-
-              <label class="radio">
-                <input type="radio" name="similar-target" value="existing" />
-                Add to an existing playlist
-              </label>
-              <div id="similar-existing-fields" class="target-fields" hidden>
-                <label class="field">
-                  <span>Playlist</span>
-                  <select id="similar-playlist-select">
-                    <option value="">Loading...</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div class="actions">
               <button id="commit-similar" type="button">Create playlist</button>
+              <p id="commit-similar-error" class="error" hidden></p>
+              <p id="commit-similar-result" class="result" hidden></p>
             </div>
-            <p id="commit-similar-error" class="error" hidden></p>
-            <p id="commit-similar-result" class="result" hidden></p>
           </section>
         </section>
 
         <!-- Deduplicator -->
         <section id="view-deduplicate" class="view" hidden>
           <header class="view-header">
-            <h1>Deduplicator</h1>
-            <p class="lede">
-              Find duplicate tracks (including remasters and the same song on
-              different albums), choose which copy to keep, and remove the rest.
-            </p>
+            <div class="view-title">
+              <h1>Deduplicator</h1>
+              <p class="lede">
+                Find duplicate tracks (including remasters and the same song on
+                different albums), choose which copy to keep, and remove the rest.
+              </p>
+            </div>
+            <ol id="dedup-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Scan</li>
+              <li>2 Review</li>
+              <li>3 Remove</li>
+            </ol>
           </header>
 
           <section class="panel">
@@ -558,25 +588,29 @@
             <p id="dedup-scan-error" class="error" hidden></p>
           </section>
 
-          <section id="dedup-results" class="panel" hidden>
+          <section id="dedup-results" class="review" hidden>
+            <h2>Review</h2>
             <p id="dedup-summary" class="hint"></p>
             <div id="dedup-groups"></div>
-            <div class="actions">
+            <div id="dedup-bar" class="commit-bar" hidden>
+              <p class="commit-note">Unticked copies are removed.</p>
               <button id="dedup-apply" type="button" hidden>Remove tracks</button>
+              <p id="dedup-apply-error" class="error" hidden></p>
+              <p id="dedup-apply-result" class="result" hidden></p>
             </div>
-            <p id="dedup-apply-error" class="error" hidden></p>
-            <p id="dedup-apply-result" class="result" hidden></p>
           </section>
         </section>
 
         <!-- Import & export -->
         <section id="view-import-export" class="view" hidden>
           <header class="view-header">
-            <h1>Import &amp; export</h1>
-            <p class="lede">
-              Export favourites or a playlist, back up your whole account, or
-              import a list back into Qobuz.
-            </p>
+            <div class="view-title">
+              <h1>Import &amp; export</h1>
+              <p class="lede">
+                Export favourites or a playlist, back up your whole account, or
+                import a list back into Qobuz.
+              </p>
+            </div>
           </header>
 
           <section class="panel">
@@ -630,7 +664,14 @@
           </section>
 
           <section class="panel">
-            <h2>Import</h2>
+            <div class="panel-head">
+              <h2>Import</h2>
+              <ol id="import-steps" class="steps" aria-label="Import steps">
+                <li aria-current="step">1 Content</li>
+                <li>2 Preview</li>
+                <li>3 Import</li>
+              </ol>
+            </div>
             <div class="destination">
               <label class="radio">
                 <input type="radio" name="ie-target" value="favourites" checked />

@@ -19,3 +19,21 @@ export function showError(node: HTMLElement, message: string | undefined): void 
     node.textContent = message;
   }
 }
+
+/**
+ * Mark the step a tool is on in its step list (`<ol class="steps">`): the
+ * steps before `current` are done, `current` is the current one, the rest are
+ * upcoming. A `current` past the last step marks every step done.
+ */
+export function setStep(listId: string, current: number): void {
+  el(listId)
+    .querySelectorAll("li")
+    .forEach((step, index) => {
+      step.classList.toggle("done", index < current);
+      if (index === current) {
+        step.setAttribute("aria-current", "step");
+      } else {
+        step.removeAttribute("aria-current");
+      }
+    });
+}

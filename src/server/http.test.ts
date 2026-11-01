@@ -9,9 +9,16 @@ describe("contentTypeFor", () => {
     expect(contentTypeFor("/styles.css")).toMatch(/text\/css/);
   });
 
+  it("serves the self-hosted fonts as woff2", () => {
+    expect(contentTypeFor("/fonts/archivo-latin-wdth.woff2")).toBe("font/woff2");
+    expect(contentTypeFor("/fonts/archivo-latin-ext-wdth.woff2")).toBe("font/woff2");
+  });
+
   it("returns undefined for anything not on the whitelist", () => {
     expect(contentTypeFor("/secret.txt")).toBeUndefined();
     expect(contentTypeFor("/../etc/passwd")).toBeUndefined();
+    expect(contentTypeFor("/fonts/OFL.txt")).toBeUndefined();
+    expect(contentTypeFor("/fonts/other.woff2")).toBeUndefined();
   });
 });
 

@@ -2,12 +2,13 @@
  * Build the web UI frontend into `dist/web`.
  *
  * esbuild bundles the TypeScript entry point into a single ES module with no
- * runtime dependencies; the static HTML and CSS are copied alongside it. This
- * runs as part of `npm run build`, after `tsc` compiles the server and CLI.
+ * runtime dependencies; the static HTML and CSS, and the self-hosted fonts with
+ * their licence, are copied alongside it. This runs as part of `npm run build`,
+ * after `tsc` compiles the server and CLI.
  */
 
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync } from "node:fs";
 
 const outDir = "dist/web";
 
@@ -23,5 +24,6 @@ await build({
 mkdirSync(outDir, { recursive: true });
 copyFileSync("src/web/index.html", `${outDir}/index.html`);
 copyFileSync("src/web/styles.css", `${outDir}/styles.css`);
+cpSync("src/web/fonts", `${outDir}/fonts`, { recursive: true });
 
 console.log(`Built web UI into ${outDir}`);

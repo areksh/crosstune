@@ -35,6 +35,9 @@ const STATIC_FILES: Record<string, string> = {
   "/index.html": "text/html; charset=utf-8",
   "/main.js": "text/javascript; charset=utf-8",
   "/styles.css": "text/css; charset=utf-8",
+  // Archivo, self-hosted so the page makes no third-party requests.
+  "/fonts/archivo-latin-wdth.woff2": "font/woff2",
+  "/fonts/archivo-latin-ext-wdth.woff2": "font/woff2",
 };
 
 export interface StartServerOptions {
@@ -162,16 +165,17 @@ function serveStatic(
     return;
   }
   const fileName = path === "/" ? "index.html" : path.slice(1);
-  let content: string;
+  // Read as bytes: the fonts are binary; only the page is decoded to inject the nonce.
+  let content: Buffer | string;
   try {
-    content = readFileSync(join(staticDir, fileName), "utf8");
+    content = readFileSync(join(staticDir, fileName));
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Not found");
     return;
   }
   if (fileName === "index.html") {
-    content = injectNonce(content, nonce);
+    content = injectNonce(content.toString("utf8"), nonce);
   }
   res.writeHead(200, { "Content-Type": contentType });
   res.end(content);

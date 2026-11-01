@@ -10,7 +10,7 @@
  */
 
 import { api, type Playlist } from "../api.js";
-import { el, showError } from "../dom.js";
+import { el, setStep, showError } from "../dom.js";
 
 interface ExportResponse {
   filename: string;
@@ -155,6 +155,7 @@ function onImportTargetChange(): void {
   // Reset any preview: the plan no longer matches the new target's kind.
   currentPlan = undefined;
   el("ie-import-preview").hidden = true;
+  setStep("import-steps", 0);
 }
 
 async function onFileChosen(): Promise<void> {
@@ -221,6 +222,7 @@ async function onResolve(): Promise<void> {
 /** Show a plan: how many matched, and which entries did not. */
 function renderPlan(plan: ImportPlan): void {
   el("ie-import-preview").hidden = false;
+  setStep("import-steps", 1);
   const total = plan.matched.length + plan.unmatched.length;
   el("ie-import-summary").textContent =
     `Matched ${plan.matched.length} of ${total} ${plan.kind}.`;
@@ -264,6 +266,7 @@ function renderRestorePreview(content: string, errorNode: HTMLElement): void {
   }
   currentPlan = undefined;
   el("ie-import-preview").hidden = false;
+  setStep("import-steps", 1);
   el("ie-import-summary").textContent = `Backup contains ${counts}.`;
   const unmatched = el("ie-import-unmatched");
   unmatched.hidden = true;
@@ -319,6 +322,7 @@ async function onCommit(): Promise<void> {
           : `Imported ${result.written} items.`;
     }
     el("ie-import-preview").hidden = true;
+    setStep("import-steps", 3);
     currentPlan = undefined;
   } catch (error) {
     showError(errorNode, (error as Error).message);
