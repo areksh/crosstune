@@ -702,6 +702,28 @@ describe("POST /api/album-tracks", () => {
     expect(svc.addTracksToPlaylist).not.toHaveBeenCalled();
   });
 
+  it("passes cover URLs through to the page", async () => {
+    const image = "https://static.qobuz.com/images/covers/a_230.jpg";
+    const svc = service({
+      getAlbumTracks: vi.fn(async () => [{ id: 1, title: "One", image }]),
+      searchAlbums: vi.fn(async () => [
+        { id: "a", title: "OK Computer", artist: "Radiohead", image },
+      ]),
+    });
+    const tracks = await handleApi(
+      request("POST", "/api/album-tracks", { albumIds: ["a"] }),
+      deps({ service: svc }),
+    );
+    expect(tracks.body).toMatchObject({
+      fetched: [{ albumId: "a", tracks: [{ track: { id: 1, title: "One", image } }] }],
+    });
+    const albums = await handleApi(
+      request("POST", "/api/resolve-albums", { entries: ["Radiohead - OK Computer"] }),
+      deps({ service: svc }),
+    );
+    expect(albums.body).toMatchObject({ resolvedAlbums: [{ versions: [{ id: "a", image }] }] });
+  });
+
   it("reports albums whose tracks could not be fetched", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async (id: string) => {

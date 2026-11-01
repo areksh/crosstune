@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional album artwork in the web UI. A *Show artwork* checkbox in the sidebar
+  (off by default, remembered in the browser) shows covers next to tracks in
+  every review and the deduplicator, and next to each album in playlist from
+  albums (following the chosen version). Covers load straight from Qobuz's
+  image server; while the setting is off the page requests no images at all.
+  Tracks and albums now carry a cover URL (`image`) parsed from the API, with
+  album/get tracks taking their album's. See ADR-0004.
+
 - Exclude artists, in every playlist tool. Alongside the track and album terms,
   *Filters* (web) and `--exclude-artist <name>` (CLI, repeatable) take artist
   names matched against each track's performer. A plain name matches the whole

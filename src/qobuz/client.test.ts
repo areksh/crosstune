@@ -756,6 +756,15 @@ describe("QobuzClient.getAlbumTracks", () => {
     expect(request?.url.searchParams.get("extra")).toBeNull();
     expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
   });
+
+  it("gives each track the album's cover, which album/get tracks do not embed", async () => {
+    const small = "https://static.qobuz.com/images/covers/a_230.jpg";
+    const { client } = await initedClient({
+      album: { id: "a", image: { small }, tracks: { items: [{ id: 1, title: "Airbag" }] } },
+    });
+
+    expect(await client.getAlbumTracks("a")).toEqual([{ id: 1, title: "Airbag", image: small }]);
+  });
 });
 
 describe("QobuzClient.createPlaylist", () => {

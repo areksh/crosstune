@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAlbumReleaseDate,
+  parseAlbumTracks,
   parseAlbums,
   parseAlbumsPage,
   parseArtistPageTracks,
@@ -364,5 +365,65 @@ describe("parsePlaylistsPage", () => {
 
   it("defaults total to zero when absent", () => {
     expect(parsePlaylistsPage({}).total).toBe(0);
+  });
+});
+
+describe("album artwork", () => {
+  const image = {
+    small: "https://static.qobuz.com/images/covers/ab/cd/x_230.jpg",
+    thumbnail: "https://static.qobuz.com/images/covers/ab/cd/x_50.jpg",
+    large: "https://static.qobuz.com/images/covers/ab/cd/x_600.jpg",
+  };
+
+  it("reads a track's cover from its embedded album, preferring the small size", () => {
+    const json = { tracks: { items: [{ id: 1, title: "Roads", album: { title: "Dummy", image } }] } };
+    expect(parseTracks(json)[0]?.image).toBe(image.small);
+  });
+
+  it("falls back to the thumbnail, then the large image", () => {
+    const track = (img: unknown) =>
+      parseTracks({ tracks: { items: [{ id: 1, title: "T", album: { image: img } }] } })[0];
+    expect(track({ thumbnail: image.thumbnail, large: image.large })?.image).toBe(image.thumbnail);
+    expect(track({ large: image.large })?.image).toBe(image.large);
+  });
+
+  it("accepts only https URLs, and tolerates a missing or odd image", () => {
+    const track = (img: unknown) =>
+      parseTracks({ tracks: { items: [{ id: 1, title: "T", album: { image: img } }] } })[0];
+    expect(track({ small: "http://static.qobuz.com/x.jpg" })).toEqual({ id: 1, title: "T" });
+    expect(track({ small: "javascript:alert(1)", large: image.large })?.image).toBe(image.large);
+    expect(track("https://static.qobuz.com/x.jpg")).toEqual({ id: 1, title: "T" });
+    expect(track(null)).toEqual({ id: 1, title: "T" });
+  });
+
+  it("reads an artist-page top track's cover from its album", () => {
+    const json = { top_tracks: [{ id: 1, title: "Glory Box", album: { id: "a", image } }] };
+    expect(parseArtistPageTracks(json)[0]?.image).toBe(image.small);
+  });
+
+  it("reads an album's cover", () => {
+    const json = { albums: { items: [{ id: "a", title: "Dummy", image }] } };
+    expect(parseAlbums(json)[0]?.image).toBe(image.small);
+  });
+
+  it("gives album/get tracks, which embed no album, the parent album's cover", () => {
+    const own = "https://static.qobuz.com/images/covers/other_230.jpg";
+    const json = {
+      id: "a",
+      image,
+      tracks: {
+        items: [
+          { id: 1, title: "Mysterons" },
+          { id: 2, title: "Sour Times", album: { image: { small: own } } },
+        ],
+      },
+    };
+    expect(parseAlbumTracks(json)).toEqual([
+      { id: 1, title: "Mysterons", image: image.small },
+      { id: 2, title: "Sour Times", image: own },
+    ]);
+    expect(parseAlbumTracks({ tracks: { items: [{ id: 1, title: "T" }] } })).toEqual([
+      { id: 1, title: "T" },
+    ]);
   });
 });

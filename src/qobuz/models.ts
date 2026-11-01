@@ -44,6 +44,8 @@ export interface Track {
   hires?: boolean;
   /** Original release date (YYYY-MM-DD) when available on the embedded album. */
   releaseDate?: string;
+  /** Album cover URL (https, about 230px), when known. See {@link imageOf}. */
+  image?: string;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -69,6 +71,8 @@ export interface Album {
   hires?: boolean;
   /** Number of tracks on the album, when the response carries it. */
   trackCount?: number;
+  /** Cover URL (https, about 230px), when known. See {@link imageOf}. */
+  image?: string;
 }
 
 export interface Playlist {
@@ -98,6 +102,24 @@ export interface ArtistsPage {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * The cover URL from a Qobuz image object (`{ small, thumbnail, large }`),
+ * preferring `small` (about 230px, enough for a list) over `thumbnail` and
+ * `large`. Only https URLs are accepted: the browser loads them directly.
+ */
+function imageOf(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  for (const size of ["small", "thumbnail", "large"]) {
+    const url = value[size];
+    if (typeof url === "string" && url.startsWith("https://")) {
+      return url;
+    }
+  }
+  return undefined;
 }
 
 function itemsOf(value: unknown, key: string): unknown[] {
@@ -166,6 +188,10 @@ function parseAlbum(item: unknown): Album | undefined {
   }
   if (typeof item["tracks_count"] === "number") {
     album.trackCount = item["tracks_count"];
+  }
+  const image = imageOf(item["image"]);
+  if (image !== undefined) {
+    album.image = image;
   }
   return album;
 }
@@ -249,6 +275,10 @@ function parseArtistPageTrack(item: unknown): Track | undefined {
     if (typeof album["id"] === "string") {
       track.albumId = album["id"];
     }
+    const image = imageOf(album["image"]);
+    if (image !== undefined) {
+      track.image = image;
+    }
   }
   const audio = item["audio_info"];
   if (isRecord(audio)) {
@@ -260,6 +290,19 @@ function parseArtistPageTrack(item: unknown): Track | undefined {
     }
   }
   return track;
+}
+
+/**
+ * Parse the tracks of an `album/get` response. Its tracks embed no album, so
+ * each takes the parent album's cover unless it carries its own.
+ */
+export function parseAlbumTracks(response: unknown): Track[] {
+  const tracks = parseTracks(response);
+  const cover = isRecord(response) ? imageOf(response["image"]) : undefined;
+  if (cover === undefined) {
+    return tracks;
+  }
+  return tracks.map((track) => (track.image === undefined ? { ...track, image: cover } : track));
 }
 
 /** Parse a tracks container into its tracks plus the total count (for pagination). */
@@ -304,6 +347,10 @@ function parseTrack(item: unknown): Track | undefined {
     const embeddedDate = releaseDateOf(album);
     if (embeddedDate !== undefined) {
       track.releaseDate = embeddedDate;
+    }
+    const image = imageOf(album["image"]);
+    if (image !== undefined) {
+      track.image = image;
     }
   }
   if (typeof item["playlist_track_id"] === "number") {

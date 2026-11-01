@@ -21,6 +21,7 @@ import {
   type Track,
 } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { coverSlot, setCover } from "../artwork.js";
 import { groupHead, readTerms, trackRow } from "../tracks.js";
 
 type Preference = "newest" | "oldest" | "highest-quality";
@@ -163,9 +164,10 @@ function renderAlbumGroup(resolved: ResolvedAlbum, index: number): HTMLElement {
   group.dataset["index"] = String(index);
 
   const count = resolved.versions.length;
-  group.appendChild(
-    groupHead("h3", resolved.query, { count: `${count} version${count === 1 ? "" : "s"}` }),
-  );
+  const head = groupHead("h3", resolved.query, {
+    count: `${count} version${count === 1 ? "" : "s"}`,
+  });
+  group.appendChild(head);
 
   // The dropdown lists the actual releases; the global preference just chooses
   // which one is selected by default. The user can pick a specific version.
@@ -179,9 +181,20 @@ function renderAlbumGroup(resolved: ResolvedAlbum, index: number): HTMLElement {
     select.value = preferred.id;
   }
   select.disabled = resolved.versions.length < 2;
+  select.addEventListener("change", () => syncCover(group));
+  head.prepend(coverSlot(preferred?.image));
 
   group.appendChild(select);
   return group;
+}
+
+/** Show the cover of the version an album group has selected. */
+function syncCover(group: HTMLElement): void {
+  const slot = group.querySelector<HTMLElement>(".group-head > .cover");
+  if (slot !== null) {
+    const id = selectOf(group).value;
+    setCover(slot, versionsOf(group).find((version) => version.id === id)?.image);
+  }
 }
 
 /** A one-line description of a single release for a dropdown option. */
@@ -258,6 +271,7 @@ function onPreferChange(): void {
     const preferred = selectVersion(enabledVersions(group), preference);
     if (preferred !== undefined) {
       select.value = preferred.id;
+      syncCover(group);
     }
   }
 }
@@ -497,9 +511,11 @@ function markGroupReady(
       list.appendChild(heading);
     }
     list.appendChild(
+      // The album's cover heads the group, so its rows leave theirs out.
       trackRow(track, {
         ...(exclusion !== undefined && { exclusion }),
         onChange: updateSelectedCount,
+        noCover: true,
       }),
     );
   }
@@ -530,6 +546,7 @@ function markGroupFailed(group: HTMLElement, triedId: string): void {
   const next = selectVersion(enabledVersions(group), globalPreference());
   if (next !== undefined) {
     select.value = next.id;
+    syncCover(group);
     select.disabled = false;
     group.dataset["state"] = "pending";
     group.classList.add("album-failed");

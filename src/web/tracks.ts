@@ -6,6 +6,7 @@
  */
 
 import type { ExcludedTrack, Exclusion, Track } from "./api.js";
+import { coverSlot } from "./artwork.js";
 import { el } from "./dom.js";
 
 /** The non-blank lines of a textarea, trimmed: one exclude term per line. */
@@ -131,10 +132,16 @@ export function titleOf(track: Track): string {
 /** A checkbox row for a track; excluded tracks start unticked, with the reason. */
 export function trackRow(
   track: Track,
-  options: { meta?: string; exclusion?: Exclusion; onChange: () => void },
+  options: {
+    meta?: string;
+    exclusion?: Exclusion;
+    onChange: () => void;
+    /** Leave out the cover (e.g. under an album that shows its own). */
+    noCover?: boolean;
+  },
 ): HTMLElement {
   const row = document.createElement("label");
-  row.className = "track";
+  row.className = options.noCover === true ? "track no-cover" : "track";
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -143,6 +150,9 @@ export function trackRow(
   checkbox.addEventListener("change", options.onChange);
   row.appendChild(checkbox);
 
+  if (options.noCover !== true) {
+    row.appendChild(coverSlot(track.image));
+  }
   row.appendChild(trackText(titleOf(track), options.meta));
   const pill = qualityPill(track);
   if (pill !== undefined) {

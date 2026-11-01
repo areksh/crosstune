@@ -316,6 +316,12 @@ a selection the destination and save button stay docked at the bottom of the
 window. Track rows show a quality badge such as "24/96" (bit depth / sampling
 rate in kHz), lit up for hi-res.
 
+Album covers are off by default. Tick *Show artwork* at the bottom of the
+sidebar to show them next to tracks and albums; your browser then loads them
+straight from Qobuz's image server (no sign-in details are involved). While it
+is off, no image is requested at all. The setting is remembered in this
+browser.
+
 **Playlist from artists:**
 
 1. Paste one artist per line and choose how many top tracks to take from each.
@@ -397,6 +403,9 @@ your Qobuz token is never sent to the page. The server is reachable only from
 your own machine, and every request must carry a per-run secret that only the
 served page can read (guarding against other local pages acting on your
 account). See [ADR-0002](docs/adr/0002-web-ui-architecture.md) for the design.
+The one exception is *Show artwork*, which, once you turn it on, has the
+browser load cover images from Qobuz's public image server; see
+[ADR-0004](docs/adr/0004-optional-artwork.md).
 
 ## Development
 

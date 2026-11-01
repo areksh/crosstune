@@ -24,6 +24,8 @@ export interface Track {
   bitDepth?: number;
   samplingRate?: number;
   releaseDate?: string;
+  /** Album cover URL on Qobuz's image server; loaded only if artwork is on. */
+  image?: string;
 }
 
 /** Why the server's filter excluded a track (see src/features/track-filter.ts). */
@@ -61,6 +63,8 @@ export interface Album {
   samplingRate?: number;
   hires?: boolean;
   trackCount?: number;
+  /** Cover URL on Qobuz's image server; loaded only if artwork is on. */
+  image?: string;
 }
 
 export interface Playlist {

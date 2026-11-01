@@ -8,6 +8,7 @@
  */
 
 import { api } from "./api.js";
+import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
@@ -52,6 +53,7 @@ async function loadSession(): Promise<void> {
   }
 }
 
+initArtworkToggle();
 initPlaylistView();
 initAlbumsView();
 initSimilarView();

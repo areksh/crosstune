@@ -10,6 +10,7 @@
 
 import { api, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { coverSlot } from "../artwork.js";
 import { qualityPill, trackText } from "../tracks.js";
 
 interface DedupTrack {
@@ -21,6 +22,7 @@ interface DedupTrack {
   bitDepth?: number;
   samplingRate?: number;
   releaseDate?: string;
+  image?: string;
 }
 
 interface ResolvedGroup {
@@ -206,6 +208,7 @@ function renderGroupTrack(track: DedupTrack, keepId: number): HTMLElement {
     updateApplyButton();
   });
   row.appendChild(checkbox);
+  row.appendChild(coverSlot(track.image));
 
   row.appendChild(
     trackText(`${track.artist ? `${track.artist} - ` : ""}${track.title}`, trackMeta(track)),

@@ -20,6 +20,7 @@ import {
   parseArtistsPage,
   parsePlaylist,
   parsePlaylistsPage,
+  parseAlbumTracks,
   parseTracks,
   parseTracksPage,
   type Album,
@@ -723,7 +724,7 @@ export class QobuzClient {
         `album/get failed with HTTP ${response.status}`,
       );
     }
-    return parseTracks(await response.json());
+    return parseAlbumTracks(await response.json());
   }
 
   /**
