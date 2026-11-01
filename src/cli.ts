@@ -144,6 +144,10 @@
  *
  * A global `--loglevel <silent|error|warn|info|debug>` option (default `info`)
  * controls how much is logged; it may appear anywhere in the arguments.
+ *
+ * A global `--json` option (also anywhere) makes a command print exactly one
+ * JSON document -- its plan or result -- to stdout, with every log line on
+ * stderr instead (see src/cli/output.ts).
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -169,9 +173,16 @@ import {
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
-import { createLogger, DEFAULT_LOG_LEVEL, type Logger } from "./cli/logger.js";
+import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import { openInBrowser } from "./cli/open-browser.js";
+import {
+  createOutput,
+  extractJsonFlag,
+  logSinksFor,
+  omitKeys,
+  type CommandOutput,
+} from "./cli/output.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
 import { startServer } from "./server/http.js";
 import {
@@ -276,10 +287,19 @@ let usedCachedCredentials = false;
  */
 let logger: Logger = createLogger(DEFAULT_LOG_LEVEL);
 
+/**
+ * The command's machine-readable output. Replaced in {@link main} once
+ * `--json` is parsed; commands record their plan/result into it, and it is
+ * written (in JSON mode only) when the command finishes.
+ */
+let output: CommandOutput = createOutput(false, "");
+
 async function main(): Promise<void> {
-  const { level, rest: args } = extractLogLevel(process.argv.slice(2));
-  logger = createLogger(level);
+  const { level, rest: afterLevel } = extractLogLevel(process.argv.slice(2));
+  const { json, rest: args } = extractJsonFlag(afterLevel);
+  logger = createLogger(level, logSinksFor(json, defaultSinks));
   const command = args[0] ?? "check";
+  output = createOutput(json, command);
   if (command === "--help" || command === "-h") {
     printUsage();
     return;
@@ -291,6 +311,8 @@ async function main(): Promise<void> {
     const hadSession = store.load() !== undefined;
     store.clear();
     logger.info(hadSession ? "Signed out." : "No saved session to clear.");
+    output.set("cleared", hadSession);
+    output.flush();
     return;
   }
 
@@ -390,6 +412,7 @@ async function main(): Promise<void> {
   );
 
   await run(client, session);
+  output.flush();
 }
 
 /**
@@ -427,6 +450,7 @@ async function runCheck(client: QobuzClient): Promise<void> {
     tracks?: { total?: number };
   };
   logger.info(`  favourite tracks: ${favorites.tracks?.total ?? "unknown"}`);
+  output.set("favouriteTracks", favorites.tracks?.total ?? null);
   logger.info("\nOK: extraction -> OAuth sign-in -> authenticated call.");
 }
 
@@ -459,6 +483,7 @@ function planPlaylistFromArtists(
       }),
       ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
     });
+    output.assign({ applied: true, result });
 
     logger.info(
       `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
@@ -564,6 +589,7 @@ function planPlaylistFromAlbums(
 
 /** Log the outcome of an album playlist build (from album lines or a discography). */
 function reportAlbumPlaylist(result: BuildAlbumPlaylistResult): void {
+  output.assign({ applied: true, result });
   logger.info(
     `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
   );
@@ -642,6 +668,7 @@ function planSimilarArtists(
             maxSeeds: source.maxSeeds,
           });
     const trackIds = similarTrackIds(plan.seeds, plan.similar, plan.appearances);
+    output.assign({ source, plan, trackIds, applied: false });
     reportSimilarPlan(
       plan,
       source.type === "artists" && source.tracksPerSeed > 0,
@@ -658,6 +685,7 @@ function planSimilarArtists(
         trackIds,
         isPublic: source.isPublic,
       });
+      output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
       logger.info(
         `\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`,
       );
@@ -673,6 +701,7 @@ function planSimilarArtists(
       playlistId: source.playlistId,
       trackIds,
     });
+    output.assign({ applied: true, result: { playlistId: source.playlistId, added, skipped } });
     logger.info(
       `\nAdded ${added.length} tracks to the playlist${skipped.length > 0 ? ` (${skipped.length} already present, skipped)` : ""}.`,
     );
@@ -776,6 +805,7 @@ function planDeduplicate(
     logger.info(formatResolutionReport(resolved));
 
     const removals = tracksToRemove(resolved);
+    output.assign({ source, keep, groups: resolved, toRemove: removals.length, applied: false });
     if (!apply) {
       if (removals.length > 0) {
         logger.info(
@@ -800,6 +830,13 @@ function planDeduplicateAllPlaylists(
   return async (client: QobuzClient): Promise<void> => {
     logger.info("Fetching all your playlists...");
     const scan = await scanAllPlaylists(client, keep);
+    output.assign({
+      source: { type: "all-playlists" },
+      keep,
+      playlistCount: scan.playlistCount,
+      within: scan.within,
+      across: scan.across,
+    });
     logger.info(
       `  ${scan.playlistCount} playlists scanned; keeping the ${keep.join(", then ")} copy of each duplicate\n`,
     );
@@ -817,6 +854,7 @@ function planDeduplicateAllPlaylists(
       }
     }
     logger.info(`\n${formatAcrossPlaylistsReport(scan.across)}`);
+    output.assign({ toRemove: removals.length, applied: false });
     if (scan.across.length > 0) {
       logger.info("(nothing is removed for these; choose where each stays in the web UI)");
     }
@@ -830,11 +868,13 @@ function planDeduplicateAllPlaylists(
       return;
     }
     if (removals.length === 0) {
+      output.assign({ applied: true, removed: 0 });
       logger.info("\nNothing to remove.");
       return;
     }
     logger.info(`\nRemoving ${removals.length} track(s)...`);
     await removePlaylistEntries(client, removals);
+    output.assign({ applied: true, removed: removals.length });
     logger.info("  done.");
   };
 }
@@ -846,6 +886,7 @@ async function applyRemovals(
   removals: readonly DedupTrack[],
 ): Promise<void> {
   if (removals.length === 0) {
+    output.assign({ applied: true, removed: 0 });
     logger.info("\nNothing to remove.");
     return;
   }
@@ -859,8 +900,10 @@ async function applyRemovals(
       logger.warn(`skipped ${skipped} track(s) with no playlist-track id`);
     }
     await client.removeTracksFromPlaylist(source.playlistId, ids);
+    output.assign({ applied: true, removed: ids.length });
   } else {
     await client.removeFavoriteTracks(removals.map((track) => track.id));
+    output.assign({ applied: true, removed: removals.length });
   }
   logger.info("  done.");
 }
@@ -887,6 +930,7 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
     logger.info(`\n${formatUpgradeReport(plan)}`);
 
     const changes = planChanges(plan.items);
+    output.assign({ source: args.source, plan, changes, applied: false });
     if (!args.apply) {
       if (changes.length > 0) {
         logger.info(
@@ -901,6 +945,7 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
     }
     logger.info(`\nApplying ${changes.length} change(s)...`);
     const result = await commitUpgrades(client, changes);
+    output.assign({ applied: true, result });
     logger.info(`  replaced ${result.replaced}, removed ${result.removed}.`);
     if (result.movedToEnd > 0) {
       logger.warn(
@@ -923,6 +968,12 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
 function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
   const args = parseExportArgs(argv);
   const { source } = args;
+  if (output.json && args.out === undefined && args.outDir === undefined) {
+    throw new Error(
+      "--json prints a summary of what was exported: give --out <file> (without it the export itself goes to stdout)",
+    );
+  }
+  output.set("source", source);
   if (source.type === "all-playlists") {
     return planExportAllPlaylists(args.format ?? "json", args.outDir!);
   }
@@ -937,6 +988,15 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
       note("Backing up your account...");
       const backup = await buildBackup(client);
       content = serializeBackup(backup);
+      output.assign({
+        format: "json",
+        favourites: {
+          tracks: backup.favourites.tracks.length,
+          albums: backup.favourites.albums.length,
+          artists: backup.favourites.artists.length,
+        },
+        playlists: backup.playlists.length,
+      });
       note(
         `  ${backup.favourites.tracks.length} favourite tracks, ` +
           `${backup.favourites.albums.length} albums, ` +
@@ -950,11 +1010,13 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
         throw new Error("M3U can only hold tracks; choose another format");
       }
       content = serializeCollection(collection, format);
+      output.assign({ format, kind: collection.kind, count: collection.items.length });
       note(`  ${collection.items.length} ${collection.kind}`);
     }
 
     if (args.out !== undefined) {
       writeFileSync(args.out, content);
+      output.set("out", args.out);
       logger.info(`Wrote ${args.out}`);
     } else {
       process.stdout.write(content);
@@ -975,6 +1037,11 @@ function planExportAllPlaylists(
       writeFileSync(join(outDir, file.filename), file.content);
       logger.info(`  ${file.filename} (${file.trackCount} tracks)`);
     }
+    output.assign({
+      format,
+      outDir,
+      files: files.map(({ filename, playlist, trackCount }) => ({ filename, playlist, trackCount })),
+    });
     logger.info(`Wrote ${files.length} playlist file${files.length === 1 ? "" : "s"} to ${outDir}`);
   };
 }
@@ -1001,6 +1068,7 @@ function resolveExportFormat(args: ExportArgs): Format {
 function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
   const args = parseImportArgs(argv);
   const content = readFileSync(args.file, "utf8");
+  output.assign({ file: args.file, target: args.target });
 
   if (args.target.type === "account") {
     return planRestore(content, args.apply);
@@ -1023,7 +1091,9 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
     }
     logger.info(`Resolving ${parsed.items.length} ${kind} from ${args.file}...`);
     const plan = await resolveImport(client, parsed);
-    const how = describeMatchCounts(countMatchMethods(plan));
+    const counts = countMatchMethods(plan);
+    output.assign({ format, plan, counts, applied: false });
+    const how = describeMatchCounts(counts);
     logger.info(
       `  matched ${plan.matched.length} of ${parsed.items.length}${how.length > 0 ? ` (${how})` : ""}`,
     );
@@ -1044,6 +1114,7 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
       return;
     }
     const result = await commitImport(client, plan, target);
+    output.assign({ applied: true, result });
     if (result.playlist !== undefined) {
       logger.info(
         `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.written} tracks.`,
@@ -1066,6 +1137,16 @@ function planRestore(
       `${backup.favourites.albums.length} albums, ` +
       `${backup.favourites.artists.length} artists, ` +
       `${backup.playlists.length} playlists`;
+    output.assign({
+      backup: {
+        exportedAt: backup.exportedAt,
+        favouriteTracks: backup.favourites.tracks.length,
+        favouriteAlbums: backup.favourites.albums.length,
+        favouriteArtists: backup.favourites.artists.length,
+        playlists: backup.playlists.length,
+      },
+      applied: false,
+    });
     if (!apply) {
       logger.info(`Backup contains ${counts}.`);
       logger.info("\n(dry run -- pass --apply to restore it)");
@@ -1073,6 +1154,7 @@ function planRestore(
     }
     logger.info(`Restoring ${counts}...`);
     const result = await restoreBackup(client, backup);
+    output.assign({ applied: true, result });
     logger.info(
       `\nRestored ${result.favouriteTracks} favourite tracks, ` +
         `${result.favouriteAlbums} albums, ${result.favouriteArtists} artists, ` +
@@ -1138,6 +1220,7 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
 
     const trackIds = combinedTrackIds(plan);
     const name = args.playlistName ?? plan.suggestedName;
+    output.assign({ plan, name, trackIds, applied: false });
     if (trackIds.length === 0) {
       logger.warn("Nothing to save: the result is empty.");
       return;
@@ -1153,6 +1236,7 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
       trackIds,
       isPublic: args.isPublic,
     });
+    output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
     logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`);
   };
 }
@@ -1166,13 +1250,12 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
   const args = parseStatsArgs(argv);
   return async (client: QobuzClient): Promise<void> => {
     const stats = computeStats(await collectLibrary(client, args.source));
-    if (args.json) {
-      // The buckets' track ids are for making playlists; leave them out.
-      const json = JSON.stringify(stats, (key, value: unknown) =>
-        key === "trackIds" ? undefined : value,
-      2);
-      process.stdout.write(`${json}\n`);
-    } else {
+    // The stats are the document's top-level fields (as `stats --json` has
+    // always printed them); the buckets' track ids are for making playlists,
+    // so they are left out. (`--json` is taken by the global option before
+    // parseStatsArgs sees it, so output.json is what decides.)
+    output.assign(omitKeys(stats, ["trackIds"]) as Record<string, unknown>);
+    if (!output.json) {
       logger.info(formatStatsReport(stats));
     }
 
@@ -1186,6 +1269,8 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
       return;
     }
     const name = request.name ?? bucket.suggestedName;
+    const decadePlaylist = { decade: request.decade, name, trackCount: bucket.count };
+    output.set("decadePlaylist", { ...decadePlaylist, applied: false });
     if (!request.apply) {
       logger.info(
         `\n(dry run -- pass --apply to create "${name}" with ${bucket.count} track${bucket.count === 1 ? "" : "s"})`,
@@ -1197,6 +1282,7 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
       trackIds: bucket.trackIds,
       isPublic: request.isPublic,
     });
+    output.set("decadePlaylist", { ...decadePlaylist, applied: true, playlist });
     logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${bucket.count} tracks.`);
   };
 }
@@ -1223,6 +1309,7 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
       ...(filter !== undefined && { filter }),
     });
 
+    output.assign({ plan, applied: false });
     const artists = new Set(plan.releases.map((release) => release.artist)).size;
     logger.info(
       `\n${plan.releases.length} release${plan.releases.length === 1 ? "" : "s"} from ${artists} artist${artists === 1 ? "" : "s"} since ${plan.since}:`,
@@ -1273,6 +1360,7 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
       target,
       ...(filter !== undefined && { filter }),
     });
+    output.assign({ applied: true, result });
     if (result.type === "favourite-albums") {
       logger.info(`\nAdded ${result.added} releases to your favourite albums.`);
       return;
@@ -1320,6 +1408,7 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
     reportWordPlay(plan, split);
 
     const trackIds = splitTrackIds(split);
+    output.assign({ plan, name: parsed.name ?? plan.suggestedName, trackIds, applied: false });
     if (trackIds.length === 0) {
       logger.warn("No songs found to add.");
       return;
@@ -1340,6 +1429,7 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
           : { type: "existing", playlistId: parsed.addTo },
       trackIds,
     });
+    output.assign({ applied: true, result });
     logger.info(
       result.playlist === undefined
         ? `\nAdded ${result.added.length} songs to the playlist${result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : ""}.`
@@ -1420,6 +1510,7 @@ function printUsage(): void {
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
+      "  --json                                      print the plan or result as one JSON document on stdout (logs go to stderr)",
       "",
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",

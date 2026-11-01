@@ -68,7 +68,8 @@ export function parseLogLevel(value: string): LogLevel {
   );
 }
 
-const defaultSinks: LoggerSinks = {
+/** The real process streams (stdout for detail, stderr for problems). */
+export const defaultSinks: LoggerSinks = {
   out: (line) => process.stdout.write(`${line}\n`),
   err: (line) => process.stderr.write(`${line}\n`),
 };

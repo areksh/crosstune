@@ -385,7 +385,7 @@ separate.
 # Stats for your favourites, a playlist, or everything (favourites + playlists)
 npm run dev -- stats --favourites
 npm run dev -- stats --playlist 12345678
-npm run dev -- --loglevel warn stats --everything --json > stats.json
+npm run dev -- stats --everything --json > stats.json
 
 # Make a playlist of your favourites from the 1990s (dry run, then --apply)
 npm run dev -- stats --favourites --decade-playlist 1990s
@@ -397,7 +397,8 @@ npm run dev -- stats --favourites --decade-playlist 1990s --name "Nineties" --ap
 prints a headline ("1,240 favourite tracks by 312 artists. 86 hours of
 music."), the quality split (hi-res above 16 bits or 48 kHz, CD quality, or
 unknown), tracks by release decade, and the ten artists and albums with the most
-tracks; `--json` prints the same as JSON instead. `--decade-playlist <decade>`
+tracks; `--json` prints the same as JSON instead (see [Output](#output)).
+`--decade-playlist <decade>`
 (e.g. `1990s`, or `unknown` for tracks without a release date) makes a playlist
 of that decade's tracks, named like "Favourites: 1990s" unless `--name` is
 given; as elsewhere, it is only created with `--apply` (`--public` makes it
@@ -554,6 +555,41 @@ npm run dev -- --loglevel debug deduplicate --favourites
 Progress and results go to stdout; warnings and errors go to stderr. Debug lines
 log only the request method, API path and response status -- never the query, so
 signed tokens never reach the logs.
+
+#### Output
+
+A global `--json` option (like `--loglevel`, it may appear anywhere) makes a
+command print **exactly one JSON document** on stdout -- its plan or result --
+and send every log line, progress included, to stderr. Redirecting stdout
+therefore captures only the JSON:
+
+```sh
+npm run dev -- --json deduplicate --favourites > duplicates.json
+npm run dev -- import --json --new-playlist "From Spotify" playlist.csv | jq .counts
+```
+
+The document is an object whose first key is `"command"`; the other keys follow
+in a fixed order per command. Commands that only report until `--apply` record
+the plan and `"applied": false`; with `--apply` they add `"applied": true` and
+the write's `"result"`.
+
+| Command | Keys |
+| ------- | ---- |
+| `deduplicate` | `source`, `keep`, `groups` (or, with `--all-playlists`, `playlistCount`, `within`, `across`), `toRemove`, `applied`, `removed` |
+| `upgrade` | `source`, `plan`, `changes`, `applied`, `result` |
+| `import` | `file`, `target`, `format` (as read: a CSV may be `spotify`), `plan` (each matched item has `via`: `id`, `isrc` or `search`), `counts`, `applied`, `result`; restoring a backup: `file`, `target`, `backup`, `applied`, `result` |
+| `export` (needs `--out` or `--out-dir`) | `source`, `format`, then `kind`, `count` and `out`; or a backup's `favourites` and `playlists` counts; or, for `--all-playlists`, `outDir` and `files` |
+| `similar-artists` | `source`, `plan`, `trackIds`, `applied`, `result` |
+| `new-releases` | `plan`, `applied`, `result` |
+| `word-play`, `combine` | `plan`, `name`, `trackIds`, `applied`, `result` |
+| `stats` | the stats themselves (`label`, `trackCount`, `artistCount`, `totalDuration`, `quality`, `decades`, `topArtists`, `topArtistsShare`, `topAlbums`, `headline`), then `decadePlaylist` with `--decade-playlist` |
+| `playlist-from-artists`, `playlist-from-albums` | `applied`, `result` (the created playlist and per-artist or per-album details) |
+| `check`, `logout` | `favouriteTracks`; `cleared` |
+
+`stats --json` keeps printing the same fields as before (now with `"command"`
+first). `export --json` without `--out`/`--out-dir` is refused, since the
+export itself would be written to stdout. When a command fails, stdout stays
+empty, the error goes to stderr, and the exit status is non-zero.
 
 ### Web UI
 

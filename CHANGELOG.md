@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A global `--json` option: report commands print exactly one JSON document
+  on stdout -- the plan or result (deduplicate, upgrade, import dry runs and
+  applied results, export summaries with `--out`/`--out-dir`, similar-artists,
+  new-releases, word-play, combine, stats, and the playlists created by the
+  builders) -- and every log line goes to stderr, so `> report.json` captures
+  only the JSON. `stats --json` keeps working and prints the same fields, now
+  after a leading `"command"` key.
 - Import a Spotify playlist: a CSV exported with Exportify is recognised from
   its header (any column order, extra columns, and the older "Artist Name"
   spelling), or chosen with `--format spotify` / "Spotify (Exportify CSV)", and
