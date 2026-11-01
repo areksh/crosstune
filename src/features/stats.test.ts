@@ -121,6 +121,23 @@ describe("computeStats", () => {
     expect(stats.topAlbums).toHaveLength(3);
   });
 
+  // Live data listed "The Ultimate Collection - Black Sabbath" twice (two
+  // editions, two album ids) and kept Qobuz's trailing spaces in titles.
+  it("counts editions of an album as one, by title and artist", () => {
+    const editions = computeStats(
+      favourites(
+        track(1, { album: "The Ultimate Collection", albumId: "a", artist: "Black Sabbath" }),
+        track(2, { album: "The Ultimate Collection ", albumId: "b", artist: "Black Sabbath" }),
+        track(3, { album: "the ultimate  collection", albumId: "c", artist: "black sabbath" }),
+        track(4, { album: "The Ultimate Collection", albumId: "d", artist: "Ozzy Osbourne" }),
+      ),
+    );
+    expect(editions.topAlbums).toEqual([
+      { title: "The Ultimate Collection", artist: "Black Sabbath", count: 3 },
+      { title: "The Ultimate Collection", artist: "Ozzy Osbourne", count: 1 },
+    ]);
+  });
+
   it("writes a headline", () => {
     expect(stats.headline).toBe("6 favourite tracks by 3 artists. 14 minutes of music.");
   });

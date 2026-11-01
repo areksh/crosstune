@@ -199,10 +199,14 @@ export function computeStats(library: Library): LibraryStats {
     if (track.album === undefined) {
       continue;
     }
-    const key = track.albumId ?? `${track.album}\u0000${track.artist ?? ""}`;
+    // By title and artist, not album id: editions of one album (each its own
+    // id) count as one, as artists are grouped by name.
+    const title = tidy(track.album);
+    const artist = tidy(track.artist ?? "");
+    const key = `${title.toLowerCase()}\u0000${artist.toLowerCase()}`;
     const entry = byAlbum.get(key);
     if (entry === undefined) {
-      byAlbum.set(key, { title: track.album, artist: track.artist ?? "", count: 1 });
+      byAlbum.set(key, { title, artist, count: 1 });
     } else {
       entry.count += 1;
     }
@@ -342,4 +346,9 @@ function number(value: number): string {
 
 function noun(count: number, word: string): string {
   return count === 1 ? word : `${word}s`;
+}
+
+/** Trim and collapse whitespace, as Qobuz titles can carry stray spaces. */
+function tidy(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
 }
