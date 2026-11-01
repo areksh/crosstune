@@ -595,6 +595,37 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+/* A fieldset of checkboxes (e.g. which kinds of release to include). */
+.choice-group {
+  margin: 16px 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.choice-group legend {
+  padding: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Playlist from albums: the discography inputs, side by side when room allows. */
+.discography-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 36px;
+}
+
+.discography-fields .field input {
+  width: 16rem;
+}
+
+.discography-fields .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 /* Filters: a collapsible block under the main input. */
 
 .filters {

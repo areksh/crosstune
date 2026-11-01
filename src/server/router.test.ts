@@ -5,6 +5,7 @@ import {
   type Album,
   type Artist,
   type Playlist,
+  type Release,
   type Track,
 } from "../qobuz/index.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
@@ -17,6 +18,7 @@ function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
     searchArtists: vi.fn(async () => [] as Artist[]),
     getArtistTopTracks: vi.fn(async () => [] as Track[]),
     getSimilarArtists: vi.fn(async () => [] as Artist[]),
+    getArtistReleases: vi.fn(async () => ({ releases: [] as Release[], truncated: false })),
     getUserPlaylists: vi.fn(async () => [] as Playlist[]),
     getPlaylistTracks: vi.fn(async () => [] as Track[]),
     getFavoriteTracks: vi.fn(async () => [] as Track[]),
@@ -1351,5 +1353,60 @@ describe("POST /api/word-play/commit", () => {
       deps(),
     );
     expect(noName.status).toBe(400);
+  });
+});
+
+describe("POST /api/resolve-discography", () => {
+  const releases: Release[] = [
+    { id: "d25", title: "Dummy (Deluxe)", artist: "Portishead", artistId: 42, releaseType: "album", releaseDate: "2019-01-01" },
+    { id: "live", title: "Roseland NYC Live", artist: "Portishead", artistId: 42, releaseType: "live", releaseDate: "1998-11-02" },
+    { id: "d", title: "Dummy", artist: "Portishead", artistId: 42, releaseType: "album", releaseDate: "1994-08-22" },
+  ];
+  const svc = () =>
+    service({
+      searchArtists: vi.fn(async () => [{ id: 42, name: "Portishead" }]),
+      getArtistReleases: vi.fn(async () => ({ releases, truncated: false })),
+    });
+
+  it("resolves an artist's studio albums into album groups, editions together", async () => {
+    const res = await handleApi(
+      request("POST", "/api/resolve-discography", { artist: "Portishead" }),
+      deps({ service: svc() }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      artist: { id: 42, name: "Portishead" },
+      resolvedAlbums: [{ query: "Portishead - Dummy", versions: [{ id: "d" }, { id: "d25" }] }],
+      unresolvedAlbums: [],
+      excludedAlbums: [],
+      truncated: false,
+    });
+  });
+
+  it("takes the kinds to include and every version on request", async () => {
+    const res = await handleApi(
+      request("POST", "/api/resolve-discography", {
+        artist: "Portishead",
+        include: ["album", "live"],
+        oneVersion: false,
+      }),
+      deps({ service: svc() }),
+    );
+    const body = res.body as { resolvedAlbums: { versions: { id: string }[] }[] };
+    expect(body.resolvedAlbums.map((album) => album.versions[0]?.id)).toEqual(["d", "live", "d25"]);
+  });
+
+  it("validates its input", async () => {
+    for (const body of [
+      {},
+      { artist: "  " },
+      { artist: "A", include: [] },
+      { artist: "A", include: ["bootleg"] },
+      { artist: "A", oneVersion: "yes" },
+      { artist: "A", filter: { excludeAlbums: ["/(/"] } },
+    ]) {
+      const res = await handleApi(request("POST", "/api/resolve-discography", body), deps());
+      expect(res.status).toBe(400);
+    }
   });
 });

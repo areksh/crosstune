@@ -37,6 +37,13 @@
  *       matching --exclude-track or --exclude-artist, or on a disc outside
  *       --discs, are left out.
  *
+ *   qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" \
+ *       [--include albums,eps,live,compilations] [--all-versions] \
+ *       [--prefer <preference>] [--public] [filters]
+ *       The same, from an artist's releases (oldest first) instead of album
+ *       lines: studio albums unless --include names other kinds, and one
+ *       version of each album (chosen by --prefer) unless --all-versions.
+ *
  *   qobuz-helper deduplicate (--playlist <id> | --favourites)
  *                            [--keep <strategy>] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
@@ -180,6 +187,7 @@ import {
   buildPlaylistFromAlbums,
   parseAlbumEntry,
   type AlbumEntry,
+  type BuildAlbumPlaylistResult,
 } from "./features/playlist-from-albums.js";
 import {
   combinedTrackIds,
@@ -200,6 +208,7 @@ import {
   type WordPlaySlot,
   type WordPlaySplit,
 } from "./features/word-play.js";
+import { buildPlaylistFromDiscography } from "./features/discography.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -423,6 +432,32 @@ function planPlaylistFromAlbums(
   argv: string[],
 ): (client: QobuzClient) => Promise<void> {
   const parsed = parseAlbumArgs(argv);
+  const { discography } = parsed;
+  if (discography !== undefined) {
+    return async (client: QobuzClient): Promise<void> => {
+      const versions = discography.allVersions
+        ? "every version"
+        : `one version each, preferring ${parsed.preference}`;
+      logger.info(
+        `Building playlist "${parsed.playlistName}" from ${discography.artist}'s discography (${discography.include.join(", ")}; ${versions})...`,
+      );
+      const result = await buildPlaylistFromDiscography(client, {
+        artist: discography.artist,
+        include: discography.include,
+        oneVersion: !discography.allVersions,
+        playlistName: parsed.playlistName,
+        preference: parsed.preference,
+        isPublic: parsed.isPublic,
+        ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
+      });
+      reportAlbumPlaylist(result);
+      if (result.truncated) {
+        logger.warn(
+          `${result.artist.name} has more releases than were fetched; the oldest may be missing.`,
+        );
+      }
+    };
+  }
   const lines = parsed.entries.length > 0 ? parsed.entries : readLinesFromStdin();
   if (lines.length === 0) {
     throw new Error(
@@ -461,29 +496,33 @@ function planPlaylistFromAlbums(
       isPublic: parsed.isPublic,
       ...(parsed.filter !== undefined && { filter: compileTrackFilter(parsed.filter) }),
     });
-
-    logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
-    );
-    for (const resolved of result.resolvedAlbums) {
-      const version =
-        resolved.album.version === undefined ? "" : ` [${resolved.album.version}]`;
-      logger.info(
-        `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
-      );
-    }
-    if (result.unresolvedAlbums.length > 0) {
-      logger.warn(`not found: ${result.unresolvedAlbums.join(", ")}`);
-    }
-    if (result.excludedAlbums.length > 0) {
-      logger.warn(
-        `every release excluded by --exclude-album: ${result.excludedAlbums.join(", ")}`,
-      );
-    }
-    if (result.failedAlbums.length > 0) {
-      logger.warn(`could not fetch tracks: ${result.failedAlbums.join(", ")}`);
-    }
+    reportAlbumPlaylist(result);
   };
+}
+
+/** Log the outcome of an album playlist build (from album lines or a discography). */
+function reportAlbumPlaylist(result: BuildAlbumPlaylistResult): void {
+  logger.info(
+    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks:`,
+  );
+  for (const resolved of result.resolvedAlbums) {
+    const version =
+      resolved.album.version === undefined ? "" : ` [${resolved.album.version}]`;
+    logger.info(
+      `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
+    );
+  }
+  if (result.unresolvedAlbums.length > 0) {
+    logger.warn(`not found: ${result.unresolvedAlbums.join(", ")}`);
+  }
+  if (result.excludedAlbums.length > 0) {
+    logger.warn(
+      `every release excluded by --exclude-album: ${result.excludedAlbums.join(", ")}`,
+    );
+  }
+  if (result.failedAlbums.length > 0) {
+    logger.warn(`could not fetch tracks: ${result.failedAlbums.join(", ")}`);
+  }
 }
 
 /**
@@ -1089,6 +1128,7 @@ function printUsage(): void {
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
       '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist - Album" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]...',
       '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
@@ -1104,6 +1144,7 @@ function printUsage(): void {
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
       "Album version preferences: highest-quality (default), newest, oldest.",
+      "--discography takes an artist's studio albums, oldest first, one version of each (per --prefer); --include widens the kinds (albums, eps, live, compilations), --all-versions keeps every edition.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
       "--exclude-artist matches the whole artist name, ignoring case and accents (\"Drake\" skips Drake, not Nick Drake); /pattern/ is a regex on the name. similar-artists never walks to an excluded artist.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",

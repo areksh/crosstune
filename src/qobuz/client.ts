@@ -29,6 +29,7 @@ import {
   type Track,
   type TracksPage,
 } from "./models.js";
+import { parseReleasesPage, type ArtistReleases, type Release } from "./releases.js";
 import { signGetFileUrl, signRequest, signSearch } from "./signing.js";
 
 const DEFAULT_USER_AGENT =
@@ -55,6 +56,12 @@ const MAX_RETRIES = 5;
 
 /** Base backoff in milliseconds, doubled each retry (500, 1000, 2000, ...). */
 const RETRY_BASE_MS = 500;
+
+/** Releases requested per page of an artist's releases list. */
+const RELEASES_PAGE_SIZE = 100;
+
+/** The default cap on an artist's releases fetched (newest first). */
+const DEFAULT_MAX_RELEASES = 500;
 
 /** Split an array into consecutive slices of at most `size` items (size >= 1). */
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -484,6 +491,55 @@ export class QobuzClient {
       (track) => track.artistId === undefined || track.artistId === artistId,
     );
     return ownTracks.slice(0, limit);
+  }
+
+  /**
+   * Fetch an artist's releases -- albums, EPs and singles, live albums,
+   * compilations -- newest first, each classified by type.
+   *
+   * Uses `artist/getReleasesList`, inferred from the Qobuz web player and not
+   * verified against the live API (see endpoints.ts); the parser tolerates the
+   * older `artist/get?extra=albums` shape too. Pages until Qobuz reports no
+   * more, or until `maxReleases` have been collected (then `truncated`).
+   *
+   * @param artistId The Qobuz artist id.
+   * @param maxReleases Stop after this many releases (default 500).
+   */
+  async getArtistReleases(
+    artistId: number,
+    maxReleases = DEFAULT_MAX_RELEASES,
+  ): Promise<ArtistReleases> {
+    const releases: Release[] = [];
+    for (let offset = 0; ; ) {
+      const limit = Math.min(RELEASES_PAGE_SIZE, maxReleases - releases.length);
+      const response = await this.#signedGet(
+        "artistgetReleasesList",
+        paths.artistGetReleasesList,
+        [
+          ["artist_id", String(artistId)],
+          ["release_type", "all"],
+          ["sort", "release_date"],
+          ["order", "desc"],
+          ["limit", String(limit)],
+          ["offset", String(offset)],
+        ],
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `artist/getReleasesList failed with HTTP ${response.status}`,
+        );
+      }
+      const page = parseReleasesPage(await response.json());
+      releases.push(...page.releases.slice(0, maxReleases - releases.length));
+      if (!page.hasMore || page.releases.length === 0) {
+        return { releases, truncated: false };
+      }
+      if (releases.length >= maxReleases) {
+        return { releases, truncated: true };
+      }
+      offset += page.releases.length;
+    }
   }
 
   /**

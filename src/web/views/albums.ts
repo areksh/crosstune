@@ -2,7 +2,8 @@
  * Playlist-from-albums view.
  *
  * Drives the resolve -> pick versions -> review tracks -> commit flow: resolve
- * "Artist - Album" lines to their matching Qobuz releases (minus any the album
+ * "Artist - Album" lines -- or an artist's discography, grouped by album the
+ * same way -- to their matching Qobuz releases (minus any the album
  * filter excludes), let the user pick which version of each to use (defaulting
  * to a global preference), fetch the chosen versions' tracks for review --
  * tracks on unwanted discs or matching a track filter start unticked -- then
@@ -37,6 +38,10 @@ interface ResolveResponse {
   resolvedAlbums: ResolvedAlbum[];
   unresolvedAlbums: string[];
   excludedAlbums: string[];
+  /** Discography only: the artist the name matched, if any. */
+  artist?: { id: number; name: string };
+  /** Discography only: the artist has more releases than were fetched. */
+  truncated?: boolean;
 }
 
 interface FetchResponse {
@@ -77,6 +82,65 @@ export function initAlbumsView(): void {
   for (const radio of document.querySelectorAll('input[name="album-target"]')) {
     radio.addEventListener("change", onTargetChange);
   }
+  for (const radio of document.querySelectorAll('input[name="album-source"]')) {
+    radio.addEventListener("change", onSourceChange);
+  }
+}
+
+/** Whether the albums come from an artist's discography rather than a list. */
+function fromDiscography(): boolean {
+  return (
+    document.querySelector<HTMLInputElement>('input[name="album-source"]:checked')?.value ===
+    "discography"
+  );
+}
+
+function onSourceChange(): void {
+  el("album-list-fields").hidden = fromDiscography();
+  el("album-discography-fields").hidden = !fromDiscography();
+}
+
+/**
+ * The resolve request for the chosen source: the album lines, or the
+ * discography's artist and kinds of release. Undefined (with the reason shown)
+ * when the input is incomplete.
+ */
+function resolveRequest(
+  filter: FilterInput,
+  errorNode: HTMLElement,
+): { path: string; body: unknown } | undefined {
+  if (fromDiscography()) {
+    const artist = el<HTMLInputElement>("album-discography-artist").value.trim();
+    const include = [
+      ...document.querySelectorAll<HTMLInputElement>('input[name="album-include"]:checked'),
+    ].map((box) => box.value);
+    if (artist.length === 0) {
+      showError(errorNode, "Enter an artist.");
+      return undefined;
+    }
+    if (include.length === 0) {
+      showError(errorNode, "Include at least one kind of release.");
+      return undefined;
+    }
+    return {
+      path: "/api/resolve-discography",
+      body: {
+        artist,
+        include,
+        oneVersion: el<HTMLInputElement>("album-one-version").checked,
+        filter,
+      },
+    };
+  }
+  const entries = el<HTMLTextAreaElement>("albums")
+    .value.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (entries.length === 0) {
+    showError(errorNode, "Enter at least one album.");
+    return undefined;
+  }
+  return { path: "/api/resolve-albums", body: { entries, filter } };
 }
 
 function globalPreference(): Preference {
@@ -98,23 +162,15 @@ async function onResolve(): Promise<void> {
   const errorNode = el("resolve-albums-error");
   showError(errorNode, undefined);
 
-  const entries = el<HTMLTextAreaElement>("albums")
-    .value.split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (entries.length === 0) {
-    showError(errorNode, "Enter at least one album.");
+  const filter = readFilter();
+  const request = resolveRequest(filter, errorNode);
+  if (request === undefined) {
     return;
   }
-
-  const filter = readFilter();
   button.disabled = true;
   button.textContent = "Loading...";
   try {
-    const result = await api<ResolveResponse>("POST", "/api/resolve-albums", {
-      entries,
-      filter,
-    });
+    const result = await api<ResolveResponse>("POST", request.path, request.body);
     resolvedAlbums = result.resolvedAlbums;
     activeFilter = filter;
     renderPreview(result);
@@ -128,12 +184,17 @@ async function onResolve(): Promise<void> {
 
 function renderPreview(result: ResolveResponse): void {
   unresolvedAlbums = result.unresolvedAlbums;
-  showError(
-    el("albums-unresolved"),
-    result.unresolvedAlbums.length > 0
-      ? `Could not find: ${result.unresolvedAlbums.join(", ")}`
-      : undefined,
-  );
+  const notes: string[] = [];
+  if (result.unresolvedAlbums.length > 0) {
+    notes.push(`Could not find: ${result.unresolvedAlbums.join(", ")}.`);
+  }
+  if (result.artist !== undefined && result.resolvedAlbums.length === 0) {
+    notes.push(`No releases of the chosen kinds for ${result.artist.name}.`);
+  }
+  if (result.truncated === true) {
+    notes.push("This artist has more releases than were fetched; the oldest may be missing.");
+  }
+  showError(el("albums-unresolved"), notes.length > 0 ? notes.join(" ") : undefined);
   showError(
     el("albums-excluded"),
     result.excludedAlbums.length > 0

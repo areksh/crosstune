@@ -14,9 +14,12 @@
 
 import {
   QobuzError,
+  RELEASE_TYPES,
   type Album,
   type Artist,
+  type ArtistReleases,
   type Playlist,
+  type ReleaseType,
   type Track,
 } from "../qobuz/index.js";
 import {
@@ -99,6 +102,7 @@ import {
   type WordPlayRequest,
   type WordPlaySource,
 } from "../features/word-play.js";
+import { resolveDiscography } from "../features/discography.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -106,6 +110,7 @@ export interface QobuzApiService {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
   getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
+  getArtistReleases(artistId: number, maxReleases?: number): Promise<ArtistReleases>;
   getUserPlaylists(): Promise<Playlist[]>;
   getPlaylistTracks(playlistId: number): Promise<Track[]>;
   getFavoriteTracks(): Promise<Track[]>;
@@ -207,6 +212,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/album-tracks") {
     return albumTracks(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/resolve-discography") {
+    return resolveDiscographyRoute(req.body, deps);
   }
   if (req.method === "POST" && req.path === "/api/similar/estimate") {
     return estimateSimilarRun(req.body);
@@ -1363,6 +1371,43 @@ async function wordPlayCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse
   return { status: 200, body: result };
 }
 
+// --- Playlist from albums: an artist's discography -------------------------
+
+/**
+ * Resolve an artist's discography into the same album groups as
+ * `/api/resolve-albums`, so the album view's review flow takes over unchanged.
+ * Body: `{ artist: string, include?: ReleaseType[], oneVersion?: boolean,
+ * filter? }`.
+ */
+async function resolveDiscographyRoute(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (!isRecord(body)) {
+    return { status: 400, body: { error: "expected a JSON object" } };
+  }
+  const artist = typeof body["artist"] === "string" ? body["artist"].trim() : "";
+  if (artist.length === 0) {
+    return { status: 400, body: { error: "an artist name is required" } };
+  }
+  const include = parseReleaseTypes(body["include"], ["album"]);
+  if (!include.ok) {
+    return { status: 400, body: { error: include.error } };
+  }
+  const oneVersion = body["oneVersion"] ?? true;
+  if (typeof oneVersion !== "boolean") {
+    return { status: 400, body: { error: "oneVersion must be a boolean" } };
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return { status: 400, body: { error: filter.error } };
+  }
+  const result = await resolveDiscography(deps.service, {
+    artist,
+    include: include.value,
+    oneVersion,
+    filter: filter.value,
+  });
+  return { status: 200, body: result };
+}
+
 interface WordPlayInput {
   request: WordPlayRequest;
   match: MatchOptions;
@@ -1476,4 +1521,22 @@ function parseMatchOptions(value: unknown): Parsed<MatchOptions> {
     options[key] = raw;
   }
   return { ok: true, value: options };
+}
+
+/** Parse an optional, non-empty list of release types, defaulting when absent. */
+function parseReleaseTypes(
+  raw: unknown,
+  fallback: readonly ReleaseType[],
+): Parsed<ReleaseType[]> {
+  if (raw === undefined) {
+    return { ok: true, value: [...fallback] };
+  }
+  const known = RELEASE_TYPES as readonly unknown[];
+  if (!Array.isArray(raw) || raw.length === 0 || !raw.every((type) => known.includes(type))) {
+    return {
+      ok: false,
+      error: `include must be a non-empty array of: ${RELEASE_TYPES.join(", ")}`,
+    };
+  }
+  return { ok: true, value: [...new Set(raw as ReleaseType[])] };
 }

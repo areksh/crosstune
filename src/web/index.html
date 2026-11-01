@@ -82,8 +82,8 @@
               <a class="tool-link" href="#/albums">
                 <span class="tool-name">Playlist from albums</span>
                 <span class="tool-desc">
-                  Whole albums from "Artist - Album" lines, choosing which version
-                  of each to use.
+                  Whole albums from "Artist - Album" lines or an artist's
+                  discography, choosing which version of each to use.
                 </span>
               </a>
               <a class="tool-link" href="#/similar">
@@ -266,8 +266,8 @@
             <div class="view-title">
               <h1>Playlist from albums</h1>
               <p class="lede">
-                One album per line as "Artist - Album". Each album contributes all
-                of its tracks.
+                Whole albums, from a list or from an artist's discography. Each
+                album contributes all of its tracks.
               </p>
             </div>
             <ol id="albums-steps" class="steps" aria-label="Steps">
@@ -279,14 +279,59 @@
           </header>
 
           <section class="panel">
-            <label class="field">
-              <span>Albums</span>
+            <div class="segmented source-toggle" role="radiogroup" aria-label="Start from">
+              <label>
+                <input type="radio" name="album-source" value="list" checked />
+                A list of albums
+              </label>
+              <label>
+                <input type="radio" name="album-source" value="discography" />
+                An artist's discography
+              </label>
+            </div>
+            <label id="album-list-fields" class="field">
+              <span>Albums (one per line, as "Artist - Album")</span>
               <textarea
                 id="albums"
                 rows="8"
                 placeholder="Radiohead - OK Computer&#10;Daft Punk - Discovery&#10;Portishead - Dummy"
               ></textarea>
             </label>
+            <div id="album-discography-fields" class="discography-fields" hidden>
+              <label class="field">
+                <span>Artist</span>
+                <input id="album-discography-artist" type="text" placeholder="Portishead" />
+              </label>
+              <fieldset class="choice-group">
+                <legend>Include</legend>
+                <label class="checkbox">
+                  <input type="checkbox" name="album-include" value="album" checked />
+                  Studio albums
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="album-include" value="ep-single" />
+                  EPs and singles
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="album-include" value="live" />
+                  Live albums
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="album-include" value="compilation" />
+                  Compilations
+                </label>
+                <label class="checkbox">
+                  <input id="album-one-version" type="checkbox" checked />
+                  One version of each album (skip deluxe editions)
+                </label>
+              </fieldset>
+              <p class="hint">
+                Albums are listed oldest first. With one version of each, an
+                album's editions (remasters, deluxe, anniversary, hi-res) are
+                grouped and your version preference picks one; you can still
+                choose another below.
+              </p>
+            </div>
             <label class="field field-inline">
               <span>Prefer version</span>
               <select id="album-prefer">

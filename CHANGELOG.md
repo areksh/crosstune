@@ -73,6 +73,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version labels by default, can accept close forms ("jumped" for "Jump"),
   avoids repeating an artist, and honours the exclude filters. Each song can be
   swapped for another match before saving.
+- Playlist from albums can start from an artist's discography instead of a
+  list of albums: CLI `--discography "<artist>"` with `--include
+  albums,eps,live,compilations` (default studio albums) and `--all-versions`,
+  and in the web UI a *Start from: A list of albums / An artist's discography*
+  choice with the artist, *Include* checkboxes and *One version of each album*.
+  Albums come oldest first. By default an album's editions (remasters, deluxe,
+  anniversary, hi-res) are grouped by their title without the edition label
+  and the version preference picks one, which the web UI still lets you change;
+  releases by other main artists are left out, and the usual filters apply.
+  The artist's releases are read from `artist/getReleasesList`, an endpoint
+  inferred from the Qobuz web player and not yet verified against the live API
+  (the parser also accepts the older `artist/get?extra=albums` shape); releases
+  are classified as albums, EPs and singles, live albums or compilations from
+  Qobuz's type, or from the title ("Live at ...", "Greatest Hits") when it gives
+  none.
 - Optional album artwork in the web UI. A *Show artwork* checkbox in the sidebar
   (off by default, remembered in the browser) shows covers next to tracks in
   every review and the deduplicator, and next to each album in playlist from

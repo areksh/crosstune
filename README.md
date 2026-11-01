@@ -18,9 +18,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 - **Playlist from artists** -- build a playlist from just a list of artists,
   using each artist's top tracks. Available on the CLI and in the web UI.
 - **Playlist from albums** -- build a playlist from a list of albums given as
-  "Artist - Album", using every track of each. When an album has several
-  versions, choose which to use (newest, oldest, or highest quality). Available
-  on the CLI and in the web UI.
+  "Artist - Album", or from an artist's whole discography (studio albums, and
+  optionally EPs and singles, live albums and compilations, oldest first),
+  using every track of each. When an album has several versions, choose which
+  to use (newest, oldest, or highest quality). Available on the CLI and in the
+  web UI.
 - **Similar artists** -- discover music through Qobuz's similar artists. Start
   from a list of artists (a new playlist with their tracks and those of artists
   like them) or from one of your playlists (expand it with artists it does not
@@ -135,6 +137,28 @@ compilation) are left out. A release whose title or version matches `--exclude-a
 every release of an album matches, the album is skipped and reported. Each
 entry is one line in `Artist - Album` form, split on the first ` - ` so album
 titles keep any hyphens.
+
+```sh
+# Every Portishead studio album, oldest first, one version of each
+npm run dev -- playlist-from-albums --name "All of Portishead" --discography "Portishead"
+
+# Studio albums plus EPs, singles and live albums, every edition
+npm run dev -- playlist-from-albums --name "Portishead, all of it" \
+  --discography "Portishead" --include albums,eps,live --all-versions
+```
+
+`--discography <artist>` takes the artist's releases instead of album lines
+(the name resolves as in `playlist-from-artists`). `--include` picks the kinds
+of release, comma-separated: `albums` (studio albums; the default), `eps` (EPs
+and singles), `live` and `compilations`; releases credited to another main
+artist (e.g. various-artists compilations) are left out. By default the
+editions of an album -- remasters, deluxe and anniversary editions, hi-res
+releases -- count as one album, grouped by their title without the edition
+label, and `--prefer` picks one; `--all-versions` keeps every release instead.
+The filters apply as with album lines. The artist's releases come from an
+endpoint inferred from the Qobuz web player (`artist/getReleasesList`) that has
+not been verified against the live API; at most 500 releases are read per
+artist.
 
 #### Filters
 
@@ -448,13 +472,19 @@ browser.
 
 **Playlist from albums:**
 
-1. Paste one album per line as "Artist - Album", and pick a default version
-   preference (highest quality, newest, or oldest). Optionally open *Filters* to
-   exclude releases, tracks or artists by term, or to include only some discs.
+1. Start from *A list of albums* -- paste one per line as "Artist - Album" --
+   or from *An artist's discography*: type the artist, tick the kinds of
+   release to include (studio albums, EPs and singles, live albums,
+   compilations), and keep *One version of each album* ticked to group each
+   album's editions into one entry (untick it to list every release). Pick a
+   default version preference (highest quality, newest, or oldest).
+   Optionally open *Filters* to exclude releases, tracks or artists by term,
+   or to include only some discs.
 2. Find the albums: each shows a dropdown to choose which version to use when
    several exist (defaulting to your preference), with the chosen release's
    quality and date shown alongside. Releases matching a release filter are not
-   offered; albums with no release left are called out.
+   offered; albums with no release left are called out. A discography is
+   listed oldest album first.
 3. Fetch the tracks: each album lists its tracks (by disc, when it has more
    than one). Tracks on a disc you did not include, or matching a track or
    artist filter, start unticked with the reason; tick or untick any. If a version cannot be

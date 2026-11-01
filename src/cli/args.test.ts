@@ -209,6 +209,53 @@ describe("parseAlbumArgs", () => {
     );
     expect(() => parseAlbumArgs(["--name", "x", "--discs"])).toThrow(/--discs/);
   });
+
+  it("parses a discography with its defaults (studio albums, one version each)", () => {
+    const parsed = parseAlbumArgs(["--name", "All", "--discography", "Portishead"]);
+    expect(parsed).toEqual({
+      playlistName: "All",
+      preference: "highest-quality",
+      isPublic: false,
+      entries: [],
+      discography: { artist: "Portishead", include: ["album"], allVersions: false },
+    });
+  });
+
+  it("parses --include and --all-versions with a discography", () => {
+    const parsed = parseAlbumArgs([
+      "--name",
+      "All",
+      "--discography",
+      "Portishead",
+      "--include",
+      "albums,eps,live,compilations",
+      "--all-versions",
+      "--prefer",
+      "oldest",
+    ]);
+    expect(parsed.discography).toEqual({
+      artist: "Portishead",
+      include: ["album", "ep-single", "live", "compilation"],
+      allVersions: true,
+    });
+    expect(parsed.preference).toBe("oldest");
+  });
+
+  it("rejects an invalid discography", () => {
+    expect(() => parseAlbumArgs(["--name", "x", "--discography"])).toThrow(/artist/);
+    expect(() =>
+      parseAlbumArgs(["--name", "x", "--discography", "A", "--include", "bootlegs"]),
+    ).toThrow(/bootlegs/);
+    expect(() => parseAlbumArgs(["--name", "x", "--discography", "A", "B - C"])).toThrow(
+      /not both/,
+    );
+    expect(() => parseAlbumArgs(["--name", "x", "--include", "live", "B - C"])).toThrow(
+      /--discography/,
+    );
+    expect(() => parseAlbumArgs(["--name", "x", "--all-versions", "B - C"])).toThrow(
+      /--discography/,
+    );
+  });
 });
 
 describe("parseDedupeArgs", () => {

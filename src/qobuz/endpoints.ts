@@ -16,6 +16,12 @@ export const paths = {
   artistSearch: "/artist/search",
   artistPage: "/artist/page",
   artistGetSimilarArtists: "/artist/getSimilarArtists",
+  // An artist's releases (albums, EPs, singles, live, compilations). Inferred
+  // from the current Qobuz web player and NOT verified against the live API:
+  // the parameters (artist_id, release_type, sort, order, limit, offset) and
+  // the response shape are best guesses, so its parser also accepts the older
+  // artist/get?extra=albums shape (see releases.ts).
+  artistGetReleasesList: "/artist/getReleasesList",
   albumSearch: "/album/search",
   albumGet: "/album/get",
   playlistGet: "/playlist/get",

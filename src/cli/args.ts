@@ -13,6 +13,7 @@ import {
   type CombineSource,
 } from "../features/combine.js";
 import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
+import { DEFAULT_DISCOGRAPHY_INCLUDE, parseIncludeList } from "../features/discography.js";
 import { FORMATS, type Format } from "../features/import-export.js";
 import {
   ALBUM_PREFERENCES,
@@ -37,6 +38,7 @@ import {
   type WordPlayRequest,
   type WordPlaySource,
 } from "../features/word-play.js";
+import type { ReleaseType } from "../qobuz/index.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
 export interface ExtractedLogLevel {
@@ -91,6 +93,14 @@ export interface AlbumPlaylistArgs {
   playlistName: string;
   /** Raw "Artist - Album" lines, parsed later into entries. */
   entries: string[];
+  /** Start from this artist's discography instead of album lines. */
+  discography?: {
+    artist: string;
+    /** Kinds of release to include (default studio albums). */
+    include: ReleaseType[];
+    /** Every release on its own, rather than one version of each album. */
+    allVersions: boolean;
+  };
   preference: AlbumPreference;
   isPublic: boolean;
   /** Present only when an exclude or `--discs` flag was given. */
@@ -333,15 +343,23 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
  * `--public`, `--discs <list>` (e.g. "1" or "1,3-4"), and the repeatable
  * `--exclude-track <term>`, `--exclude-album <term>` and
  * `--exclude-artist <name>`. All remaining positional arguments are
- * "Artist - Album" lines.
+ * "Artist - Album" lines -- unless `--discography <artist>` is given, which
+ * takes that artist's releases instead (no lines then), narrowed by
+ * `--include <kinds>` (comma-separated albums, eps, live, compilations;
+ * default albums) and, with `--all-versions`, listing every edition of an
+ * album rather than one.
  *
  * @throws {Error} if `--name` is missing, `--prefer` is not a valid preference,
- *   or a filter flag is missing its value or invalid.
+ *   a filter flag is missing its value or invalid, `--include` is invalid, or
+ *   the discography flags are mixed with album lines (or given without it).
  */
 export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   let playlistName: string | undefined;
   let preference: AlbumPreference = DEFAULT_ALBUM_PREFERENCE;
   let isPublic = false;
+  let discographyArtist: string | undefined;
+  let include: ReleaseType[] | undefined;
+  let allVersions = false;
   const entries: string[] = [];
   const filter = new FilterFlags(true);
 
@@ -371,6 +389,22 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
       case "--public":
         isPublic = true;
         break;
+      case "--discography": {
+        const raw = argv[i + 1]?.trim();
+        i += 1;
+        if (raw === undefined || raw.length === 0) {
+          throw new Error("--discography requires an artist name");
+        }
+        discographyArtist = raw;
+        break;
+      }
+      case "--include":
+        include = parseIncludeList(argv[i + 1] ?? "");
+        i += 1;
+        break;
+      case "--all-versions":
+        allVersions = true;
+        break;
       default:
         if (arg !== undefined) {
           entries.push(arg);
@@ -381,6 +415,12 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   if (playlistName === undefined || playlistName.length === 0) {
     throw new Error("--name <playlist name> is required");
   }
+  if (discographyArtist === undefined && (include !== undefined || allVersions)) {
+    throw new Error("--include and --all-versions only apply with --discography <artist>");
+  }
+  if (discographyArtist !== undefined && entries.length > 0) {
+    throw new Error('Give either --discography <artist> or "Artist - Album" lines, not both');
+  }
 
   const spec = filter.spec();
   return {
@@ -388,6 +428,13 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
     entries,
     preference,
     isPublic,
+    ...(discographyArtist !== undefined && {
+      discography: {
+        artist: discographyArtist,
+        include: include ?? [...DEFAULT_DISCOGRAPHY_INCLUDE],
+        allVersions,
+      },
+    }),
     ...(spec !== undefined && { filter: spec }),
   };
 }

@@ -413,7 +413,7 @@ export async function buildPlaylistFromArtists(
 }
 
 /** Prefer an exact (case-insensitive) name match, else the first (most relevant) result. */
-function pickArtist(candidates: Artist[], query: string): Artist | undefined {
+export function pickArtist(candidates: Artist[], query: string): Artist | undefined {
   const wanted = query.trim().toLowerCase();
   const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
   return exact ?? candidates[0];

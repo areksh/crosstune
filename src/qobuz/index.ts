@@ -20,3 +20,10 @@ export {
   type PlaylistsPage,
   type Track,
 } from "./models.js";
+export {
+  classifyRelease,
+  RELEASE_TYPES,
+  type ArtistReleases,
+  type Release,
+  type ReleaseType,
+} from "./releases.js";

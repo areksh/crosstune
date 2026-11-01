@@ -438,13 +438,27 @@ export async function buildPlaylistFromAlbums(
   if (options.entries.length === 0) {
     throw new Error("At least one album is required");
   }
+  const resolved = await resolveAlbumVersions(client, {
+    entries: options.entries,
+    ...(options.filter !== undefined && { filter: options.filter }),
+  });
+  return writeAlbumPlaylist(client, resolved, options);
+}
 
+/**
+ * Pick one version of each resolved album (per `preference`), gather the
+ * chosen versions' tracks, and create and fill a new playlist with them: the
+ * write half of {@link buildPlaylistFromAlbums}, shared with the discography
+ * mode (see ./discography.ts).
+ */
+export async function writeAlbumPlaylist(
+  client: AlbumTracksClient & PlaylistWriterClient,
+  resolution: ResolveAlbumsResult,
+  options: Omit<BuildAlbumPlaylistOptions, "entries">,
+): Promise<BuildAlbumPlaylistResult> {
   const preference = options.preference ?? DEFAULT_ALBUM_PREFERENCE;
   const filter = options.filter ?? NO_FILTER;
-  const { resolvedAlbums, unresolvedAlbums, excludedAlbums } = await resolveAlbumVersions(
-    client,
-    { entries: options.entries, filter },
-  );
+  const { resolvedAlbums, unresolvedAlbums, excludedAlbums } = resolution;
 
   // Pick a version per album, gather its tracks, and de-duplicate across albums
   // while counting how many tracks each contributed. An album whose tracks fail
