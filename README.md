@@ -34,9 +34,9 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
   its id or by search. Available on the CLI and in the web UI.
 
-The playlist tools can **exclude** tracks whose title, or whose album's title,
+The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
-chosen discs.
+chosen discs. Similar artists also never suggests an excluded artist.
 
 There is also a **local web UI** (`qobuz-helper ui`) hosting these tools, each
 with a preview-and-edit step before anything is changed. More to follow.
@@ -97,8 +97,8 @@ cat artists.txt | npm run dev -- playlist-from-artists --name "Road Trip"
 
 Options for `playlist-from-artists`: `--name` (required), `--tracks N` (top
 tracks per artist, default 10), `--public` (make the playlist public),
-`--exclude-track <term>` and `--exclude-album <term>` (see [Filters](#filters)).
-An excluded track is replaced by the artist's next most popular one; Qobuz
+`--exclude-track <term>`, `--exclude-album <term>` and `--exclude-artist <name>`
+(see [Filters](#filters)). An excluded track is replaced by the artist's next most popular one; Qobuz
 lists at most 30 top tracks per artist, so a strict filter can still leave an
 artist short.
 
@@ -115,8 +115,9 @@ Options for `playlist-from-albums`: `--name` (required), `--prefer
 <preference>` (which version to use when an album has several: `highest-quality`
 (default), `newest`, or `oldest`), `--public` (make the playlist public),
 `--discs <list>` (keep only these discs of each album, e.g. `1` or `1,3-4`), and
-`--exclude-track <term>` and `--exclude-album <term>` (see [Filters](#filters)).
-A release whose title or version matches `--exclude-album` is never picked; if
+`--exclude-track <term>`, `--exclude-album <term>` and `--exclude-artist <name>`
+(see [Filters](#filters)). Tracks performed by an excluded artist (say, on a
+compilation) are left out. A release whose title or version matches `--exclude-album` is never picked; if
 every release of an album matches, the album is skipped and reported. Each
 entry is one line in `Artist - Album` form, split on the first ` - ` so album
 titles keep any hyphens.
@@ -133,6 +134,10 @@ npm run dev -- playlist-from-artists --name "Studio Only" \
 npm run dev -- playlist-from-albums --name "Disc One" --discs 1 \
   --exclude-track demo --exclude-track "/instrumental|karaoke/" \
   "Pink Floyd - The Wall"
+
+# A compilation without one of its artists
+npm run dev -- playlist-from-albums --name "Trip Hop" \
+  --exclude-artist "Bjork" "Various Artists - Trip Hop Classics"
 ```
 
 A plain term matches as a whole word or phrase, ignoring case: `live` excludes
@@ -142,14 +147,25 @@ album terms against the album's title (and version, for album releases). A term
 wrapped in slashes, such as `/remix|edit$/`, is a regular expression, also
 case-insensitive. Repeat a flag to add more terms.
 
+Artist terms (`--exclude-artist`) are matched against each track's performer
+and differ in one way: a plain artist term matches the **whole** name, ignoring
+case, accents and extra spaces, so `Drake` excludes Drake but not Nick Drake,
+and `bjork` excludes Björk. A slashed artist term is a regular expression tested
+against the name as Qobuz spells it (`/^the /` catches every "The ..." band).
+In `similar-artists`, a similar artist matching an artist term is left out
+entirely: it takes no place, is not walked from, and the next most similar
+artist takes its place; the left-out artists are listed at the end. The seeds
+themselves -- artists you typed, or a source playlist's artists -- are always
+walked from, though their own tracks are still filtered.
+
 ```sh
 # Metallica's top tracks, plus 3 tracks from each of 3 similar artists, plus
 # 3 similar to each of those (depth 2), in a new playlist
 npm run dev -- similar-artists --name "Metal Family" --depth 2 "Metallica"
 
-# Only the similar artists, 5 per artist, no live recordings
+# Only the similar artists, 5 per artist, no live recordings, never Massive Attack
 npm run dev -- similar-artists --name "Like Portishead" --seed-tracks 0 \
-  --similar 5 --exclude-track live "Portishead"
+  --similar 5 --exclude-track live --exclude-artist "Massive Attack" "Portishead"
 
 # A big, deep walk: 10 per artist, 3 levels, stopping after 500 artists
 # (refused as very large unless --yes is given)
@@ -169,7 +185,7 @@ for a well-known artist), `--depth D` (default 1: depth 2 also takes artists
 similar to the similar artists), `--max-artists A` (stop after A similar
 artists, default 100), `--tracks M` (top tracks per similar artist, 1-30,
 default 3), `--yes`, and the [filters](#filters)
-`--exclude-track`/`--exclude-album`. With `--name`: `--seed-tracks K` (the given
+`--exclude-track`/`--exclude-album`/`--exclude-artist`. With `--name`: `--seed-tracks K` (the given
 artists' own top tracks, 0-100, default 5; 0 for none) and `--public`. With
 `--playlist`: `--seeds S` (start from its S most frequent artists, 1-50,
 default 10). `--similar`, `--depth` and `--max-artists` have no upper limit.
@@ -299,7 +315,8 @@ tools; a home page introduces each.
 **Playlist from artists:**
 
 1. Paste one artist per line and choose how many top tracks to take from each.
-   Optionally open *Filters* to exclude tracks or albums by term (one per line).
+   Optionally open *Filters* to exclude tracks, albums or artists by term (one
+   per line).
 2. Preview the tracks grouped by artist, and untick any you do not want. Tracks
    the filters excluded are replaced by the next most popular, and listed
    unticked with the reason where they rank, so you can tick one back on in
@@ -314,14 +331,14 @@ tools; a home page introduces each.
 
 1. Paste one album per line as "Artist - Album", and pick a default version
    preference (highest quality, newest, or oldest). Optionally open *Filters* to
-   exclude releases or tracks by term, or to include only some discs.
+   exclude releases, tracks or artists by term, or to include only some discs.
 2. Find the albums: each shows a dropdown to choose which version to use when
    several exist (defaulting to your preference), with the chosen release's
    quality and date shown alongside. Releases matching a release filter are not
    offered; albums with no release left are called out.
 3. Fetch the tracks: each album lists its tracks (by disc, when it has more
-   than one). Tracks on a disc you did not include, or matching a track filter,
-   start unticked with the reason; tick or untick any. If a version cannot be
+   than one). Tracks on a disc you did not include, or matching a track or
+   artist filter, start unticked with the reason; tick or untick any. If a version cannot be
    fetched, the next-best one is selected for you to retry.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped) -- and save the ticked tracks.
@@ -337,7 +354,8 @@ tools; a home page introduces each.
    turning orange for a very large run, which you are asked to confirm. Tick
    *Replace artists that already came up* to substitute the next most similar
    artist for repeats (see the CLI's `--replace-repeats`). Optionally open
-   *Filters*.
+   *Filters*; similar artists matching an excluded artist are skipped in
+   favour of the next most similar.
 2. Find similar artists: the artists are found first, then their tracks are
    fetched in batches, with progress shown on the button.
 3. Preview: each starting artist is listed with the similar artists that came
@@ -345,7 +363,8 @@ tools; a home page introduces each.
    to. An artist shared between several is listed under each but added once,
    and ticking or unticking one of its tracks updates every copy. Untick any
    tracks you do not want; tracks the filters excluded are listed unticked
-   where they rank.
+   where they rank. Similar artists the filters left out are named above the
+   preview.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped; when starting from a playlist, that playlist is preselected)
    -- and commit.

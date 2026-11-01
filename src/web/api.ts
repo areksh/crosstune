@@ -30,6 +30,7 @@ export interface Track {
 export type Exclusion =
   | { kind: "track"; term: string }
   | { kind: "album"; term: string }
+  | { kind: "artist"; term: string }
   | { kind: "disc"; disc: number };
 
 /**
@@ -46,6 +47,7 @@ export interface ExcludedTrack {
 export interface FilterInput {
   excludeTracks: string[];
   excludeAlbums: string[];
+  excludeArtists: string[];
   discs?: string;
 }
 

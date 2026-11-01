@@ -1,8 +1,8 @@
 /**
  * Exclusion filters for the playlist tools.
  *
- * A filter excludes tracks by their title, by their album's title, or by the
- * disc they sit on. It never drops anything silently on the web: the tools mark
+ * A filter excludes tracks by their title, by their album's title, by their
+ * artist, or by the disc they sit on. It never drops anything silently on the web: the tools mark
  * each excluded track with the {@link Exclusion} that caught it, so the preview
  * can show it unticked (and let the user tick it back on). The CLI, which has no
  * review step, simply leaves excluded tracks out.
@@ -13,6 +13,12 @@
  *     ignoring case, so "live" catches "Live at Wembley" but not "Alive"; and
  *   - a term wrapped in slashes ("/remix|edit$/") is a regular expression,
  *     also case-insensitive. Flags after the closing slash are not accepted.
+ *
+ * Artist terms are the exception: a plain artist term matches the *whole*
+ * artist name, ignoring case, diacritics and extra whitespace, so "Drake"
+ * excludes Drake but not Nick Drake, and "bjork" excludes Björk. A slashed
+ * artist term is a case-insensitive regex tested against the name as Qobuz
+ * spells it ("/^the /" catches every "The ..." band).
  */
 
 import type { Album, Track } from "../qobuz/index.js";
@@ -23,6 +29,8 @@ export interface TrackFilterSpec {
   excludeTracks?: readonly string[];
   /** Terms matched against the album's title (and version, for album releases). */
   excludeAlbums?: readonly string[];
+  /** Terms matched against the whole artist (performer) name. */
+  excludeArtists?: readonly string[];
   /** Discs to keep; empty or absent keeps every disc. */
   discs?: readonly number[];
 }
@@ -33,10 +41,17 @@ interface CompiledTerm {
   pattern: RegExp;
 }
 
+interface CompiledArtistTerm {
+  /** The term as the user wrote it (trimmed), for reporting. */
+  term: string;
+  matches: (name: string) => boolean;
+}
+
 /** A validated, ready-to-apply filter. Build one with {@link compileTrackFilter}. */
 export interface TrackFilter {
   readonly trackTerms: readonly CompiledTerm[];
   readonly albumTerms: readonly CompiledTerm[];
+  readonly artistTerms: readonly CompiledArtistTerm[];
   readonly discs: ReadonlySet<number>;
 }
 
@@ -44,6 +59,7 @@ export interface TrackFilter {
 export type Exclusion =
   | { kind: "track"; term: string }
   | { kind: "album"; term: string }
+  | { kind: "artist"; term: string }
   | { kind: "disc"; disc: number };
 
 /** A track with the exclusion that caught it, if any. */
@@ -71,6 +87,51 @@ const WORD_CHAR = "[\\p{L}\\p{N}\\p{M}]";
  */
 export function compileTerm(raw: string): RegExp {
   const term = raw.trim();
+  const pattern = compileRegexTerm(term);
+  if (pattern !== undefined) {
+    return pattern;
+  }
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<!${WORD_CHAR})${escaped}(?!${WORD_CHAR})`, "iu");
+}
+
+/**
+ * Compile one exclude-artist term to a name matcher: a plain term matches the
+ * whole name (see {@link normaliseArtistName}); a `/regex/` is tested against
+ * the name as given.
+ *
+ * @throws {Error} if the term is empty or is an invalid `/regex/`.
+ */
+export function compileArtistTerm(raw: string): (name: string) => boolean {
+  const term = raw.trim();
+  const pattern = compileRegexTerm(term);
+  if (pattern !== undefined) {
+    return (name) => pattern.test(name);
+  }
+  const wanted = normaliseArtistName(term);
+  return (name) => normaliseArtistName(name) === wanted;
+}
+
+/**
+ * An artist name reduced for comparison: without diacritics, lower-cased, with
+ * runs of whitespace collapsed to one space and the ends trimmed.
+ */
+export function normaliseArtistName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Compile a trimmed `/slashed/` term to a case-insensitive regex, or return
+ * undefined for a plain term.
+ *
+ * @throws {Error} if the term is empty or is an invalid `/regex/`.
+ */
+function compileRegexTerm(term: string): RegExp | undefined {
   const regexBody =
     term.length >= 2 && term.startsWith("/") && term.endsWith("/")
       ? term.slice(1, -1)
@@ -78,15 +139,14 @@ export function compileTerm(raw: string): RegExp {
   if (term.length === 0 || regexBody === "") {
     throw new Error("Exclude term is empty");
   }
-  if (regexBody !== undefined) {
-    try {
-      return new RegExp(regexBody, "i");
-    } catch (error) {
-      throw new Error(`Invalid exclude pattern "${term}": ${(error as Error).message}`);
-    }
+  if (regexBody === undefined) {
+    return undefined;
   }
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<!${WORD_CHAR})${escaped}(?!${WORD_CHAR})`, "iu");
+  try {
+    return new RegExp(regexBody, "i");
+  } catch (error) {
+    throw new Error(`Invalid exclude pattern "${term}": ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -122,27 +182,38 @@ export function parseDiscList(raw: string): number[] {
  * @throws {Error} if a term is an invalid `/regex/`.
  */
 export function compileTrackFilter(spec: TrackFilterSpec): TrackFilter {
+  const nonBlank = (terms: readonly string[] = []): string[] =>
+    terms.map((term) => term.trim()).filter((term) => term.length > 0);
   const compile = (terms: readonly string[] = []): CompiledTerm[] =>
-    terms
-      .filter((term) => term.trim().length > 0)
-      .map((term) => ({ term: term.trim(), pattern: compileTerm(term) }));
+    nonBlank(terms).map((term) => ({ term, pattern: compileTerm(term) }));
   return {
     trackTerms: compile(spec.excludeTracks),
     albumTerms: compile(spec.excludeAlbums),
+    artistTerms: nonBlank(spec.excludeArtists).map((term) => ({
+      term,
+      matches: compileArtistTerm(term),
+    })),
     discs: new Set(spec.discs ?? []),
   };
 }
 
 /** True when the filter could exclude anything. */
 export function isFilterActive(filter: TrackFilter): boolean {
-  return filter.trackTerms.length > 0 || filter.albumTerms.length > 0 || filter.discs.size > 0;
+  return (
+    filter.trackTerms.length > 0 ||
+    filter.albumTerms.length > 0 ||
+    filter.artistTerms.length > 0 ||
+    filter.discs.size > 0
+  );
 }
 
 /**
  * Why the filter excludes this track, or undefined to keep it.
  *
- * The disc is checked first, then the track terms, then the album terms. A track
- * with no disc number is never excluded by the disc list.
+ * The disc is checked first, then the artist terms (against the track's
+ * performer), then the track terms, then the album terms. A track with no disc
+ * number is never excluded by the disc list, nor one with no artist by the
+ * artist terms.
  */
 export function trackExclusion(track: Track, filter: TrackFilter): Exclusion | undefined {
   if (
@@ -151,6 +222,11 @@ export function trackExclusion(track: Track, filter: TrackFilter): Exclusion | u
     !filter.discs.has(track.discNumber)
   ) {
     return { kind: "disc", disc: track.discNumber };
+  }
+  const artistTerm =
+    track.artist === undefined ? undefined : artistExclusion(track.artist, filter);
+  if (artistTerm !== undefined) {
+    return { kind: "artist", term: artistTerm };
   }
   const trackTerm = firstMatch(filter.trackTerms, labelled(track.title, track.version));
   if (trackTerm !== undefined) {
@@ -165,6 +241,11 @@ export function trackExclusion(track: Track, filter: TrackFilter): Exclusion | u
 export function albumExclusion(album: Album, filter: TrackFilter): Exclusion | undefined {
   const term = firstMatch(filter.albumTerms, labelled(album.title, album.version));
   return term === undefined ? undefined : { kind: "album", term };
+}
+
+/** The first artist term that excludes an artist of this name, or undefined. */
+export function artistExclusion(name: string, filter: TrackFilter): string | undefined {
+  return filter.artistTerms.find((term) => term.matches(name))?.term;
 }
 
 /** Annotate each track (in order) with the exclusion that caught it, if any. */

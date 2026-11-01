@@ -36,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exclude artists, in every playlist tool. Alongside the track and album terms,
+  *Filters* (web) and `--exclude-artist <name>` (CLI, repeatable) take artist
+  names matched against each track's performer. A plain name matches the whole
+  artist name, ignoring case, accents and extra spaces -- "Drake" excludes Drake
+  but not Nick Drake, "bjork" excludes Björk -- and `/.../` is a regular
+  expression on the name. Excluded tracks are reported and replaced like any
+  other (e.g. a compilation track by an excluded artist starts unticked). In
+  similar artists, a similar artist matching a name is skipped entirely -- it
+  takes no place and is not walked from, the next most similar one is taken
+  instead -- and the left-out artists are listed ("Left out: ..."). Seeds you
+  typed are still walked from.
+
 - Similar artists: a new tool (CLI `similar-artists` and a web view) that adds
   the top tracks of the artists Qobuz lists as similar. Start from a list of
   artists, optionally with some of their own top tracks, to create a playlist;

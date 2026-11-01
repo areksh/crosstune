@@ -86,5 +86,7 @@ function exclusionLabel(exclusion: Exclusion): string {
       return `excluded: title matches "${exclusion.term}"`;
     case "album":
       return `excluded: album matches "${exclusion.term}"`;
+    case "artist":
+      return `excluded: artist matches "${exclusion.term}"`;
   }
 }

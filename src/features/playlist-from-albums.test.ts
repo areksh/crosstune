@@ -328,6 +328,32 @@ describe("fetchAlbumTracks with a filter", () => {
   });
 });
 
+describe("fetchAlbumTracks with an artist filter", () => {
+  it("marks a compilation track performed by an excluded artist", async () => {
+    const tracks: Track[] = [
+      { id: 1, title: "Joga", artist: "Bj\u00f6rk" },
+      { id: 2, title: "Teardrop", artist: "Massive Attack" },
+    ];
+    const client = stubClient({ tracksByAlbum: { comp: tracks } });
+
+    const result = await fetchAlbumTracks(
+      client,
+      ["comp"],
+      compileTrackFilter({ excludeArtists: ["bjork"] }),
+    );
+
+    expect(result.fetched).toEqual([
+      {
+        albumId: "comp",
+        tracks: [
+          { track: tracks[0], exclusion: { kind: "artist", term: "bjork" } },
+          { track: tracks[1] },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("buildPlaylistFromAlbums with a filter", () => {
   it("skips excluded versions and tracks and reports what was left out", async () => {
     const client = stubClient({

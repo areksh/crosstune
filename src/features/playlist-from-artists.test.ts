@@ -327,6 +327,30 @@ describe("resolveArtistTracks with a filter", () => {
     expect(result.partialArtists).toEqual([]);
   });
 
+  it("replaces a top track credited to an excluded artist like any other exclusion", async () => {
+    const tracks: Track[] = [
+      { id: 1, title: "Feature", artist: "Drake" },
+      { id: 2, title: "Own", artist: "A" },
+      { id: 3, title: "Other", artist: "Nick Drake" },
+    ];
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: tracks },
+    });
+
+    const result = await resolveArtistTracks(client, {
+      artists: ["A"],
+      tracksPerArtist: 2,
+      filter: compileTrackFilter({ excludeArtists: ["drake"] }),
+    });
+
+    expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, TOP_TRACKS_POOL);
+    expect(result.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([2, 3]);
+    expect(result.resolvedArtists[0]?.excluded).toEqual([
+      { track: tracks[0], exclusion: { kind: "artist", term: "drake" }, position: 0 },
+    ]);
+  });
+
   it("asks for more than the pool when more tracks are wanted", async () => {
     const client = stubClient({
       artistsByQuery: { A: [{ id: 1, name: "A" }] },

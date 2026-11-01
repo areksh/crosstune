@@ -4,9 +4,12 @@ import type { Album, Track } from "../qobuz/index.js";
 import {
   albumExclusion,
   applyTrackFilter,
+  artistExclusion,
+  compileArtistTerm,
   compileTerm,
   compileTrackFilter,
   isFilterActive,
+  normaliseArtistName,
   parseDiscList,
   trackExclusion,
 } from "./track-filter.js";
@@ -62,6 +65,59 @@ describe("compileTerm", () => {
   });
 });
 
+describe("compileArtistTerm", () => {
+  it("matches the whole name only, ignoring case", () => {
+    const term = compileArtistTerm("Drake");
+    expect(term("Drake")).toBe(true);
+    expect(term("DRAKE")).toBe(true);
+    expect(term("Nick Drake")).toBe(false);
+    expect(term("Drake & Future")).toBe(false);
+  });
+
+  it("ignores diacritics on either side", () => {
+    expect(compileArtistTerm("bjork")("Bj\u00f6rk")).toBe(true);
+    expect(compileArtistTerm("Bj\u00f6rk")("Bjork")).toBe(true);
+    expect(compileArtistTerm("sigur ros")("Sigur R\u00f3s")).toBe(true);
+  });
+
+  it("collapses and trims whitespace on either side", () => {
+    expect(compileArtistTerm("  massive   attack ")("Massive Attack")).toBe(true);
+    expect(compileArtistTerm("Massive Attack")(" Massive\tAttack ")).toBe(true);
+  });
+
+  it("treats regex metacharacters in a plain term literally", () => {
+    expect(compileArtistTerm("AC/DC")("AC/DC")).toBe(true);
+    expect(compileArtistTerm("P!nk")("P!nk")).toBe(true);
+    expect(compileArtistTerm("M.I.A.")("MxIxAx")).toBe(false);
+  });
+
+  it("treats a /slashed/ term as a case-insensitive regex on the name as given", () => {
+    const term = compileArtistTerm("/^the /");
+    expect(term("The National")).toBe(true);
+    expect(term("Thee Oh Sees")).toBe(false);
+    expect(compileArtistTerm("/drake/")("Nick Drake")).toBe(true);
+    // No diacritic folding for a regex.
+    expect(compileArtistTerm("/bjork/")("Bj\u00f6rk")).toBe(false);
+  });
+
+  it("rejects an invalid regex, naming the term", () => {
+    expect(() => compileArtistTerm("/(unclosed/")).toThrow(/\/\(unclosed\//);
+  });
+
+  it("rejects an empty term", () => {
+    expect(() => compileArtistTerm("  ")).toThrow(/empty/);
+    expect(() => compileArtistTerm("//")).toThrow(/empty/);
+  });
+});
+
+describe("normaliseArtistName", () => {
+  it("strips diacritics, lower-cases and collapses whitespace", () => {
+    expect(normaliseArtistName("  Bj\u00f6rk   Gu\u00f0mundsd\u00f3ttir ")).toBe(
+      "bjork gu\u00f0mundsdottir",
+    );
+  });
+});
+
 describe("parseDiscList", () => {
   it("parses single discs, lists and ranges", () => {
     expect(parseDiscList("1")).toEqual([1]);
@@ -102,16 +158,18 @@ describe("compileTrackFilter / isFilterActive", () => {
   it("is active when any part is given", () => {
     expect(isFilterActive(compileTrackFilter({ excludeTracks: ["live"] }))).toBe(true);
     expect(isFilterActive(compileTrackFilter({ excludeAlbums: ["live"] }))).toBe(true);
+    expect(isFilterActive(compileTrackFilter({ excludeArtists: ["Drake"] }))).toBe(true);
     expect(isFilterActive(compileTrackFilter({ discs: [1] }))).toBe(true);
   });
 
   it("ignores blank terms rather than rejecting them", () => {
-    const filter = compileTrackFilter({ excludeTracks: ["", "  "] });
+    const filter = compileTrackFilter({ excludeTracks: ["", "  "], excludeArtists: [" "] });
     expect(isFilterActive(filter)).toBe(false);
   });
 
   it("propagates an invalid term", () => {
     expect(() => compileTrackFilter({ excludeAlbums: ["/[/"] })).toThrow(/\/\[\//);
+    expect(() => compileTrackFilter({ excludeArtists: ["/[/"] })).toThrow(/\/\[\//);
   });
 });
 
@@ -169,6 +227,47 @@ describe("trackExclusion", () => {
     });
   });
 
+  it("excludes a track whose performer matches an artist term, reporting the term", () => {
+    const filter = compileTrackFilter({ excludeArtists: ["  bjork "] });
+    expect(trackExclusion(track({ artist: "Bj\u00f6rk" }), filter)).toEqual({
+      kind: "artist",
+      term: "bjork",
+    });
+    expect(trackExclusion(track({ artist: "Bj\u00f6rk Trio" }), filter)).toBeUndefined();
+  });
+
+  it("keeps a track with no performer under an artist filter", () => {
+    const filter = compileTrackFilter({ excludeArtists: ["/./"] });
+    expect(trackExclusion(track({}), filter)).toBeUndefined();
+  });
+
+  it("does not apply an artist term to the title or album", () => {
+    const filter = compileTrackFilter({ excludeArtists: ["Song"] });
+    expect(trackExclusion(track({ album: "Song", artist: "Someone" }), filter)).toBeUndefined();
+  });
+
+  it("checks the disc, then the artist, then the track, then the album", () => {
+    const filter = compileTrackFilter({
+      excludeTracks: ["song"],
+      excludeAlbums: ["hits"],
+      excludeArtists: ["Drake"],
+      discs: [1],
+    });
+    const all = { title: "Song", album: "Hits", artist: "Drake" };
+    expect(trackExclusion(track({ ...all, discNumber: 2 }), filter)).toEqual({
+      kind: "disc",
+      disc: 2,
+    });
+    expect(trackExclusion(track(all), filter)).toEqual({ kind: "artist", term: "Drake" });
+    expect(trackExclusion(track({ ...all, artist: "Future" }), filter)).toEqual({
+      kind: "track",
+      term: "song",
+    });
+    expect(trackExclusion(track({ album: "Hits", artist: "Future", title: "x" }), filter)).toEqual(
+      { kind: "album", term: "hits" },
+    );
+  });
+
   it("keeps everything under an empty filter", () => {
     expect(trackExclusion(track({ title: "Live" }), compileTrackFilter({}))).toBeUndefined();
   });
@@ -198,6 +297,15 @@ describe("albumExclusion", () => {
   it("ignores track terms and discs", () => {
     const filter = compileTrackFilter({ excludeTracks: ["dummy"], discs: [2] });
     expect(albumExclusion(album({}), filter)).toBeUndefined();
+  });
+});
+
+describe("artistExclusion", () => {
+  it("returns the first matching artist term, or undefined", () => {
+    const filter = compileTrackFilter({ excludeArtists: ["/^the /", "The National"] });
+    expect(artistExclusion("The National", filter)).toBe("/^the /");
+    expect(artistExclusion("National", filter)).toBeUndefined();
+    expect(artistExclusion("Drake", compileTrackFilter({}))).toBeUndefined();
   });
 });
 

@@ -78,6 +78,7 @@ async function onResolve(): Promise<void> {
       filter: {
         excludeTracks: readTerms("exclude-tracks"),
         excludeAlbums: readTerms("exclude-albums"),
+        excludeArtists: readTerms("exclude-artists"),
       },
     });
     renderPreview(result);

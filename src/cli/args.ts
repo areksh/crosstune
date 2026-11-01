@@ -11,6 +11,7 @@ import {
 } from "../features/playlist-from-albums.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import {
+  compileArtistTerm,
   compileTerm,
   parseDiscList,
   type TrackFilterSpec,
@@ -79,6 +80,7 @@ export interface AlbumPlaylistArgs {
 class FilterFlags {
   readonly #excludeTracks: string[] = [];
   readonly #excludeAlbums: string[] = [];
+  readonly #excludeArtists: string[] = [];
   #discs: number[] | undefined;
   #given = false;
   readonly #allowDiscs: boolean;
@@ -99,6 +101,7 @@ class FilterFlags {
     if (
       flag !== "--exclude-track" &&
       flag !== "--exclude-album" &&
+      flag !== "--exclude-artist" &&
       !(flag === "--discs" && this.#allowDiscs)
     ) {
       return 0;
@@ -110,6 +113,9 @@ class FilterFlags {
     this.#given = true;
     if (flag === "--discs") {
       this.#discs = parseDiscList(value);
+    } else if (flag === "--exclude-artist") {
+      compileArtistTerm(value);
+      this.#excludeArtists.push(value);
     } else {
       compileTerm(value);
       (flag === "--exclude-track" ? this.#excludeTracks : this.#excludeAlbums).push(value);
@@ -125,6 +131,7 @@ class FilterFlags {
     return {
       excludeTracks: this.#excludeTracks,
       excludeAlbums: this.#excludeAlbums,
+      excludeArtists: this.#excludeArtists,
       ...(this.#discs !== undefined && { discs: this.#discs }),
     };
   }
@@ -237,8 +244,9 @@ function isKeepStrategy(value: string | undefined): value is KeepStrategy {
  * Parse the arguments for the `playlist-from-artists` command.
  *
  * Recognised options: `--name <name>` (required), `--tracks <n>` (positive
- * integer), `--public`, and the repeatable `--exclude-track <term>` and
- * `--exclude-album <term>`. All remaining positional arguments are artist names.
+ * integer), `--public`, and the repeatable `--exclude-track <term>`,
+ * `--exclude-album <term>` and `--exclude-artist <name>`. All remaining
+ * positional arguments are artist names.
  *
  * @throws {Error} if `--name` is missing, `--tracks` is not a positive integer,
  *   or an exclude term is missing or an invalid `/regex/`.
@@ -302,8 +310,9 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
  * Recognised options: `--name <name>` (required), `--prefer <preference>` (which
  * version to pick when an album has several; default `highest-quality`),
  * `--public`, `--discs <list>` (e.g. "1" or "1,3-4"), and the repeatable
- * `--exclude-track <term>` and `--exclude-album <term>`. All remaining
- * positional arguments are "Artist - Album" lines.
+ * `--exclude-track <term>`, `--exclude-album <term>` and
+ * `--exclude-artist <name>`. All remaining positional arguments are
+ * "Artist - Album" lines.
  *
  * @throws {Error} if `--name` is missing, `--prefer` is not a valid preference,
  *   or a filter flag is missing its value or invalid.
@@ -617,7 +626,8 @@ const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
  * `--similar N`, `--depth D`, `--tracks M`, `--max-artists A`, `--yes` (run
  * even when estimated to be very large), `--replace-repeats` (replace artists
  * that already came up with the next most similar), and the repeatable
- * `--exclude-track`/`--exclude-album`. Artists source only: `--seed-tracks K`
+ * `--exclude-track`/`--exclude-album`/`--exclude-artist` (an excluded artist is
+ * also never walked to). Artists source only: `--seed-tracks K`
  * (0 for none) and `--public`. Playlist source only: `--seeds S` and `--apply`.
  * Ranges and defaults are {@link SIMILAR_SETTINGS}.
  *

@@ -60,7 +60,7 @@ let unresolvedAlbums: string[] = [];
  * The filter as it stood when "Find albums" was pressed. The server validated
  * it then, and track fetches reuse it so the whole review applies one filter.
  */
-let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [] };
+let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [], excludeArtists: [] };
 
 /** True once any fetch has run in this cycle (changes the button wording). */
 let fetchAttempted = false;
@@ -87,6 +87,7 @@ function readFilter(): FilterInput {
   return {
     excludeTracks: readTerms("album-exclude-tracks"),
     excludeAlbums: readTerms("album-exclude-albums"),
+    excludeArtists: readTerms("album-exclude-artists"),
     ...(discs.length > 0 && { discs }),
   };
 }

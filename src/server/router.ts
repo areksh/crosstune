@@ -525,7 +525,8 @@ type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /**
  * Parse the optional `filter` of a playlist request:
- * `{ excludeTracks?: string[], excludeAlbums?: string[], discs?: string }`,
+ * `{ excludeTracks?: string[], excludeAlbums?: string[], excludeArtists?: string[],
+ * discs?: string }`,
  * where `discs` is a list as the user typed it ("1", "1,3-4"). Absent means no
  * filter; an invalid regex term or disc list is a 400 naming the problem.
  */
@@ -547,10 +548,12 @@ function parseFilterInput(raw: unknown): Parsed<TrackFilter> {
   };
   const excludeTracks = terms("excludeTracks");
   const excludeAlbums = terms("excludeAlbums");
-  if (excludeTracks === undefined || excludeAlbums === undefined) {
+  const excludeArtists = terms("excludeArtists");
+  if (excludeTracks === undefined || excludeAlbums === undefined || excludeArtists === undefined) {
     return {
       ok: false,
-      error: "filter.excludeTracks and filter.excludeAlbums must be arrays of strings",
+      error:
+        "filter.excludeTracks, filter.excludeAlbums and filter.excludeArtists must be arrays of strings",
     };
   }
   const discs = raw["discs"];
@@ -563,6 +566,7 @@ function parseFilterInput(raw: unknown): Parsed<TrackFilter> {
       value: compileTrackFilter({
         excludeTracks,
         excludeAlbums,
+        excludeArtists,
         discs: parseDiscList(discs ?? ""),
       }),
     };

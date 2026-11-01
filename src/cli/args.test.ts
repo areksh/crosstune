@@ -95,8 +95,36 @@ describe("parsePlaylistArgs", () => {
     expect(parsed.filter).toEqual({
       excludeTracks: ["live", "/remix|edit/"],
       excludeAlbums: ["greatest hits"],
+      excludeArtists: [],
     });
     expect(parsed.artists).toEqual(["A"]);
+  });
+
+  it("collects repeated --exclude-artist names", () => {
+    const parsed = parsePlaylistArgs([
+      "--name",
+      "x",
+      "--exclude-artist",
+      "Drake",
+      "--exclude-artist",
+      "/^the /",
+      "A",
+    ]);
+    expect(parsed.filter).toEqual({
+      excludeTracks: [],
+      excludeAlbums: [],
+      excludeArtists: ["Drake", "/^the /"],
+    });
+    expect(parsed.artists).toEqual(["A"]);
+  });
+
+  it("rejects an --exclude-artist with no value or an invalid regex", () => {
+    expect(() => parsePlaylistArgs(["--name", "x", "--exclude-artist"])).toThrow(
+      /--exclude-artist/,
+    );
+    expect(() =>
+      parsePlaylistArgs(["--name", "x", "--exclude-artist", "/[/", "A"]),
+    ).toThrow(/\/\[\//);
   });
 
   it("omits the filter when no exclude flag is given", () => {
@@ -159,11 +187,14 @@ describe("parseAlbumArgs", () => {
       "demo",
       "--exclude-album",
       "live",
+      "--exclude-artist",
+      "Various Artists",
       "A - B",
     ]);
     expect(parsed.filter).toEqual({
       excludeTracks: ["demo"],
       excludeAlbums: ["live"],
+      excludeArtists: ["Various Artists"],
       discs: [1, 3, 4],
     });
     expect(parsed.entries).toEqual(["A - B"]);
@@ -360,7 +391,7 @@ describe("parseSimilarArgs", () => {
       maxArtists: 250,
       yes: true,
       replaceRepeats: true,
-      filter: { excludeTracks: ["live"], excludeAlbums: [] },
+      filter: { excludeTracks: ["live"], excludeAlbums: [], excludeArtists: [] },
     });
   });
 
@@ -374,6 +405,9 @@ describe("parseSimilarArgs", () => {
       yes: false,
       replaceRepeats: false,
     });
+    expect(
+      parseSimilarArgs(["--playlist", "42", "--exclude-artist", "Drake"]).filter,
+    ).toEqual({ excludeTracks: [], excludeAlbums: [], excludeArtists: ["Drake"] });
     expect(parseSimilarArgs(["--playlist", "42"]).source).toEqual({
       type: "playlist",
       playlistId: 42,

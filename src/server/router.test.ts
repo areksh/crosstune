@@ -251,6 +251,32 @@ describe("filter in playlist requests", () => {
     expect(body.resolvedArtists[0]?.excluded.map((e) => e.track.id)).toEqual([100]);
   });
 
+  it("applies an artist filter to the tracks' performers", async () => {
+    const svc = service({
+      searchArtists: vi.fn(async (q: string) => [{ id: 5, name: q }]),
+      getArtistTopTracks: vi.fn(async () => [
+        { id: 100, title: "Duet", artist: "Björk" },
+        { id: 101, title: "Sour Times", artist: "Portishead" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve", {
+        artists: ["Portishead"],
+        tracksPerArtist: 1,
+        filter: { excludeArtists: ["bjork"] },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ exclusion: unknown }> }>;
+    };
+    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([101]);
+    expect(body.resolvedArtists[0]?.excluded.map((e) => e.exclusion)).toEqual([
+      { kind: "artist", term: "bjork" },
+    ]);
+  });
+
   it("drops excluded releases when resolving albums and reports fully excluded ones", async () => {
     const svc = service({
       searchAlbums: vi.fn(async () => [
@@ -302,6 +328,8 @@ describe("filter in playlist requests", () => {
     ["a non-object filter", "live"],
     ["non-array terms", { excludeTracks: "live" }],
     ["non-string terms", { excludeAlbums: [1] }],
+    ["non-array artist terms", { excludeArtists: "Drake" }],
+    ["non-string artist terms", { excludeArtists: [null] }],
     ["a non-string disc list", { discs: [1] }],
   ])("rejects %s", async (_label, filter) => {
     const res = await handleApi(
@@ -321,6 +349,15 @@ describe("filter in playlist requests", () => {
     );
     expect(res.status).toBe(400);
     expect((res.body as { error: string }).error).toContain("/(oops/");
+  });
+
+  it("rejects an invalid regex artist term with a message naming it", async () => {
+    const res = await handleApi(
+      request("POST", "/api/resolve", { artists: ["A"], filter: { excludeArtists: ["/[/"] } }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toContain("/[/");
   });
 
   it("rejects a malformed disc list", async () => {
@@ -448,6 +485,21 @@ describe("POST /api/similar/walk", () => {
     ]);
     const replacing = await walk(true);
     expect(replacing.found.map((f) => f.artist.id)).toEqual([11, 13]);
+  });
+
+  it("leaves out similar artists the filter excludes and reports them", async () => {
+    const res = await handleApi(
+      request("POST", "/api/similar/walk", {
+        source: { type: "artists", artists: ["Nirvana"], tracksPerSeed: 0 },
+        similarPerArtist: 1,
+        filter: { excludeArtists: ["mudhoney"] },
+      }),
+      deps({ service: similarService() }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { found: Array<{ artist: Artist }>; excludedArtists: Artist[] };
+    expect(body.found.map((f) => f.artist.id)).toEqual([12]);
+    expect(body.excludedArtists).toEqual([{ id: 11, name: "Mudhoney" }]);
   });
 
   it("accepts zero seed tracks", async () => {

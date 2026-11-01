@@ -20,20 +20,22 @@
  *
  *   qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] \
  *       [--exclude-track <term>]... [--exclude-album <term>]... \
- *       "Artist One" "Artist Two" ...
+ *       [--exclude-artist <name>]... "Artist One" "Artist Two" ...
  *       Build a playlist from the given artists' top tracks. Artist names may
- *       also be piped on stdin, one per line. Tracks whose title, or whose
- *       album's title, matches an exclude term are replaced by the artist's
- *       next most popular tracks.
+ *       also be piped on stdin, one per line. Tracks whose title, album's
+ *       title or performer matches an exclude term are replaced by the
+ *       artist's next most popular tracks.
  *
  *   qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] \
  *       [--public] [--discs <list>] [--exclude-track <term>]... \
- *       [--exclude-album <term>]... "Artist One - Album One" ...
+ *       [--exclude-album <term>]... [--exclude-artist <name>]... \
+ *       "Artist One - Album One" ...
  *       Build a playlist from whole albums. Each entry is "Artist - Album";
  *       entries may also be piped on stdin, one per line. When an album has
  *       several versions, --prefer picks one: highest-quality (default), newest,
  *       or oldest. Releases matching --exclude-album are never picked; tracks
- *       matching --exclude-track, or on a disc outside --discs, are left out.
+ *       matching --exclude-track or --exclude-artist, or on a disc outside
+ *       --discs, are left out.
  *
  *   qobuz-helper deduplicate (--playlist <id> | --favourites)
  *                            [--keep <strategy>] [--apply]
@@ -72,7 +74,9 @@
  *       came up uses a slot and is listed again (added once), unless
  *       --replace-repeats takes the next most similar instead. The walk stops
  *       after A similar artists (default 100); a run estimated to be very large
- *       is refused unless --yes is given.
+ *       is refused unless --yes is given. A similar artist matching
+ *       --exclude-artist is left out (and not walked from), and the next most
+ *       similar one takes its place; seeds are used regardless.
  *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
@@ -550,6 +554,11 @@ function reportSimilarPlan(
       `stopped at ${maxArtists} similar artists; raise --max-artists, or lower --similar or --depth for a fuller walk`,
     );
   }
+  if (plan.excludedArtists.length > 0) {
+    logger.info(
+      `  Left out (--exclude-artist): ${plan.excludedArtists.map((a) => a.name).join(", ")}`,
+    );
+  }
   if (plan.emptyArtists.length > 0) {
     logger.warn(
       `no tracks available for: ${plan.emptyArtists.map((a) => a.artist.name).join(", ")}`,
@@ -839,10 +848,10 @@ function printUsage(): void {
       "  qobuz-helper logout",
       "  qobuz-helper ui",
       "  qobuz-helper check",
-      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... "Artist - Album" ...',
-      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... "Artist" ...',
-      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--apply]",
+      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
+      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist - Album" ...',
+      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
+      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
@@ -854,6 +863,7 @@ function printUsage(): void {
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
       "Album version preferences: highest-quality (default), newest, oldest.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
+      "--exclude-artist matches the whole artist name, ignoring case and accents (\"Drake\" skips Drake, not Nick Drake); /pattern/ is a regex on the name. similar-artists never walks to an excluded artist.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",

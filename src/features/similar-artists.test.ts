@@ -386,6 +386,98 @@ describe("walkSimilarArtists", () => {
     ]);
     expect(client.getArtistTopTracks).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    "skips an excluded artist without using a slot (replaceRepeats %s)",
+    async (replaceRepeats) => {
+      const client = stubClient({
+        similar: { 1: [artist(11, "Drake"), artist(12, "Nick Drake"), artist(13)] },
+      });
+
+      const walk = await walkSimilarArtists(client, {
+        seeds: [artist(1)],
+        similarPerArtist: 2,
+        depth: 1,
+        replaceRepeats,
+        filter: compileTrackFilter({ excludeArtists: ["drake"] }),
+      });
+
+      // Drake is left out and the next most similar takes its place.
+      expect(walk.found.map((f) => f.artist.id)).toEqual([12, 13]);
+      expect(walk.appearances.map((a) => a.artist.id)).toEqual([12, 13]);
+      expect(walk.excludedArtists).toEqual([artist(11, "Drake")]);
+    },
+  );
+
+  it("never expands an excluded artist and records each one once, in first-seen order", async () => {
+    const client = stubClient({
+      similar: {
+        1: [artist(11, "Bj\u00f6rk"), artist(12)],
+        2: [artist(13, "Sigur R\u00f3s"), artist(11, "Bj\u00f6rk"), artist(14)],
+        12: [artist(120)],
+      },
+    });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1), artist(2)],
+      similarPerArtist: 1,
+      depth: 2,
+      filter: compileTrackFilter({ excludeArtists: ["bjork", "/r\u00f3s$/"] }),
+    });
+
+    expect(walk.found.map((f) => [f.artist.id, f.level])).toEqual([
+      [12, 1],
+      [120, 2],
+      [14, 1],
+    ]);
+    expect(walk.excludedArtists.map((a) => a.id)).toEqual([11, 13]);
+    expect(client.getSimilarArtists).not.toHaveBeenCalledWith(11, expect.anything());
+    expect(client.getSimilarArtists).not.toHaveBeenCalledWith(13, expect.anything());
+  });
+
+  it("does not count an excluded artist towards the cap or as truncation", async () => {
+    const client = stubClient({ similar: { 1: [artist(11), artist(12, "Drake")] } });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1)],
+      similarPerArtist: 5,
+      depth: 1,
+      maxArtists: 1,
+      filter: compileTrackFilter({ excludeArtists: ["Drake"] }),
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(walk.truncated).toBe(false);
+    expect(walk.excludedArtists.map((a) => a.id)).toEqual([12]);
+  });
+
+  it("still walks from a seed the filter matches (explicit input wins)", async () => {
+    const client = stubClient({ similar: { 1: [artist(11)], 11: [artist(1, "Drake")] } });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1, "Drake")],
+      similarPerArtist: 1,
+      depth: 2,
+      filter: compileTrackFilter({ excludeArtists: ["Drake"] }),
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(walk.excludedArtists).toEqual([]);
+  });
+
+  it("reports no excluded artists without artist terms", async () => {
+    const client = stubClient({ similar: { 1: [artist(11, "Drake")] } });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1)],
+      similarPerArtist: 1,
+      depth: 1,
+      filter: compileTrackFilter({ excludeTracks: ["drake"] }),
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(walk.excludedArtists).toEqual([]);
+  });
 });
 
 describe("fetchArtistTracks", () => {
@@ -529,6 +621,32 @@ describe("planFromArtists", () => {
     expect(plan.seeds.map((s) => [s.artist.id, s.tracks.length])).toEqual([[1, 2]]);
     expect(plan.similar.map((s) => s.artist.id)).toEqual([11]);
     expect(plan.unresolvedArtists).toEqual(["Nobody"]);
+    expect(plan.excludedArtists).toEqual([]);
+  });
+
+  it("walks from a typed seed the filter matches, but filters its own tracks", async () => {
+    const client = stubClient({
+      searches: { Drake: [artist(1, "Drake")] },
+      similar: { 1: [artist(11, "Drake"), artist(12)] },
+      tracks: { 1: [{ id: 100, title: "Song", artist: "Drake" }] },
+    });
+
+    const plan = await planFromArtists(client, {
+      artists: ["Drake"],
+      tracksPerSeed: 1,
+      similarPerArtist: 1,
+      depth: 1,
+      tracksPerSimilar: 1,
+      filter: compileTrackFilter({ excludeArtists: ["Drake"] }),
+    });
+
+    expect(plan.seeds[0]?.tracks).toEqual([]);
+    expect(plan.seeds[0]?.excluded.map((e) => e.exclusion)).toEqual([
+      { kind: "artist", term: "Drake" },
+    ]);
+    // A different artist of the same name is still left out of the walk.
+    expect(plan.similar.map((s) => s.artist.id)).toEqual([12]);
+    expect(plan.excludedArtists.map((a) => a.id)).toEqual([11]);
   });
 
   it("walks from a seed with no tracks of its own and flags it", async () => {
@@ -595,6 +713,25 @@ describe("planFromPlaylist", () => {
     expect(plan.seeds.map((s) => [s.artist.id, s.tracks])).toEqual([[5, []]]);
     expect(plan.similar.map((s) => s.artist.id)).toEqual([50]);
     expect(plan.unresolvedArtists).toEqual([]);
+  });
+
+  it("reports the similar artists the filter left out", async () => {
+    const client = stubClient({
+      playlist: [{ id: 1, title: "a", artistId: 5, artist: "Five" }],
+      similar: { 5: [artist(50, "Drake"), artist(51)] },
+    });
+
+    const plan = await planFromPlaylist(client, {
+      playlistId: 42,
+      maxSeeds: 1,
+      similarPerArtist: 1,
+      depth: 1,
+      tracksPerSimilar: 1,
+      filter: compileTrackFilter({ excludeArtists: ["drake"] }),
+    });
+
+    expect(plan.similar.map((s) => s.artist.id)).toEqual([51]);
+    expect(plan.excludedArtists).toEqual([artist(50, "Drake")]);
   });
 
   it("by default counts an artist already in the playlist towards the top N", async () => {

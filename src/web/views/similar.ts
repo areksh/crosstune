@@ -60,6 +60,7 @@ interface WalkResponse {
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
   truncated: boolean;
+  excludedArtists: Artist[];
 }
 
 interface TracksResponse {
@@ -96,6 +97,7 @@ interface PlanResponse {
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
   truncated: boolean;
+  excludedArtists: Artist[];
 }
 
 type CommitTarget =
@@ -176,6 +178,7 @@ function settingsBody(): { body: Record<string, unknown> } | { missing: string }
       filter: {
         excludeTracks: readTerms("similar-exclude-tracks"),
         excludeAlbums: readTerms("similar-exclude-albums"),
+        excludeArtists: readTerms("similar-exclude-artists"),
       },
     },
   };
@@ -296,6 +299,7 @@ async function fetchTracksInBatches(
     emptyArtists,
     partialArtists,
     truncated: walk.truncated,
+    excludedArtists: walk.excludedArtists,
   };
 }
 
@@ -313,6 +317,12 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
     el("similar-truncated"),
     plan.truncated
       ? `Stopped at ${numberInput("similar-max-artists")} similar artists. Raise that limit, or lower the depth or the similar artists per artist, for a fuller walk.`
+      : undefined,
+  );
+  showError(
+    el("similar-left-out"),
+    plan.excludedArtists.length > 0
+      ? `Left out: ${plan.excludedArtists.map((a) => a.name).join(", ")}`
       : undefined,
   );
   showError(
