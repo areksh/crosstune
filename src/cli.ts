@@ -52,6 +52,15 @@
  *       newest. Without --apply it only reports; with --apply it removes the
  *       tracks marked "drop".
  *
+ *   qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists)
+ *                        [--allow-signature-match] [--remove-unplayable] [--apply]
+ *       Find tracks with a better-quality release of the same recording (same
+ *       ISRC), and tracks Qobuz no longer streams, proposing a streamable
+ *       replacement for each. --allow-signature-match also proposes upgrades
+ *       matched by artist+title only (maybe a different recording);
+ *       --remove-unplayable removes unplayable tracks with no replacement.
+ *       Without --apply it only reports.
+ *
  *   qobuz-helper export (--favourites | --favourite-albums | --favourite-artists
  *       | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]
  *       Export favourites or a playlist (or the whole account, with --account)
@@ -142,6 +151,7 @@ import {
   parseSimilarArgs,
   parseStatsArgs,
   parseWordPlayArgs,
+  parseUpgradeArgs,
   type DedupeSource,
   type ExportArgs,
   type ImportArgs,
@@ -177,6 +187,12 @@ import {
   type SimilarPlan,
 } from "./features/similar-artists.js";
 import { compileTrackFilter } from "./features/track-filter.js";
+import {
+  commitUpgrades,
+  formatUpgradeReport,
+  planChanges,
+  resolveUpgrades,
+} from "./features/upgrade.js";
 import {
   buildBackup,
   collectCollection,
@@ -289,6 +305,11 @@ async function main(): Promise<void> {
     }
     case "deduplicate": {
       const plan = planDeduplicate(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "upgrade": {
+      const plan = planUpgrade(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -771,6 +792,54 @@ async function applyRemovals(
 }
 
 /**
+ * Validate the upgrade command's arguments up front, returning an executor that
+ * resolves the plan, reports it, and (with --apply) writes it.
+ */
+function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const args = parseUpgradeArgs(argv);
+
+  return async (client: QobuzClient): Promise<void> => {
+    const where =
+      args.source.type === "playlist"
+        ? `playlist ${args.source.playlistId}`
+        : args.source.type === "all-playlists"
+          ? "all your playlists"
+          : "your favourites";
+    logger.info(`Checking ${where} for upgrades and unplayable tracks...`);
+    const plan = await resolveUpgrades(client, args.source, {
+      allowSignatureMatch: args.allowSignatureMatch,
+      removeUnplayable: args.removeUnplayable,
+    });
+    logger.info(`\n${formatUpgradeReport(plan)}`);
+
+    const changes = planChanges(plan.items);
+    if (!args.apply) {
+      if (changes.length > 0) {
+        logger.info(
+          `\n(dry run -- pass --apply to make the ${changes.length} change${changes.length === 1 ? "" : "s"})`,
+        );
+      }
+      return;
+    }
+    if (changes.length === 0) {
+      logger.info("\nNothing to change.");
+      return;
+    }
+    logger.info(`\nApplying ${changes.length} change(s)...`);
+    const result = await commitUpgrades(client, changes);
+    logger.info(`  replaced ${result.replaced}, removed ${result.removed}.`);
+    if (result.movedToEnd > 0) {
+      logger.warn(
+        `${result.movedToEnd} replacement(s) could not be moved into place and are at the end of their playlist`,
+      );
+    }
+    for (const failure of result.failed) {
+      logger.warn(`track ${failure.change.trackId}: ${failure.reason}`);
+    }
+  };
+}
+
+/**
  * Validate the export command's arguments up front, returning an executor that
  * reads the chosen source and writes it to a file (`--out`) or stdout.
  *
@@ -1239,6 +1308,7 @@ function printUsage(): void {
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
+      "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
@@ -1259,6 +1329,7 @@ function printUsage(): void {
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
       "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
+      "upgrade reports only unless --apply is given; it matches by ISRC unless --allow-signature-match is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",
       "import resolves and reports only unless --apply is given; --account restores a backup.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',

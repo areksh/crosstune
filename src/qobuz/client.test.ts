@@ -129,6 +129,9 @@ function makeFetch(options: FetchOptions): typeof fetch {
     if (path.endsWith("/album/get")) {
       return new Response(JSON.stringify(options.album ?? {}), { status: 200 });
     }
+    if (path.endsWith("/playlist/updateTracksPosition")) {
+      return new Response(JSON.stringify({ status: "success" }), { status: 200 });
+    }
     if (
       path.endsWith("/playlist/deleteTracks") ||
       path.endsWith("/favorite/delete")
@@ -833,6 +836,39 @@ describe("QobuzClient.addTracksToPlaylist", () => {
     expect(batches.length).toBeGreaterThan(1);
     expect(Math.max(...batches.map((b) => b.length))).toBeLessThanOrEqual(50);
     expect(batches.flat()).toEqual(ids);
+  });
+});
+
+describe("QobuzClient.movePlaylistTracks", () => {
+  it("sends the entries and the target position with the user token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.movePlaylistTracks(777, [91, 92], 3);
+
+    const request = recorded.find((r) =>
+      r.url.pathname.endsWith("/playlist/updateTracksPosition"),
+    );
+    expect(request?.url.searchParams.get("playlist_id")).toBe("777");
+    expect(request?.url.searchParams.get("playlist_track_ids")).toBe("91,92");
+    expect(request?.url.searchParams.get("insert_before")).toBe("3");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("is a no-op for an empty list (no request sent)", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.movePlaylistTracks(777, [], 0);
+
+    expect(
+      recorded.some((r) => r.url.pathname.endsWith("/playlist/updateTracksPosition")),
+    ).toBe(false);
   });
 });
 

@@ -111,6 +111,13 @@ import {
   type ArtistSource,
   type NewReleasesTarget,
 } from "../features/new-releases.js";
+import {
+  commitUpgrades,
+  resolveUpgrades,
+  type TrackLocation,
+  type UpgradeChange,
+  type UpgradeSource,
+} from "../features/upgrade.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -144,6 +151,15 @@ export interface QobuzApiService {
     playlistTrackIds: readonly number[],
   ): Promise<void>;
   removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
+  /**
+   * Move playlist entries into place (upgrade & repair). Optional: its endpoint
+   * is unverified, and without it replacements stay at the end of a playlist.
+   */
+  movePlaylistTracks?(
+    playlistId: number,
+    playlistTrackIds: readonly number[],
+    insertBefore: number,
+  ): Promise<void>;
 }
 
 export interface SessionInfo {
@@ -244,6 +260,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/deduplicate/apply") {
     return apply(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/upgrade/resolve") {
+    return upgradeResolve(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/upgrade/commit") {
+    return upgradeCommit(req.body, deps);
   }
   if (req.method === "POST" && req.path === "/api/export") {
     return exportData(req.body, deps);
@@ -486,6 +508,30 @@ async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const ids = removals.map((removal) => removal.id);
   await deps.service.removeFavoriteTracks(ids);
   return { status: 200, body: { removed: ids.length } };
+}
+
+/** Resolve an upgrade & repair plan for a source (phase one), without writing. */
+async function upgradeResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseUpgradeResolveInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { source, allowSignatureMatch, removeUnplayable } = input.value;
+  const plan = await resolveUpgrades(deps.service, source, {
+    allowSignatureMatch,
+    removeUnplayable,
+  });
+  return { status: 200, body: plan };
+}
+
+/** Write the chosen upgrade & repair changes (phase two). */
+async function upgradeCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseUpgradeCommitInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const result = await commitUpgrades(deps.service, input.value);
+  return { status: 200, body: result };
 }
 
 /**
@@ -1017,6 +1063,110 @@ function parseApplyInput(body: unknown): Parsed<ApplyInput> {
     return { ok: false, error: "at least one track to remove is required" };
   }
   return { ok: true, value: { source: source.value, removals } };
+}
+
+interface UpgradeResolveInput {
+  source: UpgradeSource;
+  allowSignatureMatch: boolean;
+  removeUnplayable: boolean;
+}
+
+function parseUpgradeResolveInput(body: unknown): Parsed<UpgradeResolveInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const raw = body["source"];
+  let source: UpgradeSource;
+  if (!isRecord(raw)) {
+    return { ok: false, error: "source is required" };
+  } else if (raw["type"] === "favourites" || raw["type"] === "all-playlists") {
+    source = { type: raw["type"] };
+  } else if (raw["type"] === "playlist") {
+    if (!isPositiveInteger(raw["playlistId"])) {
+      return { ok: false, error: "source.playlistId must be a playlist id" };
+    }
+    source = { type: "playlist", playlistId: raw["playlistId"] };
+  } else {
+    return {
+      ok: false,
+      error: "source.type must be 'favourites', 'playlist' or 'all-playlists'",
+    };
+  }
+  const allowSignatureMatch = body["allowSignatureMatch"] ?? false;
+  const removeUnplayable = body["removeUnplayable"] ?? false;
+  if (typeof allowSignatureMatch !== "boolean" || typeof removeUnplayable !== "boolean") {
+    return { ok: false, error: "allowSignatureMatch and removeUnplayable must be booleans" };
+  }
+  return { ok: true, value: { source, allowSignatureMatch, removeUnplayable } };
+}
+
+/**
+ * Parse `{ changes: [...] }` for an upgrade commit. Every change must be valid
+ * (a malformed one fails the request rather than being dropped, since a
+ * half-applied plan would surprise the user).
+ */
+function parseUpgradeCommitInput(body: unknown): Parsed<UpgradeChange[]> {
+  if (!isRecord(body) || !Array.isArray(body["changes"])) {
+    return { ok: false, error: "changes must be an array" };
+  }
+  const changes: UpgradeChange[] = [];
+  for (const [index, item] of body["changes"].entries()) {
+    const change = parseUpgradeChange(item);
+    if (change === undefined) {
+      return { ok: false, error: `changes[${index}] is not a valid change` };
+    }
+    changes.push(change);
+  }
+  if (changes.length === 0) {
+    return { ok: false, error: "at least one change is required" };
+  }
+  return { ok: true, value: changes };
+}
+
+function parseUpgradeChange(item: unknown): UpgradeChange | undefined {
+  if (!isRecord(item) || !isPositiveInteger(item["trackId"])) {
+    return undefined;
+  }
+  const location = parseTrackLocation(item["location"]);
+  if (location === undefined) {
+    return undefined;
+  }
+  const trackId = item["trackId"];
+  if (item["action"] === "remove") {
+    return { action: "remove", location, trackId };
+  }
+  if (item["action"] === "replace" && isPositiveInteger(item["newTrackId"])) {
+    if (item["newTrackId"] === trackId) {
+      return undefined;
+    }
+    return { action: "replace", location, trackId, newTrackId: item["newTrackId"] };
+  }
+  return undefined;
+}
+
+function parseTrackLocation(value: unknown): TrackLocation | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (value["type"] === "favourites") {
+    return { type: "favourites" };
+  }
+  if (
+    value["type"] === "playlist" &&
+    isPositiveInteger(value["playlistId"]) &&
+    isPositiveInteger(value["playlistTrackId"])
+  ) {
+    return {
+      type: "playlist",
+      playlistId: value["playlistId"],
+      playlistTrackId: value["playlistTrackId"],
+    };
+  }
+  return undefined;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 interface ExportInput {

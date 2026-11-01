@@ -879,6 +879,125 @@ describe("POST /api/deduplicate/apply", () => {
   });
 });
 
+describe("POST /api/upgrade/resolve", () => {
+  const cdTrack: Track = {
+    id: 1,
+    title: "Teardrop",
+    artist: "Massive Attack",
+    isrc: "GBAAA9800001",
+    streamable: true,
+    bitDepth: 16,
+    samplingRate: 44.1,
+    playlistTrackId: 11,
+  };
+  const hires: Track = { ...cdTrack, id: 2, bitDepth: 24, samplingRate: 96 };
+
+  it("returns a plan for a playlist", async () => {
+    const svc = service({
+      getPlaylistTracks: vi.fn(async () => [cdTrack]),
+      searchTracks: vi.fn(async () => [hires]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/upgrade/resolve", { source: { type: "playlist", playlistId: 55 } }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { items: Array<{ kind: string; replacementId?: number; location: unknown }> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      kind: "upgrade",
+      replacementId: 2,
+      location: { type: "playlist", playlistId: 55, playlistTrackId: 11 },
+    });
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(55);
+  });
+
+  it("scans every playlist and passes the options through", async () => {
+    const gone: Track = { ...cdTrack, streamable: false, isrc: "GONE" };
+    const svc = service({
+      getUserPlaylists: vi.fn(async () => [{ id: 1, name: "A" }]),
+      getPlaylistTracks: vi.fn(async () => [gone]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/upgrade/resolve", {
+        source: { type: "all-playlists" },
+        allowSignatureMatch: true,
+        removeUnplayable: true,
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { items: Array<{ kind: string; action: string }> };
+    expect(body.items[0]).toMatchObject({ kind: "unplayable", action: "remove" });
+  });
+
+  it("rejects an invalid source or option", async () => {
+    for (const body of [
+      {},
+      { source: { type: "album" } },
+      { source: { type: "playlist" } },
+      { source: { type: "favourites" }, allowSignatureMatch: "yes" },
+    ]) {
+      const res = await handleApi(request("POST", "/api/upgrade/resolve", body), deps());
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
+describe("POST /api/upgrade/commit", () => {
+  it("writes favourite replacements and removals", async () => {
+    const svc = service();
+    const res = await handleApi(
+      request("POST", "/api/upgrade/commit", {
+        changes: [
+          { action: "replace", location: { type: "favourites" }, trackId: 1, newTrackId: 2 },
+          { action: "remove", location: { type: "favourites" }, trackId: 3 },
+        ],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ replaced: 1, removed: 1, failed: [], movedToEnd: 0 });
+    expect(svc.addFavoriteTracks).toHaveBeenCalledWith([2]);
+    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([1, 3]);
+  });
+
+  it("removes a playlist entry by its playlist-track id", async () => {
+    const svc = service({
+      getPlaylistTracks: vi.fn(async () => [{ id: 3, title: "T", playlistTrackId: 33 }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/upgrade/commit", {
+        changes: [
+          {
+            action: "remove",
+            location: { type: "playlist", playlistId: 9, playlistTrackId: 33 },
+            trackId: 3,
+          },
+        ],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(9, [33]);
+  });
+
+  it("rejects an empty list or any malformed change", async () => {
+    const fav = { type: "favourites" };
+    for (const changes of [
+      [],
+      [{ action: "replace", location: fav, trackId: 1 }],
+      [{ action: "replace", location: fav, trackId: 1, newTrackId: 1 }],
+      [{ action: "remove", location: { type: "playlist", playlistId: 9 }, trackId: 1 }],
+      [{ action: "leave", location: fav, trackId: 1 }],
+      [{ action: "remove", location: fav, trackId: 1 }, "junk"],
+    ]) {
+      const res = await handleApi(request("POST", "/api/upgrade/commit", { changes }), deps());
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
 describe("error handling", () => {
   it("maps a QobuzError to 502", async () => {
     const svc = service({

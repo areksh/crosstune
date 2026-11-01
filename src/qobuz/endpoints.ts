@@ -31,6 +31,12 @@ export const paths = {
   playlistDeleteTracks: "/playlist/deleteTracks",
   favoriteCreate: "/favorite/create",
   favoriteDelete: "/favorite/delete",
+  /**
+   * Move playlist entries. UNVERIFIED: inferred from the web player (and
+   * third-party API wrappers), not documented and not exercised against the
+   * live API; see {@link QobuzClient.movePlaylistTracks}.
+   */
+  playlistUpdateTracksPosition: "/playlist/updateTracksPosition",
 } as const;
 
 /** Build the full URL for an endpoint path. */

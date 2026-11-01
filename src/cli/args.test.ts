@@ -11,6 +11,7 @@ import {
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
+  parseUpgradeArgs,
   parseWordPlayArgs,
 } from "./args.js";
 
@@ -831,5 +832,49 @@ describe("parseNewReleasesArgs", () => {
     for (const [argv, message] of cases) {
       expect(() => parseNewReleasesArgs(argv)).toThrow(message);
     }
+  });
+});
+
+describe("parseUpgradeArgs", () => {
+  it("parses each source, report-only by default", () => {
+    expect(parseUpgradeArgs(["--favourites"])).toEqual({
+      source: { type: "favourites" },
+      allowSignatureMatch: false,
+      removeUnplayable: false,
+      apply: false,
+    });
+    expect(parseUpgradeArgs(["--favorites"]).source).toEqual({ type: "favourites" });
+    expect(parseUpgradeArgs(["--playlist", "42"]).source).toEqual({
+      type: "playlist",
+      playlistId: 42,
+    });
+    expect(parseUpgradeArgs(["--all-playlists"]).source).toEqual({ type: "all-playlists" });
+  });
+
+  it("parses the options", () => {
+    expect(
+      parseUpgradeArgs([
+        "--all-playlists",
+        "--allow-signature-match",
+        "--remove-unplayable",
+        "--apply",
+      ]),
+    ).toEqual({
+      source: { type: "all-playlists" },
+      allowSignatureMatch: true,
+      removeUnplayable: true,
+      apply: true,
+    });
+  });
+
+  it("requires exactly one source", () => {
+    expect(() => parseUpgradeArgs([])).toThrow(/source is required/);
+    expect(() => parseUpgradeArgs(["--favourites", "--all-playlists"])).toThrow(/only one/);
+  });
+
+  it("rejects a bad playlist id and unknown arguments", () => {
+    expect(() => parseUpgradeArgs(["--playlist", "abc"])).toThrow(/numeric id/);
+    expect(() => parseUpgradeArgs(["--playlist"])).toThrow(/numeric id/);
+    expect(() => parseUpgradeArgs(["--favourites", "--keep", "x"])).toThrow(/Unknown argument/);
   });
 });

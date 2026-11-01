@@ -28,6 +28,7 @@ import {
 } from "../features/playlist-from-albums.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import type { StatsSource } from "../features/stats.js";
+import type { UpgradeSource } from "../features/upgrade.js";
 import {
   compileArtistTerm,
   compileTerm,
@@ -1398,4 +1399,75 @@ export function parseNewReleasesArgs(argv: readonly string[]): NewReleasesArgs {
     ...(target !== undefined && { target }),
     ...(spec !== undefined && { filter: spec }),
   };
+}
+
+/** Arguments for the `upgrade` command. */
+export interface UpgradeArgs {
+  source: UpgradeSource;
+  /** Also propose upgrades matched by artist+title only (maybe a different recording). */
+  allowSignatureMatch: boolean;
+  /** Remove unplayable tracks that have no replacement (otherwise leave them). */
+  removeUnplayable: boolean;
+  /** Whether to write the changes (otherwise report only). */
+  apply: boolean;
+}
+
+/**
+ * Parse the arguments for the `upgrade` command.
+ *
+ * Exactly one source: `--favourites` (or `--favorites`), `--playlist <id>`, or
+ * `--all-playlists`. `--allow-signature-match` also proposes upgrades matched
+ * by normalised artist+title; `--remove-unplayable` removes unplayable tracks
+ * with no replacement; `--apply` writes the plan (otherwise it only reports).
+ *
+ * @throws {Error} on a missing or doubled source, a bad playlist id, or an
+ *   unknown argument.
+ */
+export function parseUpgradeArgs(argv: readonly string[]): UpgradeArgs {
+  const sources: UpgradeSource[] = [];
+  let allowSignatureMatch = false;
+  let removeUnplayable = false;
+  let apply = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    switch (arg) {
+      case "--favourites":
+      case "--favorites":
+        sources.push({ type: "favourites" });
+        break;
+      case "--all-playlists":
+        sources.push({ type: "all-playlists" });
+        break;
+      case "--playlist": {
+        const raw = argv[i + 1];
+        i += 1;
+        const value = Number(raw);
+        if (!Number.isInteger(value) || value <= 0) {
+          throw new Error(`--playlist must be a numeric id, got "${raw}"`);
+        }
+        sources.push({ type: "playlist", playlistId: value });
+        break;
+      }
+      case "--allow-signature-match":
+        allowSignatureMatch = true;
+        break;
+      case "--remove-unplayable":
+        removeUnplayable = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (sources.length === 0) {
+    throw new Error("A source is required: --favourites, --playlist <id>, or --all-playlists");
+  }
+  if (sources.length > 1) {
+    throw new Error("Give only one of --favourites, --playlist or --all-playlists");
+  }
+  return { source: sources[0]!, allowSignatureMatch, removeUnplayable, apply };
 }

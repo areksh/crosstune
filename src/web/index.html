@@ -34,6 +34,7 @@
             <span class="nav-label">Tidy up</span>
             <a class="nav-link" data-view="deduplicate" href="#/deduplicate">Deduplicator</a>
             <a class="nav-link" data-view="combine" href="#/combine">Combine playlists</a>
+            <a class="nav-link" data-view="upgrade" href="#/upgrade">Upgrade &amp; repair</a>
           </div>
           <div class="nav-group">
             <span class="nav-label">Explore</span>
@@ -116,6 +117,13 @@
                 <span class="tool-desc">
                   Merge playlists into one, each song once, or see what they
                   share and what only one has.
+                </span>
+              </a>
+              <a class="tool-link" href="#/upgrade">
+                <span class="tool-name">Upgrade &amp; repair</span>
+                <span class="tool-desc">
+                  Swap tracks for a hi-res release of the same recording, and
+                  replace the ones Qobuz no longer plays.
                 </span>
               </a>
             </section>
@@ -1028,6 +1036,84 @@
               <button id="combine-commit" type="button">Create playlist</button>
               <p id="combine-commit-error" class="error" hidden></p>
               <p id="combine-commit-result" class="result" hidden></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- Upgrade & repair -->
+        <section id="view-upgrade" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Upgrade &amp; repair</h1>
+              <p class="lede">
+                Swap tracks for a better-quality release of the same recording,
+                and fix tracks Qobuz no longer plays.
+              </p>
+            </div>
+            <ol id="upgrade-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Check</li>
+              <li>2 Review</li>
+              <li>3 Apply</li>
+            </ol>
+          </header>
+
+          <section class="panel">
+            <div class="upgrade-controls">
+              <label class="field">
+                <span>Check</span>
+                <select id="upgrade-source">
+                  <option value="favourites">Your favourite tracks</option>
+                  <option value="all-playlists">All my playlists</option>
+                  <optgroup id="upgrade-playlists" label="One playlist"></optgroup>
+                </select>
+              </label>
+              <label class="checkbox">
+                <input id="upgrade-same-recording" type="checkbox" checked />
+                Only the same recording (matching ISRC)
+              </label>
+              <label class="checkbox">
+                <input id="upgrade-remove-unplayable" type="checkbox" />
+                Remove unplayable tracks with no replacement
+              </label>
+            </div>
+            <p class="hint">
+              Upgrades are matched by ISRC (the same recording) unless you untick
+              the first box. An unplayable track falls back to the same song when
+              no release of the same recording is left; such matches are flagged.
+            </p>
+            <div class="actions">
+              <button id="upgrade-check" type="button">Check</button>
+            </div>
+            <p id="upgrade-check-error" class="error" hidden></p>
+          </section>
+
+          <section id="upgrade-results" class="review" hidden>
+            <p id="upgrade-summary" class="hint"></p>
+            <section class="upgrade-section">
+              <header class="group-head">
+                <h3>Better quality available</h3>
+                <span id="upgrade-count" class="count"></span>
+              </header>
+              <div id="upgrade-list"></div>
+            </section>
+            <section class="upgrade-section">
+              <header class="group-head">
+                <h3>No longer playable</h3>
+                <span id="upgrade-broken-count" class="count"></span>
+              </header>
+              <div id="upgrade-broken-list"></div>
+            </section>
+            <div id="upgrade-bar" class="commit-bar" hidden>
+              <span class="commit-summary">
+                <span id="upgrade-commit-count" class="commit-count" aria-live="polite"></span>
+                <span class="commit-note">
+                  Replacements take the old track's place; if Qobuz refuses the
+                  move, they go to the end of the playlist.
+                </span>
+              </span>
+              <button id="upgrade-apply" type="button">Apply</button>
+              <p id="upgrade-apply-error" class="error" hidden></p>
+              <p id="upgrade-apply-result" class="result" hidden></p>
             </div>
           </section>
         </section>

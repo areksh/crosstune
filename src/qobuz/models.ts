@@ -48,6 +48,12 @@ export interface Track {
   image?: string;
   /** Length in seconds, when present. */
   duration?: number;
+  /**
+   * Whether Qobuz can currently stream the track, when the response says.
+   * `false` marks a track that has gone unplayable (rights withdrawn), which
+   * the upgrade tool repairs; absent means unknown, not unplayable.
+   */
+  streamable?: boolean;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -75,6 +81,8 @@ export interface Album {
   trackCount?: number;
   /** Cover URL (https, about 230px), when known. See {@link imageOf}. */
   image?: string;
+  /** Whether Qobuz can currently stream the album, when the response says. */
+  streamable?: boolean;
 }
 
 export interface Playlist {
@@ -190,6 +198,9 @@ function parseAlbum(item: unknown): Album | undefined {
   }
   if (typeof item["tracks_count"] === "number") {
     album.trackCount = item["tracks_count"];
+  }
+  if (typeof item["streamable"] === "boolean") {
+    album.streamable = item["streamable"];
   }
   const image = imageOf(item["image"]);
   if (image !== undefined) {
@@ -368,6 +379,9 @@ function parseTrack(item: unknown): Track | undefined {
   }
   if (typeof item["hires"] === "boolean") {
     track.hires = item["hires"];
+  }
+  if (typeof item["streamable"] === "boolean") {
+    track.streamable = item["streamable"];
   }
   return track;
 }

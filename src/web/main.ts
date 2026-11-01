@@ -19,6 +19,7 @@ import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
 import { initStatsView } from "./views/stats.js";
 import { initWordPlayView } from "./views/word-play.js";
+import { initUpgradeView } from "./views/upgrade.js";
 
 const VIEWS = [
   "home",
@@ -28,6 +29,7 @@ const VIEWS = [
   "word-play",
   "deduplicate",
   "combine",
+  "upgrade",
   "stats",
   "new-releases",
   "import-export",
@@ -76,6 +78,7 @@ initWordPlayView();
 initDeduplicateView();
 initCombineView();
 initStatsView();
+initUpgradeView();
 initImportExportView();
 initNewReleasesView();
 window.addEventListener("hashchange", route);

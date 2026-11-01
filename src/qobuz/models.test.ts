@@ -147,6 +147,25 @@ describe("parseTracks", () => {
     ]);
   });
 
+  it("reads whether a track is streamable, leaving it unset when absent", () => {
+    const json = {
+      tracks: {
+        items: [
+          { id: 1, title: "Gone", streamable: false },
+          { id: 2, title: "Here", streamable: true },
+          { id: 3, title: "Unknown" },
+          { id: 4, title: "Odd", streamable: "yes" },
+        ],
+      },
+    };
+    expect(parseTracks(json).map((t) => t.streamable)).toEqual([
+      false,
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("derives a release date from a released_at timestamp", () => {
     const json = {
       tracks: {
@@ -193,6 +212,18 @@ describe("parseAlbums", () => {
       },
       { id: "0001", title: "Discovery", artist: "Daft Punk" },
     ]);
+  });
+
+  it("reads whether an album is streamable", () => {
+    const json = {
+      albums: {
+        items: [
+          { id: "a", title: "T", artist: { name: "X" }, streamable: false },
+          { id: "b", title: "U", artist: { name: "X" } },
+        ],
+      },
+    };
+    expect(parseAlbums(json).map((a) => a.streamable)).toEqual([false, undefined]);
   });
 
   it("reads hires from a plain hires flag when present", () => {

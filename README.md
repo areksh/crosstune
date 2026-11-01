@@ -50,6 +50,9 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   and compilations, without what you already have or reissues of older
   albums. Put the ones you pick in a new playlist or your favourite albums.
   Available on the CLI and in the web UI.
+- **Upgrade & repair** -- swap tracks in your favourites or playlists for a
+  better-quality (hi-res) release of the same recording, and replace or remove
+  tracks Qobuz no longer plays. Available on the CLI and in the web UI.
 - **Import & export** -- export favourites or a playlist as JSON, CSV, plain
   text or M3U; back up your whole account (favourites and playlists) to a
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
@@ -374,6 +377,37 @@ given; as elsewhere, it is only created with `--apply` (`--public` makes it
 public).
 
 ```sh
+# Report better-quality releases and unplayable tracks in your favourites
+npm run dev -- upgrade --favourites
+
+# Check one playlist, or every playlist, and make the changes
+npm run dev -- upgrade --playlist 12345678 --apply
+npm run dev -- upgrade --all-playlists --remove-unplayable --apply
+```
+
+`upgrade` looks at each track below the best quality Qobuz streams (24-bit /
+192 kHz) and searches Qobuz by its ISRC for another release of the *same
+recording* that is streamable and of strictly higher quality (bit depth, then
+sampling rate), proposing the best. Search results count only if their ISRC
+really matches; tracks without an ISRC, or of unknown quality, are skipped and
+counted. `--allow-signature-match` also accepts a release with the same
+normalised artist and title (as the deduplicator matches), flagged as "same
+song, maybe a different recording".
+
+Tracks Qobuz marks as no longer streamable get a streamable replacement too:
+the same recording first, else the same song (flagged). With no replacement
+they are left alone, or removed with `--remove-unplayable`.
+
+Like `deduplicate`, `upgrade` only **reports** unless `--apply` is given. In
+favourites the replacement is added and the old track removed; in a playlist the
+replacement is added, and only once it is confirmed in the playlist is the old
+entry deleted and the replacement moved into its place. The move uses an
+undocumented Qobuz call; if it is refused, the replacement stays at the end of
+the playlist and the command says so. A run makes at most 600 searches
+(unplayable tracks are checked first); tracks beyond that are reported as not
+checked.
+
+```sh
 # Export favourite tracks as CSV to a file
 npm run dev -- export --favourites --out favourites.csv
 
@@ -622,6 +656,19 @@ browser.
    you do not want.
 3. In the bar at the bottom, choose *Add to* a new playlist (named, optionally
    public) or your favourite albums, and save.
+
+**Upgrade & repair:**
+
+1. Choose what to check (your favourites, all your playlists, or one
+   playlist). Untick *Only the same recording* to also accept the same song by
+   artist and title; tick *Remove unplayable tracks with no replacement* to
+   default those to removal.
+2. Check, then review two lists. *Better quality available* shows each track's
+   quality next to the replacement's ("16/44.1 -> 24/96"); untick any you want
+   to keep, and pick another release when several were found. *No longer
+   playable* offers, per track, a replacement (when one was found), "Remove
+   it" or "Leave it". Matches by artist and title only are flagged.
+3. Apply: the bar at the bottom counts the upgrades, replacements and removals.
 
 **Import & export:**
 

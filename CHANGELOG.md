@@ -73,6 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version labels by default, can accept close forms ("jumped" for "Jump"),
   avoids repeating an artist, and honours the exclude filters. Each song can be
   swapped for another match before saving.
+- Upgrade & repair, a new tool (CLI `upgrade`, and *Upgrade & repair* under
+  *Tidy up* in the web UI). For your favourites, one playlist or all your
+  playlists, it finds tracks with a better-quality release of the same
+  recording (matched by ISRC via Qobuz's track search, checked against each
+  result's ISRC) and tracks Qobuz no longer streams, proposing a streamable
+  replacement for each. Matching by normalised artist and title can be allowed
+  for upgrades (`--allow-signature-match`, or unticking *Only the same
+  recording*) and is always tried for unplayable tracks with no same-recording
+  release; such matches are flagged. The plan is reviewed (and, on the CLI,
+  only reported unless `--apply`) before anything is written; an old track is
+  removed only once its replacement was added, and in playlists the
+  replacement is moved into the old track's place (via an undocumented call;
+  if Qobuz refuses it, the replacement stays at the end and you are told).
+  Tracks now carry Qobuz's `streamable` flag.
 
 - New releases: a new tool (CLI `new-releases` and a web view under *Explore*)
   listing what your favourite artists, or a playlist's artists, have released

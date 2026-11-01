@@ -1075,6 +1075,97 @@ input[type="date"] {
   cursor: pointer;
 }
 
+/* Upgrade & repair: old -> new quality, and a per-track action for
+   unplayable tracks. */
+
+.upgrade-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 28px;
+}
+
+.upgrade-controls .field {
+  margin: 0;
+}
+
+.upgrade-controls .checkbox {
+  min-height: 44px;
+}
+
+.upgrade-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 28px;
+}
+
+.upgrade-pills {
+  grid-area: pill;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.upgrade-choice {
+  grid-area: reason;
+  justify-self: start;
+  min-height: 36px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.match-note {
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.track.upgrade-off > :not(input) {
+  opacity: 0.62;
+}
+
+.track.upgrade-broken {
+  grid-template-columns: 46px minmax(0, 1fr) minmax(0, 280px);
+  grid-template-areas: "cover text action";
+  cursor: default;
+}
+
+.upgrade-broken > select {
+  grid-area: action;
+  width: 100%;
+}
+
+.broken-icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.commit-summary {
+  margin: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.commit-summary .commit-count,
+.commit-summary .commit-note {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .track.upgrade-broken {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      "cover text"
+      "action action";
+    row-gap: 8px;
+  }
+}
+
 /* The save bar: docked to the bottom of the window while reviewing. */
 
 .commit-bar {

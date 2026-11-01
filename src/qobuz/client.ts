@@ -813,6 +813,46 @@ export class QobuzClient {
   }
 
   /**
+   * Move playlist entries (by playlist-track id) so they sit before the entry
+   * currently at 0-based `insertBefore`, keeping their relative order.
+   *
+   * UNVERIFIED: `playlist/updateTracksPosition` with `playlist_id`,
+   * `playlist_track_ids` and `insert_before` (read as a 0-based position) is
+   * inferred from the Qobuz web player and third-party API wrappers; it is not
+   * documented and has not been exercised against the live API. Callers treat
+   * it as best-effort: a failure leaves the entries where they were (e.g. at
+   * the end after an add), it never loses tracks.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in, or
+   *   `api-response` if Qobuz rejects the move.
+   */
+  async movePlaylistTracks(
+    playlistId: number,
+    playlistTrackIds: readonly number[],
+    insertBefore: number,
+  ): Promise<void> {
+    if (playlistTrackIds.length === 0) {
+      return;
+    }
+    const response = await this.#signedGet(
+      "playlistupdateTracksPosition",
+      paths.playlistUpdateTracksPosition,
+      [
+        ["playlist_id", String(playlistId)],
+        ["playlist_track_ids", playlistTrackIds.join(",")],
+        ["insert_before", String(insertBefore)],
+      ],
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/updateTracksPosition failed with HTTP ${response.status}`,
+      );
+    }
+  }
+
+  /**
    * Remove tracks from the user's favourites by track id. No-op for an empty
    * list.
    *
