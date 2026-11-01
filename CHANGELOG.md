@@ -51,6 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Import a Spotify playlist: a CSV exported with Exportify is recognised from
+  its header (any column order, extra columns, and the older "Artist Name"
+  spelling), or chosen with `--format spotify` / "Spotify (Exportify CSV)", and
+  imported into favourite tracks or a playlist. Each track is matched by its
+  ISRC first -- only results with exactly that ISRC, preferring one Qobuz can
+  stream, then the album named in the file, then the highest quality -- and
+  otherwise by its first artist and title. The import report (CLI and web) now
+  says how many entries matched by Qobuz id, by ISRC and by artist and title.
+  Any import of tracks that carry an ISRC but no Qobuz id now uses the same
+  ISRC search.
+- Export every playlist at once: `export --all-playlists --out-dir <dir>
+  [--format ...]` writes one file per playlist, named after it (unsafe
+  characters replaced, duplicate names numbered); in the web UI, "Every
+  playlist" downloads them as a single .zip.
+
 - Library stats (`stats` on the CLI, and in the web UI under a new *Explore*
   group): for your favourites, a playlist, or everything (favourites and all
   playlists, each track once), the track and artist counts and hours of music,

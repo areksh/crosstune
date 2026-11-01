@@ -35,10 +35,19 @@ import {
   type ExistingPlaylistClient,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
+import { compareQuality } from "./upgrade.js";
 
 /** The interchange formats a collection can be written to and read from. */
 export const FORMATS = ["json", "csv", "text", "m3u"] as const;
 export type Format = (typeof FORMATS)[number];
+
+/**
+ * The formats an import can read: every export format, plus `spotify` -- a CSV
+ * written by Exportify (exportify.net) from a Spotify playlist. Spotify is
+ * import-only; a plain `csv` import whose header is Exportify's is read as one.
+ */
+export const IMPORT_FORMATS = [...FORMATS, "spotify"] as const;
+export type ImportFormat = (typeof IMPORT_FORMATS)[number];
 
 /** The current backup document version, bumped if the shape changes. */
 export const BACKUP_FORMAT_VERSION = 1;
@@ -223,7 +232,10 @@ function csvEscape(field: string): string {
 export interface ParsedTrack {
   id?: number;
   title?: string;
+  /** The artist credit as displayed (several artists joined with ", "). */
   artist?: string;
+  /** Each credited artist, when the source lists them separately (Spotify). */
+  artists?: string[];
   album?: string;
   isrc?: string;
 }
@@ -253,17 +265,20 @@ export type ParsedCollection =
  * Parse `content` in `format` into items of the given `kind`.
  *
  * JSON is self-describing (the `kind` argument is only a fallback for the
- * key to read); the other formats are read as the requested kind. Blank lines
- * and unparseable rows are skipped rather than fatal.
+ * key to read); the other formats are read as the requested kind. A `csv`
+ * whose header is Exportify's is read as a Spotify export (see
+ * {@link effectiveImportFormat}). Blank lines and unparseable rows are skipped
+ * rather than fatal.
  *
- * @throws {Error} if JSON content is malformed.
+ * @throws {Error} if JSON content is malformed, or a Spotify export is read as
+ *   anything but tracks.
  */
 export function parseCollection(
   content: string,
-  format: Format,
+  format: ImportFormat,
   kind: CollectionKind,
 ): ParsedCollection {
-  switch (format) {
+  switch (effectiveImportFormat(content, format)) {
     case "json":
       return parseCollectionJson(content, kind);
     case "csv":
@@ -272,7 +287,94 @@ export function parseCollection(
       return parseCollectionText(content, kind);
     case "m3u":
       return { kind: "tracks", items: parseTracksM3u(content) };
+    case "spotify":
+      if (kind !== "tracks") {
+        throw new Error(
+          "A Spotify export holds tracks; import it into favourite tracks or a playlist",
+        );
+      }
+      return { kind: "tracks", items: parseSpotifyCsv(content) };
   }
+}
+
+/**
+ * The format `content` will actually be read as: `csv` becomes `spotify` when
+ * the header is an Exportify one; anything else is returned unchanged.
+ */
+export function effectiveImportFormat(content: string, format: ImportFormat): ImportFormat {
+  return format === "csv" && isSpotifyExport(content) ? "spotify" : format;
+}
+
+/**
+ * Exportify's column names (lower-cased) for each field, in preference order.
+ * Its header has changed over the years ("Artist Name" became "Artist Name(s)"),
+ * so columns are found by name, never by position.
+ */
+const SPOTIFY_COLUMNS = {
+  title: ["track name"],
+  artists: ["artist name(s)", "artist name", "artist names"],
+  album: ["album name"],
+  isrc: ["isrc"],
+} as const;
+
+/** Whether `content` is a CSV with Exportify's header (a track name and artist column). */
+export function isSpotifyExport(content: string): boolean {
+  const header = csvHeader(content);
+  return (
+    header.includes("track name") &&
+    SPOTIFY_COLUMNS.artists.some((column) => header.includes(column))
+  );
+}
+
+/** The first CSV row, trimmed and lower-cased, without a leading byte-order mark. */
+function csvHeader(content: string): string[] {
+  const firstLine = stripBom(content).split(/\r?\n/, 1)[0] ?? "";
+  return (parseCsv(firstLine)[0] ?? []).map((h) => h.trim().toLowerCase());
+}
+
+/** Read an Exportify CSV: one track per row, its artists split on commas. */
+function parseSpotifyCsv(content: string): ParsedTrack[] {
+  const rows = parseCsv(stripBom(content));
+  if (rows.length === 0) {
+    return [];
+  }
+  const header = rows[0]!.map((h) => h.trim().toLowerCase());
+  const column = (names: readonly string[]): number =>
+    names.map((name) => header.indexOf(name)).find((index) => index !== -1) ?? -1;
+  const at = (row: string[], index: number): string | undefined => {
+    const value = index === -1 ? undefined : row[index]?.trim();
+    return value !== undefined && value.length > 0 ? value : undefined;
+  };
+  const titleAt = column(SPOTIFY_COLUMNS.title);
+  const artistsAt = column(SPOTIFY_COLUMNS.artists);
+  const albumAt = column(SPOTIFY_COLUMNS.album);
+  const isrcAt = column(SPOTIFY_COLUMNS.isrc);
+
+  return rows
+    .slice(1)
+    .filter((row) => row.some((cell) => cell.trim().length > 0))
+    .map((row) => {
+      const item: ParsedTrack = {};
+      const title = at(row, titleAt);
+      if (title !== undefined) item.title = title;
+      const artists = (at(row, artistsAt) ?? "")
+        .split(",")
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0);
+      if (artists.length > 0) {
+        item.artist = artists.join(", ");
+        item.artists = artists;
+      }
+      const album = at(row, albumAt);
+      if (album !== undefined) item.album = album;
+      const isrc = at(row, isrcAt);
+      if (isrc !== undefined) item.isrc = isrc;
+      return item;
+    });
+}
+
+function stripBom(content: string): string {
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 }
 
 function parseCollectionJson(
@@ -304,7 +406,7 @@ function parseCollectionCsv(
   content: string,
   kind: CollectionKind,
 ): ParsedCollection {
-  const rows = parseCsv(content);
+  const rows = parseCsv(stripBom(content));
   if (rows.length === 0) {
     return emptyParsed(kind);
   }
@@ -431,10 +533,19 @@ export interface ImportResolverClient {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
 }
 
+/**
+ * How an item was matched: `id` -- the input carried its Qobuz id; `isrc` -- a
+ * search by its ISRC found the same recording; `search` -- an artist and title
+ * (or name) search, which can occasionally pick the wrong item.
+ */
+export type MatchMethod = "id" | "isrc" | "search";
+
 /** A single matched item: its display label and the Qobuz id it resolved to. */
 export interface MatchedItem {
   label: string;
   id: number | string;
+  /** How it was matched (always set by {@link resolveImport}). */
+  via?: MatchMethod;
 }
 
 /** The outcome of resolving a parsed collection to Qobuz ids. */
@@ -446,8 +557,40 @@ export interface ImportPlan {
   unmatched: string[];
 }
 
+/** How many matched items each method found, plus how many did not match. */
+export type MatchCounts = Record<MatchMethod | "unmatched", number>;
+
+/** Count a plan's matches by method (an item without `via` counts as a search). */
+export function countMatchMethods(plan: ImportPlan): MatchCounts {
+  const counts: MatchCounts = { id: 0, isrc: 0, search: 0, unmatched: plan.unmatched.length };
+  for (const item of plan.matched) {
+    counts[item.via ?? "search"] += 1;
+  }
+  return counts;
+}
+
+/**
+ * Describe how matches were found, e.g. "12 by ISRC, 3 by artist and title"
+ * (methods that found nothing are left out; empty when nothing matched).
+ */
+export function describeMatchCounts(counts: MatchCounts): string {
+  return [
+    counts.id > 0 ? `${counts.id} by Qobuz id` : undefined,
+    counts.isrc > 0 ? `${counts.isrc} by ISRC` : undefined,
+    counts.search > 0 ? `${counts.search} by artist and title` : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(", ");
+}
+
 /** How many search results to weigh when matching an item to Qobuz. */
 const IMPORT_SEARCH_LIMIT = 10;
+
+/**
+ * Results to weigh for an ISRC search. One recording is often on many releases
+ * (the album, its remasters, compilations), so this is wider than a name search.
+ */
+const ISRC_SEARCH_LIMIT = 20;
 
 /**
  * Resolve a parsed collection to Qobuz ids (phase one).
@@ -464,15 +607,15 @@ export async function resolveImport(
   const unmatched: string[] = [];
   const seen = new Set<string>();
 
-  const add = (label: string, id: number | string | undefined): void => {
-    if (id === undefined) {
+  const add = (label: string, match: Match | undefined): void => {
+    if (match === undefined) {
       unmatched.push(label);
       return;
     }
-    const key = String(id);
+    const key = String(match.id);
     if (seen.has(key)) return;
     seen.add(key);
-    matched.push({ label, id });
+    matched.push({ label, id: match.id, via: match.via });
   };
 
   // Resolve items through a bounded pool (results stay in input order), then run
@@ -486,58 +629,78 @@ export async function resolveImport(
       DEFAULT_CONCURRENCY,
       async (item) => ({
         label: trackLabel(item),
-        id: await resolveTrackId(client, item),
+        match: await resolveTrack(client, item),
       }),
     );
-    for (const { label, id } of resolved) add(label, id);
+    for (const { label, match } of resolved) add(label, match);
   } else if (parsed.kind === "albums") {
     const resolved = await mapWithConcurrency(
       parsed.items,
       DEFAULT_CONCURRENCY,
       async (item) => ({
         label: albumLabel(item),
-        id: await resolveAlbumId(client, item),
+        match: await resolveAlbum(client, item),
       }),
     );
-    for (const { label, id } of resolved) add(label, id);
+    for (const { label, match } of resolved) add(label, match);
   } else {
     const resolved = await mapWithConcurrency(
       parsed.items,
       DEFAULT_CONCURRENCY,
       async (item) => ({
         label: item.name ?? "(unknown)",
-        id: await resolveArtistId(client, item),
+        match: await resolveArtist(client, item),
       }),
     );
-    for (const { label, id } of resolved) add(label, id);
+    for (const { label, match } of resolved) add(label, match);
   }
   return { kind: parsed.kind, matched, unmatched };
 }
 
-/** Resolve one parsed track to a Qobuz track id (its own id, else a search). */
-async function resolveTrackId(
+/** A resolved Qobuz id and how it was found. */
+interface Match {
+  id: number | string;
+  via: MatchMethod;
+}
+
+/**
+ * Resolve one parsed track: its own id; else a search by its ISRC (the same
+ * recording, see {@link pickByIsrc}); else an artist and title search.
+ */
+async function resolveTrack(
   client: ImportResolverClient,
   item: ParsedTrack,
-): Promise<number | undefined> {
+): Promise<Match | undefined> {
   if (item.id !== undefined) {
-    return item.id;
+    return { id: item.id, via: "id" };
+  }
+  if (item.isrc !== undefined && normaliseIsrc(item.isrc).length > 0) {
+    const isrc = normaliseIsrc(item.isrc);
+    const byIsrc = pickByIsrc(await client.searchTracks(isrc, ISRC_SEARCH_LIMIT), isrc, item);
+    if (byIsrc !== undefined) {
+      return { id: byIsrc.id, via: "isrc" };
+    }
   }
   if (item.title === undefined) {
     return undefined;
   }
-  const query =
-    item.artist !== undefined ? `${item.artist} ${item.title}` : item.title;
+  // Search by the first credited artist and the title without its "feat." part:
+  // Qobuz keeps featured artists in the version or artist, not the title.
+  const artist = item.artists?.[0] ?? item.artist;
+  const title = withoutFeaturing(item.title);
+  const query = artist !== undefined ? `${artist} ${title}` : title;
   const candidates = await client.searchTracks(query, IMPORT_SEARCH_LIMIT);
-  return pickTrack(candidates, item)?.id;
+  const picked = pickTrack(candidates, item);
+  return picked === undefined ? undefined : { id: picked.id, via: "search" };
 }
 
 /** Resolve one parsed album to a Qobuz album id, choosing its best version. */
-async function resolveAlbumId(
+async function resolveAlbum(
   client: ImportResolverClient,
   item: ParsedAlbum,
-): Promise<string | undefined> {
+): Promise<Match | undefined> {
   if (item.id !== undefined) {
-    return item.id;
+    return { id: item.id, via: "id" };
   }
   if (item.title === undefined || item.artist === undefined) {
     return undefined;
@@ -546,18 +709,20 @@ async function resolveAlbumId(
     entries: [{ artist: item.artist, album: item.title }],
   });
   const resolved = resolvedAlbums[0];
-  return resolved === undefined
-    ? undefined
-    : selectAlbumVersion(resolved.versions, "highest-quality")?.id;
+  const id =
+    resolved === undefined
+      ? undefined
+      : selectAlbumVersion(resolved.versions, "highest-quality")?.id;
+  return id === undefined ? undefined : { id, via: "search" };
 }
 
 /** Resolve one parsed artist to a Qobuz artist id (exact name, else first hit). */
-async function resolveArtistId(
+async function resolveArtist(
   client: ImportResolverClient,
   item: ParsedArtist,
-): Promise<number | undefined> {
+): Promise<Match | undefined> {
   if (item.id !== undefined) {
-    return item.id;
+    return { id: item.id, via: "id" };
   }
   if (item.name === undefined) {
     return undefined;
@@ -565,26 +730,98 @@ async function resolveArtistId(
   const candidates = await client.searchArtists(item.name, IMPORT_SEARCH_LIMIT);
   const wanted = item.name.trim().toLowerCase();
   const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
-  return (exact ?? candidates[0])?.id;
+  const id = (exact ?? candidates[0])?.id;
+  return id === undefined ? undefined : { id, via: "search" };
+}
+
+/** ISRCs compare case-insensitively, ignoring hyphens and spaces. */
+function normaliseIsrc(isrc: string): string {
+  return isrc.replace(/[\s-]/g, "").toUpperCase();
+}
+
+/**
+ * Of the results of an ISRC search, pick the best release of that recording.
+ * Only results carrying exactly that ISRC count (a search can also return
+ * near-misses). Among them: one Qobuz can stream (an unplayable release is no
+ * use in a library), then the release whose album title matches the wanted
+ * album, then the highest quality; ties keep Qobuz's order.
+ */
+function pickByIsrc(
+  candidates: readonly Track[],
+  isrc: string,
+  want: ParsedTrack,
+): Track | undefined {
+  const wantAlbum = want.album === undefined ? undefined : normalise(want.album);
+  const albumScore = (track: Track): number => {
+    if (wantAlbum === undefined || wantAlbum.length === 0 || track.album === undefined) return 0;
+    const album = normalise(track.album);
+    if (album === wantAlbum) return 2;
+    return tokensOverlap(tokens(album), tokens(wantAlbum)) ? 1 : 0;
+  };
+  const same = candidates.filter(
+    (track) => track.isrc !== undefined && normaliseIsrc(track.isrc) === isrc,
+  );
+  return [...same].sort(
+    (a, b) =>
+      Number(b.streamable !== false) - Number(a.streamable !== false) ||
+      albumScore(b) - albumScore(a) ||
+      compareQuality(b, a),
+  )[0];
+}
+
+/**
+ * A trailing featured-artist credit in a title: "(feat. X)", "[with X]",
+ * " - feat. X". Spotify keeps these in the title; Qobuz in the version.
+ */
+const FEATURING =
+  /\s*[([]\s*(?:feat\.?|ft\.?|featuring|with)\s[^)\]]*[)\]]|\s+-\s+(?:feat\.?|ft\.?|featuring)\s.*$/gi;
+
+function withoutFeaturing(title: string): string {
+  const stripped = title.replace(FEATURING, "").trim();
+  return stripped.length > 0 ? stripped : title;
 }
 
 /**
  * Pick the search result that best matches a wanted track. An ISRC match wins
- * outright; otherwise the title must match and the artist tokens must overlap.
+ * outright; otherwise the title must match (with or without a "feat." credit,
+ * and against Qobuz's title alone or title plus version, so Spotify's
+ * "Song - Live" finds "Song" [Live]) and the artist tokens must overlap with
+ * the credit or any one credited artist. A streamable match beats one that is
+ * not.
  */
 function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | undefined {
   if (want.isrc !== undefined) {
-    const byIsrc = candidates.find((c) => c.isrc === want.isrc);
+    const isrc = normaliseIsrc(want.isrc);
+    const byIsrc = candidates.find(
+      (c) => c.isrc !== undefined && normaliseIsrc(c.isrc) === isrc,
+    );
     if (byIsrc !== undefined) return byIsrc;
   }
-  const wantTitle = normalise(want.title ?? "");
-  const wantArtist = want.artist === undefined ? undefined : tokens(want.artist);
-  return candidates.find((candidate) => {
-    if (normalise(candidate.title) !== wantTitle) return false;
-    if (wantArtist === undefined) return true;
+  const wantTitles = titleKeys(want.title ?? "");
+  const wantArtists =
+    want.artist === undefined
+      ? undefined
+      : [want.artist, ...(want.artists ?? [])].map(tokens);
+  const matches = candidates.filter((candidate) => {
+    const candidateTitles = [
+      ...titleKeys(candidate.title),
+      ...(candidate.version === undefined
+        ? []
+        : titleKeys(`${candidate.title} ${candidate.version}`)),
+    ];
+    if (!candidateTitles.some((key) => wantTitles.includes(key))) return false;
+    if (wantArtists === undefined) return true;
     if (candidate.artist === undefined) return false;
-    return tokensOverlap(wantArtist, tokens(candidate.artist));
+    const candidateArtist = tokens(candidate.artist);
+    return wantArtists.some((artist) => tokensOverlap(artist, candidateArtist));
   });
+  return matches.find((track) => track.streamable !== false) ?? matches[0];
+}
+
+/** Normalised forms a title may be compared by: as given, and without "feat.". */
+function titleKeys(title: string): string[] {
+  const keys = [normalise(title), normalise(withoutFeaturing(title))];
+  return keys.filter((key, index) => key.length > 0 && keys.indexOf(key) === index);
 }
 
 function tokens(text: string): string[] {
@@ -760,6 +997,89 @@ export async function buildBackup(
     },
     playlists: exportPlaylists,
   };
+}
+
+/** One playlist written to its own file by {@link exportAllPlaylists}. */
+export interface PlaylistFile {
+  /** A safe file name, unique within the set (see {@link playlistFilenames}). */
+  filename: string;
+  playlist: Playlist;
+  trackCount: number;
+  content: string;
+}
+
+/**
+ * Serialise every owned playlist to its own file in `format`, in playlist
+ * order. Track lists are fetched through a small concurrency pool.
+ */
+export async function exportAllPlaylists(
+  client: ExportClient,
+  format: Format,
+): Promise<PlaylistFile[]> {
+  const playlists = await client.getUserPlaylists();
+  const filenames = playlistFilenames(
+    playlists.map((playlist) => playlist.name),
+    extensionFor(format),
+  );
+  const trackLists = await mapWithConcurrency(playlists, DEFAULT_CONCURRENCY, (playlist) =>
+    client.getPlaylistTracks(playlist.id),
+  );
+  return playlists.map((playlist, index) => {
+    const items = trackLists[index]!.map(toExportTrack);
+    return {
+      filename: filenames[index]!,
+      playlist,
+      trackCount: items.length,
+      content: serializeCollection({ kind: "tracks", items }, format),
+    };
+  });
+}
+
+/** The file extension for a format (plain text is `.txt`). */
+export function extensionFor(format: Format): string {
+  return format === "text" ? "txt" : format;
+}
+
+/** Longest file name stem kept, so names stay well inside filesystem limits. */
+const MAX_FILENAME_STEM = 100;
+
+/** Device names Windows reserves, with or without an extension. */
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+
+/**
+ * Turn playlist names into safe, unique file names with `extension`.
+ *
+ * Characters not allowed in file names on common systems (`/ \ : * ? " < > |`
+ * and control characters) become `_`; leading and trailing spaces and dots are
+ * trimmed; long names are capped; an empty name becomes "playlist"; a name
+ * Windows reserves ("CON", "nul.txt") is prefixed with `_`. Repeated names --
+ * compared ignoring case, as on macOS and Windows -- get " (2)", " (3)", ...
+ */
+export function playlistFilenames(names: readonly string[], extension: string): string[] {
+  const used = new Set<string>();
+  return names.map((name) => {
+    const stem = safeStem(name);
+    let candidate = `${stem}.${extension}`;
+    for (let n = 2; used.has(candidate.toLowerCase()); n += 1) {
+      candidate = `${stem} (${n}).${extension}`;
+    }
+    used.add(candidate.toLowerCase());
+    return candidate;
+  });
+}
+
+function safeStem(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\:*?"<>|\u0000-\u001f\u007f]+/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.]+|[\s.]+$/g, "")
+    .slice(0, MAX_FILENAME_STEM)
+    .replace(/[\s.]+$/, "");
+  if (cleaned.length === 0) {
+    return "playlist";
+  }
+  return RESERVED_NAMES.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 
 // --- Backup restore --------------------------------------------------------

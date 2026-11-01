@@ -1170,6 +1170,39 @@ describe("POST /api/export", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("exports every playlist as one zip download, a file per playlist", async () => {
+    const svc = service({
+      getUserPlaylists: vi.fn(async () => [
+        { id: 3, name: "Chill/Out" },
+        { id: 4, name: "chill/out" },
+      ]),
+      getPlaylistTracks: vi.fn(async (id: number) => [
+        { id: id * 10, title: "T", artist: "A" },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/export", { source: { type: "all-playlists" }, format: "m3u" }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.file?.contentType).toBe("application/zip");
+    expect(res.file?.filename).toMatch(/^qobuz-playlists-\d{4}-\d\d-\d\d\.zip$/);
+    const bytes = res.file!.bytes;
+    // A zip starts with a local file header and names each playlist's file.
+    expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    const raw = Buffer.from(bytes).toString("latin1");
+    expect(raw).toContain("Chill_Out.m3u");
+    expect(raw).toContain("chill_out (2).m3u");
+  });
+
+  it("requires a valid format for every-playlist exports", async () => {
+    const res = await handleApi(
+      request("POST", "/api/export", { source: { type: "all-playlists" }, format: "xml" }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("POST /api/import/resolve", () => {
@@ -1190,6 +1223,40 @@ describe("POST /api/import/resolve", () => {
       kind: "tracks",
       matched: [{ label: "Portishead - Roads", id: 1 }],
     });
+  });
+
+  it("reads an Exportify CSV as a Spotify export, matching by ISRC", async () => {
+    const searchTracks = vi.fn(async (query: string) =>
+      query === "GBAAA0000001"
+        ? [{ id: 1, title: "Roads", artist: "Portishead", isrc: "GBAAA0000001" }]
+        : [],
+    );
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", {
+        format: "csv",
+        kind: "tracks",
+        content: "Track Name,Artist Name(s),Album Name,ISRC\nRoads,Portishead,Dummy,GBAAA0000001\n",
+      }),
+      deps({ service: service({ searchTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      format: "spotify",
+      matched: [{ label: "Portishead - Roads", id: 1, via: "isrc" }],
+    });
+  });
+
+  it("refuses a Spotify export for album favourites", async () => {
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", {
+        format: "spotify",
+        kind: "albums",
+        content: "Track Name,Artist Name(s)\nRoads,Portishead\n",
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: expect.stringMatching(/tracks/) });
   });
 
   it("rejects an unknown format", async () => {

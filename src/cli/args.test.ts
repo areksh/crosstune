@@ -365,6 +365,29 @@ describe("parseExportArgs", () => {
     expect(() => parseExportArgs(["--favourites", "--format", "xml"])).toThrow(/--format/);
     expect(() => parseExportArgs(["--playlist", "x"])).toThrow(/numeric id/);
   });
+
+  it("parses every playlist into an output directory", () => {
+    expect(
+      parseExportArgs(["--all-playlists", "--out-dir", "lists", "--format", "m3u"]),
+    ).toEqual({
+      source: { type: "all-playlists" },
+      format: "m3u",
+      outDir: "lists",
+    });
+  });
+
+  it("requires --out-dir with --all-playlists, and only there", () => {
+    expect(() => parseExportArgs(["--all-playlists"])).toThrow(/--out-dir/);
+    expect(() => parseExportArgs(["--all-playlists", "--out-dir", "d", "--out", "f"])).toThrow(
+      /--out-dir/,
+    );
+    expect(() => parseExportArgs(["--favourites", "--out-dir", "d"])).toThrow(/--all-playlists/);
+    expect(() => parseExportArgs(["--all-playlists", "--out-dir"])).toThrow(/--out-dir/);
+  });
+
+  it("refuses a Spotify format for export (it is import-only)", () => {
+    expect(() => parseExportArgs(["--favourites", "--format", "spotify"])).toThrow(/--format/);
+  });
 });
 
 describe("parseImportArgs", () => {
@@ -405,6 +428,16 @@ describe("parseImportArgs", () => {
 
   it("rejects more than one target", () => {
     expect(() => parseImportArgs(["--favourites", "--account", "f.json"])).toThrow(/only one/);
+  });
+
+  it("accepts the import-only spotify format", () => {
+    expect(parseImportArgs(["--new-playlist", "From Spotify", "--format", "spotify", "x.csv"])).toEqual({
+      target: { type: "playlist-new", name: "From Spotify" },
+      file: "x.csv",
+      format: "spotify",
+      isPublic: false,
+      apply: false,
+    });
   });
 });
 

@@ -1,14 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Album, Artist, Playlist, Track } from "../qobuz/index.js";
 import {
   buildBackup,
   collectCollection,
   commitImport,
+  countMatchMethods,
+  describeMatchCounts,
+  effectiveImportFormat,
+  exportAllPlaylists,
   formatFromFilename,
+  isSpotifyExport,
   looksLikeBackup,
   parseBackup,
   parseCollection,
+  playlistFilenames,
   resolveImport,
   restoreBackup,
   serializeBackup,
@@ -157,7 +163,7 @@ describe("resolveImport", () => {
       items: [{ id: 99, title: "Known" }],
     });
     expect(searched).toBe(false);
-    expect(plan.matched).toEqual([{ label: "Known", id: 99 }]);
+    expect(plan.matched).toEqual([{ label: "Known", id: 99, via: "id" }]);
   });
 
   it("resolves tracks by search and reports the rest as unmatched", async () => {
@@ -168,7 +174,7 @@ describe("resolveImport", () => {
         { title: "Nonexistent", artist: "Nobody" },
       ],
     });
-    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: 1 }]);
+    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: 1, via: "search" }]);
     expect(plan.unmatched).toEqual(["Nobody - Nonexistent"]);
   });
 
@@ -180,7 +186,7 @@ describe("resolveImport", () => {
         { id: 1, title: "Roads again" },
       ],
     });
-    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: 1 }]);
+    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: 1, via: "search" }]);
   });
 
   it("resolves an album to its highest-quality version", async () => {
@@ -188,7 +194,7 @@ describe("resolveImport", () => {
       kind: "albums",
       items: [{ title: "Dummy", artist: "Portishead" }],
     });
-    expect(plan.matched).toEqual([{ label: "Portishead - Dummy", id: "alb-hi" }]);
+    expect(plan.matched).toEqual([{ label: "Portishead - Dummy", id: "alb-hi", via: "search" }]);
   });
 
   it("resolves an artist by exact name", async () => {
@@ -196,7 +202,7 @@ describe("resolveImport", () => {
       kind: "artists",
       items: [{ name: "Portishead" }],
     });
-    expect(plan.matched).toEqual([{ label: "Portishead", id: 55 }]);
+    expect(plan.matched).toEqual([{ label: "Portishead", id: 55, via: "search" }]);
   });
 });
 
@@ -373,5 +379,290 @@ describe("format helpers", () => {
     expect(looksLikeBackup('{"favourites":{}}')).toBe(true);
     expect(looksLikeBackup('{"tracks":[]}')).toBe(false);
     expect(looksLikeBackup("nope")).toBe(false);
+  });
+});
+
+// --- Spotify (Exportify) import ---------------------------------------------
+
+const EXPORTIFY_HEADER =
+  '"Track URI","Track Name","Artist URI(s)","Artist Name(s)","Album URI","Album Name",' +
+  '"Album Release Date","Disc Number","Track Number","Track Duration (ms)","Explicit",' +
+  '"Popularity","ISRC","Added By","Added At"';
+
+function exportifyRow(fields: {
+  name: string;
+  artists: string;
+  album: string;
+  isrc: string;
+}): string {
+  return [
+    "spotify:track:abc",
+    fields.name,
+    "spotify:artist:x",
+    fields.artists,
+    "spotify:album:y",
+    fields.album,
+    "2013-05-17",
+    "1",
+    "8",
+    "369626",
+    "false",
+    "80",
+    fields.isrc,
+    "spotify:user:me",
+    "2020-01-01T00:00:00Z",
+  ]
+    .map((field) => `"${field.replace(/"/g, '""')}"`)
+    .join(",");
+}
+
+const exportify = [
+  EXPORTIFY_HEADER,
+  exportifyRow({
+    name: "Get Lucky (feat. Pharrell Williams & Nile Rodgers)",
+    artists: "Daft Punk,Pharrell Williams,Nile Rodgers",
+    album: "Random Access Memories",
+    isrc: "USQX91300108",
+  }),
+  exportifyRow({
+    name: "Bohemian Rhapsody - Remastered 2011",
+    artists: "Queen",
+    album: "A Night At The Opera (2011 Remaster)",
+    isrc: "GBUM71029604",
+  }),
+].join("\n");
+
+describe("Spotify (Exportify) parsing", () => {
+  it("recognises an Exportify header", () => {
+    expect(isSpotifyExport(exportify)).toBe(true);
+    expect(isSpotifyExport(serializeCollection(tracks, "csv"))).toBe(false);
+    expect(isSpotifyExport("Portishead - Roads")).toBe(false);
+  });
+
+  it("reads Exportify rows into tracks, splitting the artists on commas", () => {
+    const parsed = parseCollection(exportify, "spotify", "tracks");
+    expect(parsed).toEqual({
+      kind: "tracks",
+      items: [
+        {
+          title: "Get Lucky (feat. Pharrell Williams & Nile Rodgers)",
+          artist: "Daft Punk, Pharrell Williams, Nile Rodgers",
+          artists: ["Daft Punk", "Pharrell Williams", "Nile Rodgers"],
+          album: "Random Access Memories",
+          isrc: "USQX91300108",
+        },
+        {
+          title: "Bohemian Rhapsody - Remastered 2011",
+          artist: "Queen",
+          artists: ["Queen"],
+          album: "A Night At The Opera (2011 Remaster)",
+          isrc: "GBUM71029604",
+        },
+      ],
+    });
+  });
+
+  it("auto-detects an Exportify file given as plain CSV", () => {
+    expect(effectiveImportFormat(exportify, "csv")).toBe("spotify");
+    expect(effectiveImportFormat(serializeCollection(tracks, "csv"), "csv")).toBe("csv");
+    expect(effectiveImportFormat(exportify, "text")).toBe("text");
+    expect(parseCollection(exportify, "csv", "tracks")).toEqual(
+      parseCollection(exportify, "spotify", "tracks"),
+    );
+  });
+
+  it("tolerates other column orders, extra columns, the older 'Artist Name' and a BOM", () => {
+    const older =
+      "﻿Spotify ID,Popularity,Artist Name,Track Name,Album Name,Duration (ms),Genres\r\n" +
+      "4uLU6hMCjMI75M1A2tKUQC,50,Portishead,Roads,Dummy,305000,trip hop\r\n";
+    expect(isSpotifyExport(older)).toBe(true);
+    expect(parseCollection(older, "spotify", "tracks").items).toEqual([
+      { title: "Roads", artist: "Portishead", artists: ["Portishead"], album: "Dummy" },
+    ]);
+  });
+
+  it("refuses to read a Spotify export as albums or artists", () => {
+    expect(() => parseCollection(exportify, "spotify", "albums")).toThrow(/tracks/);
+  });
+});
+
+describe("resolveImport by ISRC", () => {
+  const getLucky = (over: Partial<Track>): Track => ({
+    id: 0,
+    title: "Get Lucky",
+    artist: "Daft Punk",
+    isrc: "USQX91300108",
+    ...over,
+  });
+
+  it("searches by ISRC, keeps only exact ISRCs, and prefers the named album then quality", async () => {
+    const searchTracks = vi.fn(async (query: string) =>
+      query === "USQX91300108"
+        ? [
+            getLucky({ id: 1, album: "Summer Hits", bitDepth: 24, samplingRate: 96 }),
+            getLucky({ id: 2, album: "Random Access Memories", bitDepth: 16, samplingRate: 44.1 }),
+            getLucky({ id: 3, album: "Random Access Memories", bitDepth: 24, samplingRate: 88.2 }),
+            getLucky({ id: 4, isrc: "USQX91300999", album: "Random Access Memories", bitDepth: 24, samplingRate: 192 }),
+          ]
+        : [],
+    );
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [
+        {
+          title: "Get Lucky (feat. Pharrell Williams)",
+          artist: "Daft Punk, Pharrell Williams",
+          artists: ["Daft Punk", "Pharrell Williams"],
+          album: "Random Access Memories",
+          isrc: "usqx-91300108",
+        },
+      ],
+    });
+    expect(searchTracks).toHaveBeenCalledWith("USQX91300108", expect.any(Number));
+    expect(plan.matched).toEqual([
+      { label: "Daft Punk, Pharrell Williams - Get Lucky (feat. Pharrell Williams)", id: 3, via: "isrc" },
+    ]);
+  });
+
+  it("prefers a streamable release over a better one Qobuz no longer streams", async () => {
+    const searchTracks = vi.fn(async () => [
+      getLucky({ id: 1, album: "Random Access Memories", bitDepth: 24, samplingRate: 192, streamable: false }),
+      getLucky({ id: 2, album: "Compilation", bitDepth: 16, samplingRate: 44.1, streamable: true }),
+    ]);
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Get Lucky", isrc: "USQX91300108", album: "Random Access Memories" }],
+    });
+    expect(plan.matched[0]).toMatchObject({ id: 2, via: "isrc" });
+  });
+
+  it("falls back to an artist and title search when the ISRC finds nothing", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> =>
+      query === "Daft Punk Get Lucky"
+        ? [
+            { id: 8, title: "Get Lucky", artist: "Someone Else" },
+            { id: 9, title: "Get Lucky", version: "feat. Pharrell Williams", artist: "Daft Punk feat. Pharrell Williams" },
+          ]
+        : [],
+    );
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [
+        {
+          title: "Get Lucky (feat. Pharrell Williams)",
+          artist: "Daft Punk, Pharrell Williams",
+          artists: ["Daft Punk", "Pharrell Williams"],
+          isrc: "XX0000000000",
+        },
+      ],
+    });
+    expect(searchTracks.mock.calls.map((call) => call[0])).toEqual([
+      "XX0000000000",
+      "Daft Punk Get Lucky",
+    ]);
+    expect(plan.matched).toEqual([
+      { label: "Daft Punk, Pharrell Williams - Get Lucky (feat. Pharrell Williams)", id: 9, via: "search" },
+    ]);
+  });
+
+  it("matches a Spotify ' - Live' title against Qobuz's title plus version", async () => {
+    const searchTracks = vi.fn(async (): Promise<Track[]> => [
+      { id: 5, title: "Roads", artist: "Portishead" },
+      { id: 6, title: "Roads", version: "Live", artist: "Portishead" },
+    ]);
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Roads - Live", artist: "Portishead" }],
+    });
+    expect(plan.matched[0]).toMatchObject({ id: 6, via: "search" });
+  });
+
+  it("counts how each entry was matched", () => {
+    expect(
+      countMatchMethods({
+        kind: "tracks",
+        matched: [
+          { label: "a", id: 1, via: "isrc" },
+          { label: "b", id: 2, via: "isrc" },
+          { label: "c", id: 3, via: "search" },
+          { label: "d", id: 4, via: "id" },
+          { label: "e", id: 5 },
+        ],
+        unmatched: ["f"],
+      }),
+    ).toEqual({ id: 1, isrc: 2, search: 2, unmatched: 1 }); // "e" has no via: a search
+  });
+
+  it("describes the counts for a report, leaving out methods that found nothing", () => {
+    expect(describeMatchCounts({ id: 0, isrc: 12, search: 3, unmatched: 2 })).toBe(
+      "12 by ISRC, 3 by artist and title",
+    );
+    expect(describeMatchCounts({ id: 4, isrc: 0, search: 0, unmatched: 0 })).toBe("4 by Qobuz id");
+    expect(describeMatchCounts({ id: 0, isrc: 0, search: 0, unmatched: 5 })).toBe("");
+  });
+});
+
+// --- Exporting every playlist -------------------------------------------------
+
+describe("playlistFilenames", () => {
+  it("sanitises characters that are unsafe in file names", () => {
+    expect(playlistFilenames(['AC/DC: "Best" <of>?*|\\'], "csv")).toEqual([
+      "AC_DC_ _Best_ _of_.csv",
+    ]);
+  });
+
+  it("de-duplicates names case-insensitively, keeping the extension", () => {
+    expect(playlistFilenames(["Chill", "chill", "Chill", "Chill (2)"], "m3u")).toEqual([
+      "Chill.m3u",
+      "chill (2).m3u",
+      "Chill (3).m3u",
+      "Chill (2) (2).m3u",
+    ]);
+  });
+
+  it("names empty, dot-only and reserved names safely", () => {
+    expect(playlistFilenames(["", "  ..  ", "CON", "nul.txt", "Mix. "], "txt")).toEqual([
+      "playlist.txt",
+      "playlist (2).txt",
+      "_CON.txt",
+      "_nul.txt.txt",
+      "Mix.txt",
+    ]);
+  });
+
+  it("caps very long names", () => {
+    const [name] = playlistFilenames(["x".repeat(300)], "json");
+    expect(name).toBe(`${"x".repeat(100)}.json`);
+  });
+});
+
+describe("exportAllPlaylists", () => {
+  it("serialises every playlist to its own file, in playlist order", async () => {
+    const client: ExportClient = {
+      ...fakeExportClient(),
+      getUserPlaylists: async () => [
+        { id: 7, name: "Chill" },
+        { id: 8, name: "chill" },
+      ],
+      getPlaylistTracks: async (id) =>
+        id === 7
+          ? [{ id: 2, title: "Glory Box", artist: "Portishead" }]
+          : [{ id: 3, title: "Roads", artist: "Portishead" }],
+    };
+    const files = await exportAllPlaylists(client, "text");
+    expect(files).toEqual([
+      {
+        filename: "Chill.txt",
+        playlist: { id: 7, name: "Chill" },
+        trackCount: 1,
+        content: "Portishead - Glory Box\n",
+      },
+      {
+        filename: "chill (2).txt",
+        playlist: { id: 8, name: "chill" },
+        trackCount: 1,
+        content: "Portishead - Roads\n",
+      },
+    ]);
   });
 });

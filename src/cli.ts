@@ -71,13 +71,19 @@
  *       otherwise --format chooses the format (inferred from --out's extension
  *       when omitted, else JSON).
  *
+ *   qobuz-helper export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]
+ *       Export every playlist to its own file in <dir> (JSON unless --format),
+ *       named after the playlist (made safe and unique).
+ *
  *   qobuz-helper import (--favourites | --favourite-albums | --favourite-artists
  *       | --playlist <id> | --new-playlist <name> | --account)
- *       [--format <json|csv|text|m3u>] [--public] [--apply] <file>
+ *       [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>
  *       Import a file into favourites or a playlist, resolving each entry to a
- *       Qobuz item (by its id when present, else by search). --account restores
- *       a full backup. Without --apply it resolves and reports only; the format
- *       is inferred from the filename when --format is omitted.
+ *       Qobuz item (by its id when present, else by its ISRC, else by search).
+ *       --account restores a full backup. Without --apply it resolves and
+ *       reports only; the format is inferred from the filename when --format is
+ *       omitted, and a CSV exported from Spotify by Exportify is recognised
+ *       from its header.
  *
  *   qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] \
  *       [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] \
@@ -140,7 +146,8 @@
  * controls how much is logged; it may appear anywhere in the arguments.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   extractLogLevel,
@@ -205,6 +212,10 @@ import {
   buildBackup,
   collectCollection,
   commitImport,
+  countMatchMethods,
+  describeMatchCounts,
+  effectiveImportFormat,
+  exportAllPlaylists,
   formatFromFilename,
   looksLikeBackup,
   parseBackup,
@@ -215,6 +226,7 @@ import {
   serializeCollection,
   type CollectionKind,
   type Format,
+  type ImportFormat,
   type ImportTarget,
 } from "./features/import-export.js";
 import {
@@ -910,6 +922,10 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
  */
 function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
   const args = parseExportArgs(argv);
+  const { source } = args;
+  if (source.type === "all-playlists") {
+    return planExportAllPlaylists(args.format ?? "json", args.outDir!);
+  }
   const toFile = args.out !== undefined;
   const note = (message: string): void => {
     if (toFile) logger.info(message);
@@ -917,7 +933,7 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
 
   return async (client: QobuzClient): Promise<void> => {
     let content: string;
-    if (args.source.type === "account") {
+    if (source.type === "account") {
       note("Backing up your account...");
       const backup = await buildBackup(client);
       content = serializeBackup(backup);
@@ -929,7 +945,7 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
       );
     } else {
       const format = resolveExportFormat(args);
-      const collection = await collectCollection(client, args.source);
+      const collection = await collectCollection(client, source);
       if (format === "m3u" && collection.kind !== "tracks") {
         throw new Error("M3U can only hold tracks; choose another format");
       }
@@ -943,6 +959,23 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
     } else {
       process.stdout.write(content);
     }
+  };
+}
+
+/** Executor for `export --all-playlists`: one file per playlist in `outDir`. */
+function planExportAllPlaylists(
+  format: Format,
+  outDir: string,
+): (client: QobuzClient) => Promise<void> {
+  return async (client: QobuzClient): Promise<void> => {
+    logger.info(`Exporting every playlist as ${format}...`);
+    const files = await exportAllPlaylists(client, format);
+    mkdirSync(outDir, { recursive: true });
+    for (const file of files) {
+      writeFileSync(join(outDir, file.filename), file.content);
+      logger.info(`  ${file.filename} (${file.trackCount} tracks)`);
+    }
+    logger.info(`Wrote ${files.length} playlist file${files.length === 1 ? "" : "s"} to ${outDir}`);
   };
 }
 
@@ -978,15 +1011,22 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
     );
   }
 
-  const format = resolveImportFormat(args);
+  const format = effectiveImportFormat(content, resolveImportFormat(args));
   const kind = kindForTarget(args.target);
   const target = toImportTarget(args.target, args.isPublic);
+  // Parse before signing in, so a malformed file fails fast.
+  const parsed = parseCollection(content, format, kind);
 
   return async (client: QobuzClient): Promise<void> => {
-    const parsed = parseCollection(content, format, kind);
+    if (format === "spotify") {
+      logger.info("Reading a Spotify (Exportify) export: matching by ISRC first.");
+    }
     logger.info(`Resolving ${parsed.items.length} ${kind} from ${args.file}...`);
     const plan = await resolveImport(client, parsed);
-    logger.info(`  matched ${plan.matched.length} of ${parsed.items.length}`);
+    const how = describeMatchCounts(countMatchMethods(plan));
+    logger.info(
+      `  matched ${plan.matched.length} of ${parsed.items.length}${how.length > 0 ? ` (${how})` : ""}`,
+    );
     if (plan.unmatched.length > 0) {
       logger.warn(`not found: ${plan.unmatched.join(", ")}`);
     }
@@ -1042,14 +1082,14 @@ function planRestore(
 }
 
 /** Format for an import: an explicit `--format`, else inferred from the filename. */
-function resolveImportFormat(args: ImportArgs): Format {
+function resolveImportFormat(args: ImportArgs): ImportFormat {
   if (args.format !== undefined) {
     return args.format;
   }
   const inferred = formatFromFilename(args.file);
   if (inferred === undefined) {
     throw new Error(
-      "Could not infer the format from the filename; pass --format <json|csv|text|m3u>",
+      "Could not infer the format from the filename; pass --format <json|csv|text|m3u|spotify>",
     );
   }
   return inferred;
@@ -1372,7 +1412,8 @@ function printUsage(): void {
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
       "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
-      "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
+      "  qobuz-helper export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]",
+      "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
       "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
       '  qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
@@ -1392,8 +1433,8 @@ function printUsage(): void {
       "deduplicate reports only unless --apply is given.",
       "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
       "upgrade reports only unless --apply is given; it matches by ISRC unless --allow-signature-match is given.",
-      "export writes to stdout unless --out is given; --account writes a full JSON backup.",
-      "import resolves and reports only unless --apply is given; --account restores a backup.",
+      "export writes to stdout unless --out is given; --account writes a full JSON backup; --all-playlists writes one file per playlist into --out-dir.",
+      "import resolves and reports only unless --apply is given; --account restores a backup; a Spotify playlist exported with Exportify (CSV) is recognised and matched by ISRC first.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',
       'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
       "word-play reports only unless --apply is given; --split defaults to fewest, --max-span to 6 (1-8), --count to 25 (1-100); the playlist is named after the text unless --name is given.",

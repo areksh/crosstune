@@ -105,6 +105,35 @@ export async function api<T>(
   return data as T;
 }
 
+/**
+ * Call a local API route that answers with a file (such as a zip), returning
+ * its bytes and the filename from the attachment header; an error response is
+ * JSON as usual and throws.
+ */
+export async function apiDownload(
+  method: string,
+  path: string,
+  body: unknown,
+  fallbackName: string,
+): Promise<{ filename: string; blob: Blob }> {
+  const response = await fetch(path, {
+    method,
+    headers: { "X-Qobuz-Nonce": nonce, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const data: unknown = await response.json().catch(() => ({}));
+    throw new Error(
+      isRecord(data) && typeof data["error"] === "string"
+        ? data["error"]
+        : `HTTP ${response.status}`,
+    );
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+  return { filename, blob: await response.blob() };
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

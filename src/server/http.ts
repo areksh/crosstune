@@ -3,8 +3,9 @@
  *
  * This is the I/O boundary: it binds a socket on 127.0.0.1, reads each request
  * off the wire into the plain {@link ApiRequest} that {@link handleApi}
- * consumes, writes the JSON response back, and serves the static frontend from
- * `dist/web`. The routing, validation and security all live in the pure
+ * consumes, writes the response back (JSON, or a file download), and serves
+ * the static frontend from `dist/web`. The routing, validation and security
+ * all live in the pure
  * `router`/`security` modules, which are unit-tested; only the wiring here is
  * not.
  *
@@ -145,7 +146,7 @@ async function handle(
         port: address,
       },
     );
-    sendJson(res, response);
+    sendResponse(res, response);
     return;
   }
 
@@ -181,9 +182,43 @@ function serveStatic(
   res.end(content);
 }
 
-function sendJson(res: http.ServerResponse, response: ApiResponse): void {
-  res.writeHead(response.status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(response.body));
+/** An API response as it goes on the wire: status, headers and payload. */
+export interface EncodedResponse {
+  status: number;
+  headers: Record<string, string>;
+  payload: string | Uint8Array;
+}
+
+/**
+ * Encode an API response: its body as JSON, or -- for a download -- the file's
+ * bytes with an attachment header. The filename in that header is reduced to
+ * printable ASCII without quotes, so it can never break out of the header.
+ */
+export function encodeResponse(response: ApiResponse): EncodedResponse {
+  const { file } = response;
+  if (file === undefined) {
+    return {
+      status: response.status,
+      headers: { "Content-Type": "application/json" },
+      payload: JSON.stringify(response.body),
+    };
+  }
+  const filename = file.filename.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  return {
+    status: response.status,
+    headers: {
+      "Content-Type": file.contentType,
+      "Content-Length": String(file.bytes.byteLength),
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+    payload: file.bytes,
+  };
+}
+
+function sendResponse(res: http.ServerResponse, response: ApiResponse): void {
+  const { status, headers, payload } = encodeResponse(response);
+  res.writeHead(status, headers);
+  res.end(payload);
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {

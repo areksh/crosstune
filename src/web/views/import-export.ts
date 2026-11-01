@@ -9,7 +9,7 @@
  * matching and writing all live in the tested server modules.
  */
 
-import { api, type Playlist } from "../api.js";
+import { api, apiDownload, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 
 interface ExportResponse {
@@ -19,8 +19,10 @@ interface ExportResponse {
 
 interface ImportPlan {
   kind: "tracks" | "albums" | "artists";
-  matched: Array<{ label: string; id: number | string }>;
+  matched: Array<{ label: string; id: number | string; via?: "id" | "isrc" | "search" }>;
   unmatched: string[];
+  /** The format the server read (a CSV may turn out to be a Spotify export). */
+  format?: string;
 }
 
 type ImportTarget =
@@ -94,10 +96,19 @@ async function onExport(): Promise<void> {
     if (source.type !== "account") {
       body["format"] = format;
     }
-    const result = await api<ExportResponse>("POST", "/api/export", body);
-    download(result.filename, result.content);
+    let filename: string;
+    if (source.type === "all-playlists") {
+      // The server zips one file per playlist; save the archive as it comes.
+      const result = await apiDownload("POST", "/api/export", body, "qobuz-playlists.zip");
+      filename = result.filename;
+      download(filename, result.blob);
+    } else {
+      const result = await api<ExportResponse>("POST", "/api/export", body);
+      filename = result.filename;
+      download(filename, result.content);
+    }
     resultNode.hidden = false;
-    resultNode.textContent = `Downloaded ${result.filename}.`;
+    resultNode.textContent = `Downloaded ${filename}.`;
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {
@@ -107,7 +118,14 @@ async function onExport(): Promise<void> {
 }
 
 function exportSourceBody():
-  | { type: "favourite-tracks" | "favourite-albums" | "favourite-artists" | "account" }
+  | {
+      type:
+        | "favourite-tracks"
+        | "favourite-albums"
+        | "favourite-artists"
+        | "account"
+        | "all-playlists";
+    }
   | { type: "playlist"; playlistId: number }
   | undefined {
   const source = exportSource();
@@ -121,9 +139,12 @@ function exportSourceBody():
   return { type: source as "favourite-tracks" };
 }
 
-/** Trigger a browser download of text content. */
-function download(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "application/octet-stream" });
+/** Trigger a browser download of text content or a received file. */
+function download(filename: string, content: string | Blob): void {
+  const blob =
+    typeof content === "string"
+      ? new Blob([content], { type: "application/octet-stream" })
+      : content;
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -209,7 +230,7 @@ async function onResolve(): Promise<void> {
       content,
       kind: kindForTarget(target),
     });
-    currentPlan = plan;
+    currentPlan = { kind: plan.kind, matched: plan.matched, unmatched: plan.unmatched };
     renderPlan(plan);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -224,8 +245,20 @@ function renderPlan(plan: ImportPlan): void {
   el("ie-import-preview").hidden = false;
   setStep("import-steps", 1);
   const total = plan.matched.length + plan.unmatched.length;
+  // How the matches were found: an id or ISRC is exact; a search can misfire.
+  const byMethod = { id: 0, isrc: 0, search: 0 };
+  for (const item of plan.matched) {
+    byMethod[item.via ?? "search"] += 1;
+  }
+  const how = [
+    byMethod.id > 0 ? `${byMethod.id} by Qobuz id` : undefined,
+    byMethod.isrc > 0 ? `${byMethod.isrc} by ISRC` : undefined,
+    byMethod.search > 0 ? `${byMethod.search} by artist and title` : undefined,
+  ].filter((part) => part !== undefined);
+  const source = plan.format === "spotify" ? "Read as a Spotify (Exportify) export. " : "";
   el("ie-import-summary").textContent =
-    `Matched ${plan.matched.length} of ${total} ${plan.kind}.`;
+    `${source}Matched ${plan.matched.length} of ${total} ${plan.kind}` +
+    (how.length > 0 ? ` (${how.join(", ")}).` : ".");
 
   const unmatched = el("ie-import-unmatched");
   if (plan.unmatched.length === 0) {

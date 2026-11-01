@@ -54,6 +54,9 @@ import {
   buildBackup,
   collectCollection,
   commitImport,
+  effectiveImportFormat,
+  exportAllPlaylists,
+  extensionFor,
   parseBackup,
   parseCollection,
   resolveImport,
@@ -61,13 +64,16 @@ import {
   serializeBackup,
   serializeCollection,
   FORMATS,
+  IMPORT_FORMATS,
   type CollectionKind,
   type ExportSource,
   type Format,
+  type ImportFormat,
   type ImportPlan,
   type ImportTarget,
   type MatchedItem,
 } from "../features/import-export.js";
+import { createZip } from "../features/zip.js";
 import {
   describeEstimate,
   estimateSimilar,
@@ -188,6 +194,15 @@ export interface ApiRequest {
 export interface ApiResponse {
   status: number;
   body: unknown;
+  /** A file to download; when set it is sent as raw bytes instead of `body`. */
+  file?: DownloadFile;
+}
+
+/** A binary response body the browser saves as a file. */
+export interface DownloadFile {
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
 }
 
 /** Bounds for how many top tracks may be requested per artist. */
@@ -552,7 +567,8 @@ async function upgradeCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse>
 
 /**
  * Export a collection or a full-account backup, returning the serialised text
- * and a suggested filename for the browser to download.
+ * and a suggested filename for the browser to download. Every playlist at once
+ * comes back as a zip download (a file per playlist) instead.
  */
 async function exportData(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const input = parseExportInput(body);
@@ -560,6 +576,18 @@ async function exportData(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     return { status: 400, body: { error: input.error } };
   }
   const { source, format } = input.value;
+  if (source.type === "all-playlists") {
+    const files = await exportAllPlaylists(deps.service, format);
+    const encoder = new TextEncoder();
+    const bytes = createZip(
+      files.map((file) => ({ name: file.filename, data: encoder.encode(file.content) })),
+    );
+    return {
+      status: 200,
+      body: undefined,
+      file: { filename: `qobuz-playlists-${today()}.zip`, contentType: "application/zip", bytes },
+    };
+  }
   if (source.type === "account") {
     const backup = await buildBackup(deps.service);
     return {
@@ -589,9 +617,12 @@ async function importResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse>
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
+  const { content, kind } = input.value;
+  // Report the format actually read (a CSV may turn out to be a Spotify export).
+  const format = effectiveImportFormat(content, input.value.format);
   let parsed;
   try {
-    parsed = parseCollection(input.value.content, input.value.format, input.value.kind);
+    parsed = parseCollection(content, format, kind);
   } catch (error) {
     return {
       status: 400,
@@ -599,7 +630,7 @@ async function importResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse>
     };
   }
   const plan = await resolveImport(deps.service, parsed);
-  return { status: 200, body: plan };
+  return { status: 200, body: { ...plan, format } };
 }
 
 /** Write a resolved import plan to its destination (phase two). */
@@ -1208,7 +1239,7 @@ function isPositiveInteger(value: unknown): value is number {
 }
 
 interface ExportInput {
-  source: ExportSource;
+  source: ExportSource | { type: "all-playlists" };
   format: Format;
 }
 
@@ -1231,7 +1262,7 @@ function parseExportInput(body: unknown): Parsed<ExportInput> {
   return { ok: true, value: { source: source.value, format } };
 }
 
-function parseExportSource(value: unknown): Parsed<ExportSource> {
+function parseExportSource(value: unknown): Parsed<ExportInput["source"]> {
   if (!isRecord(value)) {
     return { ok: false, error: "source is required" };
   }
@@ -1240,6 +1271,7 @@ function parseExportSource(value: unknown): Parsed<ExportSource> {
     case "favourite-albums":
     case "favourite-artists":
     case "account":
+    case "all-playlists":
       return { ok: true, value: { type: value["type"] } };
     case "playlist":
       if (typeof value["playlistId"] !== "number") {
@@ -1250,13 +1282,13 @@ function parseExportSource(value: unknown): Parsed<ExportSource> {
       return {
         ok: false,
         error:
-          "source.type must be favourite-tracks, favourite-albums, favourite-artists, playlist or account",
+          "source.type must be favourite-tracks, favourite-albums, favourite-artists, playlist, all-playlists or account",
       };
   }
 }
 
 interface ImportResolveInput {
-  format: Format;
+  format: ImportFormat;
   content: string;
   kind: CollectionKind;
 }
@@ -1265,8 +1297,8 @@ function parseImportResolveInput(body: unknown): Parsed<ImportResolveInput> {
   if (!isRecord(body)) {
     return { ok: false, error: "expected a JSON object" };
   }
-  if (!isFormat(body["format"])) {
-    return { ok: false, error: `format must be one of: ${FORMATS.join(", ")}` };
+  if (!isImportFormat(body["format"])) {
+    return { ok: false, error: `format must be one of: ${IMPORT_FORMATS.join(", ")}` };
   }
   if (typeof body["content"] !== "string" || body["content"].trim().length === 0) {
     return { ok: false, error: "content must be a non-empty string" };
@@ -1369,9 +1401,8 @@ function isFormat(value: unknown): value is Format {
   return typeof value === "string" && (FORMATS as readonly string[]).includes(value);
 }
 
-/** File extension for a format (text is `.txt`). */
-function extensionFor(format: Format): string {
-  return format === "text" ? "txt" : format;
+function isImportFormat(value: unknown): value is ImportFormat {
+  return typeof value === "string" && (IMPORT_FORMATS as readonly string[]).includes(value);
 }
 
 /** A stable, human-readable base filename for an exported collection. */

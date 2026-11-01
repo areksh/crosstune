@@ -1368,6 +1368,10 @@
                 </label>
               </div>
               <label class="radio">
+                <input type="radio" name="ie-source" value="all-playlists" />
+                Every playlist (zip, one file each)
+              </label>
+              <label class="radio">
                 <input type="radio" name="ie-source" value="account" />
                 Whole account (backup)
               </label>
@@ -1452,8 +1456,14 @@
                 <option value="csv">CSV</option>
                 <option value="text">Plain text</option>
                 <option value="m3u">M3U</option>
+                <option value="spotify">Spotify (Exportify CSV)</option>
               </select>
             </label>
+            <p class="hint">
+              A Spotify playlist exported with Exportify is recognised from its
+              CSV header; tracks are matched by ISRC first, then by artist and
+              title.
+            </p>
             <label class="field">
               <span>Paste content, or choose a file</span>
               <textarea

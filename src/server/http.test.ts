@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contentTypeFor, extractHeaders, injectNonce } from "./http.js";
+import { contentTypeFor, encodeResponse, extractHeaders, injectNonce } from "./http.js";
 
 describe("contentTypeFor", () => {
   it("maps allowed static paths to content types", () => {
@@ -47,5 +47,39 @@ describe("extractHeaders", () => {
 
   it("collapses array-valued headers to the first value", () => {
     expect(extractHeaders({ host: ["a", "b"] }).host).toBe("a");
+  });
+});
+
+describe("encodeResponse", () => {
+  it("sends an API body as JSON", () => {
+    const encoded = encodeResponse({ status: 400, body: { error: "nope" } });
+    expect(encoded.status).toBe(400);
+    expect(encoded.headers).toEqual({ "Content-Type": "application/json" });
+    expect(encoded.payload).toBe('{"error":"nope"}');
+  });
+
+  it("sends a download as raw bytes with an attachment filename", () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x05, 0x06]);
+    const encoded = encodeResponse({
+      status: 200,
+      body: undefined,
+      file: { filename: "qobuz-playlists-2026-11-01.zip", contentType: "application/zip", bytes },
+    });
+    expect(encoded.status).toBe(200);
+    expect(encoded.headers).toEqual({
+      "Content-Type": "application/zip",
+      "Content-Length": "4",
+      "Content-Disposition": 'attachment; filename="qobuz-playlists-2026-11-01.zip"',
+    });
+    expect(encoded.payload).toBe(bytes);
+  });
+
+  it("keeps the attachment header safe for any filename", () => {
+    const encoded = encodeResponse({
+      status: 200,
+      body: undefined,
+      file: { filename: 'a"b\r\nc é.zip', contentType: "application/zip", bytes: new Uint8Array() },
+    });
+    expect(encoded.headers["Content-Disposition"]).toBe('attachment; filename="a_b__c _.zip"');
   });
 });

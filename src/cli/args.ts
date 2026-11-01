@@ -14,7 +14,12 @@ import {
 } from "../features/combine.js";
 import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
 import { DEFAULT_DISCOGRAPHY_INCLUDE, parseIncludeList } from "../features/discography.js";
-import { FORMATS, type Format } from "../features/import-export.js";
+import {
+  FORMATS,
+  IMPORT_FORMATS,
+  type Format,
+  type ImportFormat,
+} from "../features/import-export.js";
 import {
   DEFAULT_NEW_RELEASE_INCLUDE,
   isIsoDate,
@@ -475,7 +480,8 @@ export type ExportSourceArg =
   | { type: "favourite-albums" }
   | { type: "favourite-artists" }
   | { type: "playlist"; playlistId: number }
-  | { type: "account" };
+  | { type: "account" }
+  | { type: "all-playlists" };
 
 export interface ExportArgs {
   source: ExportSourceArg;
@@ -483,22 +489,28 @@ export interface ExportArgs {
   format?: Format;
   /** Output file; undefined writes to stdout. */
   out?: string;
+  /** Output directory for `--all-playlists` (one file per playlist). */
+  outDir?: string;
 }
 
 /**
  * Parse the arguments for the `export` command.
  *
  * Exactly one source is required: `--favourites`, `--favourite-albums`,
- * `--favourite-artists`, `--playlist <id>`, or `--account` (a full backup).
+ * `--favourite-artists`, `--playlist <id>`, `--account` (a full backup), or
+ * `--all-playlists` (each playlist to its own file).
  * `--format <json|csv|text|m3u>` chooses the format (a backup is always JSON);
- * `--out <file>` writes to a file instead of stdout.
+ * `--out <file>` writes to a file instead of stdout; `--all-playlists` needs
+ * `--out-dir <dir>` instead.
  *
- * @throws {Error} if no source, more than one source, or an invalid format is given.
+ * @throws {Error} if no source, more than one source, or an invalid format is
+ *   given, or `--out-dir` is missing with `--all-playlists` or given without it.
  */
 export function parseExportArgs(argv: readonly string[]): ExportArgs {
   const sources: ExportSourceArg[] = [];
   let format: Format | undefined;
   let out: string | undefined;
+  let outDir: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -518,6 +530,18 @@ export function parseExportArgs(argv: readonly string[]): ExportArgs {
       case "--account":
         sources.push({ type: "account" });
         break;
+      case "--all-playlists":
+        sources.push({ type: "all-playlists" });
+        break;
+      case "--out-dir": {
+        const raw = argv[i + 1];
+        i += 1;
+        if (raw === undefined || raw.length === 0) {
+          throw new Error("--out-dir requires a directory");
+        }
+        outDir = raw;
+        break;
+      }
       case "--playlist": {
         const raw = argv[i + 1];
         i += 1;
@@ -550,13 +574,25 @@ export function parseExportArgs(argv: readonly string[]): ExportArgs {
 
   if (sources.length === 0) {
     throw new Error(
-      "A source is required: --favourites, --favourite-albums, --favourite-artists, --playlist <id>, or --account",
+      "A source is required: --favourites, --favourite-albums, --favourite-artists, --playlist <id>, --all-playlists, or --account",
     );
   }
   if (sources.length > 1) {
     throw new Error("Give only one export source");
   }
-  return { source: sources[0]!, ...(format !== undefined && { format }), ...(out !== undefined && { out }) };
+  const source = sources[0]!;
+  if (source.type === "all-playlists" && (outDir === undefined || out !== undefined)) {
+    throw new Error("--all-playlists writes one file per playlist: give --out-dir <dir> (not --out)");
+  }
+  if (source.type !== "all-playlists" && outDir !== undefined) {
+    throw new Error("--out-dir is only for --all-playlists; use --out <file>");
+  }
+  return {
+    source,
+    ...(format !== undefined && { format }),
+    ...(out !== undefined && { out }),
+    ...(outDir !== undefined && { outDir }),
+  };
 }
 
 /** Where the `import` command should write the resolved items. */
@@ -573,7 +609,7 @@ export interface ImportArgs {
   /** Path to the file to import. */
   file: string;
   /** Chosen input format; undefined lets the caller infer it from the filename. */
-  format?: Format;
+  format?: ImportFormat;
   /** Whether a new playlist should be public. */
   isPublic: boolean;
   /** Whether to actually write (otherwise resolve and report only). */
@@ -586,7 +622,8 @@ export interface ImportArgs {
  * Exactly one target is required: `--favourites`, `--favourite-albums`,
  * `--favourite-artists`, `--playlist <id>` (an existing playlist), or
  * `--new-playlist <name>`. One positional file argument is required.
- * `--format` overrides the format inferred from the filename; `--public` marks
+ * `--format` (one of the export formats, or `spotify` for an Exportify CSV)
+ * overrides the format inferred from the filename; `--public` marks
  * a new playlist public; `--apply` performs the write (otherwise it is a dry run).
  *
  * @throws {Error} if the target, the file, or a given format is missing/invalid.
@@ -594,7 +631,7 @@ export interface ImportArgs {
 export function parseImportArgs(argv: readonly string[]): ImportArgs {
   const targets: ImportTargetArg[] = [];
   const files: string[] = [];
-  let format: Format | undefined;
+  let format: ImportFormat | undefined;
   let isPublic = false;
   let apply = false;
 
@@ -638,9 +675,9 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
       case "--format": {
         const raw = argv[i + 1];
         i += 1;
-        if (!isFormat(raw)) {
+        if (!isImportFormat(raw)) {
           throw new Error(
-            `--format must be one of: ${FORMATS.join(", ")} (got "${raw}")`,
+            `--format must be one of: ${IMPORT_FORMATS.join(", ")} (got "${raw}")`,
           );
         }
         format = raw;
@@ -684,6 +721,10 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
 
 function isFormat(value: string | undefined): value is Format {
   return value !== undefined && (FORMATS as readonly string[]).includes(value);
+}
+
+function isImportFormat(value: string | undefined): value is ImportFormat {
+  return value !== undefined && (IMPORT_FORMATS as readonly string[]).includes(value);
 }
 
 /**

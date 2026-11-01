@@ -54,10 +54,12 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 - **Upgrade & repair** -- swap tracks in your favourites or playlists for a
   better-quality (hi-res) release of the same recording, and replace or remove
   tracks Qobuz no longer plays. Available on the CLI and in the web UI.
-- **Import & export** -- export favourites or a playlist as JSON, CSV, plain
-  text or M3U; back up your whole account (favourites and playlists) to a
-  lossless JSON file; and import a list back in, matching each entry to Qobuz by
-  its id or by search. Available on the CLI and in the web UI.
+- **Import & export** -- export favourites, a playlist, or every playlist
+  (a file each) as JSON, CSV, plain text or M3U; back up your whole account
+  (favourites and playlists) to a lossless JSON file; and import a list back in
+  -- including a Spotify playlist exported with Exportify -- matching each entry
+  to Qobuz by its id, its ISRC, or by search. Available on the CLI and in the
+  web UI.
 
 The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
@@ -442,17 +444,23 @@ npm run dev -- export --playlist 12345678 --out mix.m3u
 # Back up your whole account (favourites and playlists) to a JSON file
 npm run dev -- export --account --out qobuz-backup.json
 
+# Every playlist to its own CSV file in ./playlists
+npm run dev -- export --all-playlists --out-dir playlists --format csv
+
 # Without --out the content goes to stdout; pair it with --loglevel warn so
 # sign-in progress does not end up in the piped file
 npm run dev -- --loglevel warn export --playlist 12345678 --format m3u > mix.m3u
 ```
 
 `export` sources are `--favourites`, `--favourite-albums`, `--favourite-artists`,
-`--playlist <id>`, or `--account` (a full backup). `--format` is one of `json`,
-`csv`, `text` or `m3u` (inferred from `--out`'s extension when omitted, else
-`json`); a backup is always JSON. CSV and plain text carry a single collection;
-M3U carries tracks only; JSON is lossless and the only format for a whole-account
-backup.
+`--playlist <id>`, `--all-playlists`, or `--account` (a full backup). `--format`
+is one of `json`, `csv`, `text` or `m3u` (inferred from `--out`'s extension when
+omitted, else `json`); a backup is always JSON. CSV and plain text carry a single
+collection; M3U carries tracks only; JSON is lossless and the only format for a
+whole-account backup. `--all-playlists` needs `--out-dir <dir>` (created if
+missing) and writes one file per playlist, named after it: characters that are
+not allowed in file names become `_`, and playlists with the same name get
+" (2)", " (3)", ...
 
 ```sh
 # Preview importing a hand-written track list into favourites (dry run)
@@ -464,6 +472,9 @@ npm run dev -- import --favourites tracks.txt --apply
 # Import a CSV into a new playlist
 npm run dev -- import --new-playlist "From CSV" songs.csv --apply
 
+# Import a Spotify playlist exported with Exportify (recognised from its header)
+npm run dev -- import --new-playlist "From Spotify" "My Spotify Playlist.csv"
+
 # Restore a whole-account backup
 npm run dev -- import --account qobuz-backup.json --apply
 ```
@@ -471,10 +482,23 @@ npm run dev -- import --account qobuz-backup.json --apply
 `import` targets are `--favourites`, `--favourite-albums`, `--favourite-artists`,
 `--playlist <id>` (an existing playlist), `--new-playlist <name>`, or `--account`
 (restore a backup). The format is inferred from the filename unless `--format` is
-given. Each entry is resolved to a Qobuz item by its id when the file carries one
-(JSON always does; CSV and M3U can), otherwise by searching and best-matching;
-entries that match nothing are reported. Like `deduplicate`, `import` only
-resolves and **reports** unless `--apply` is given.
+given (`json`, `csv`, `text`, `m3u`, or `spotify`). Each entry is resolved to a
+Qobuz item by its id when the file carries one (JSON always does; CSV and M3U
+can); else, for a track with an ISRC, by searching Qobuz for that ISRC (the same
+recording); otherwise by searching for the artist and title and best-matching.
+The report says how many matched each way; entries that match nothing are
+listed. Like `deduplicate`, `import` only resolves and **reports** unless
+`--apply` is given.
+
+**From Spotify:** export the playlist with [Exportify](https://exportify.net)
+and import the CSV into favourite tracks or a playlist. Its header ("Track
+Name", "Artist Name(s)", "Album Name", "ISRC", ...) is recognised whatever the
+column order, so `--format spotify` is only needed when the file does not end in
+`.csv`. Each track is matched by its ISRC first -- preferring a release Qobuz
+can stream, then the album named in the file, then the highest quality -- and,
+when the ISRC is missing or not on Qobuz, by its first artist and title (a
+"feat." credit in the title is ignored, and "Song - Live" matches Qobuz's
+"Song" in its Live version).
 
 ```sh
 # What your favourite artists released in the last 30 days (report only)
@@ -702,11 +726,14 @@ browser.
 **Import & export:**
 
 1. *Export:* choose a source (favourite tracks, albums or artists, a playlist,
-   or your whole account) and a format, then download the file. A whole-account
-   backup is always JSON.
+   every playlist, or your whole account) and a format, then download the file.
+   A whole-account backup is always JSON; every playlist downloads as one .zip
+   with a file per playlist.
 2. *Import:* choose a destination (favourites or a playlist, or restore a
-   backup), paste or upload the content, and preview: the matched entries are
-   counted and any that could not be resolved are listed.
+   backup), paste or upload the content (a Spotify CSV from Exportify too), and
+   preview: the matched entries are counted, with how they were matched (by
+   Qobuz id, ISRC, or artist and title), and any that could not be resolved
+   are listed.
 3. Commit to add the matched items (or restore the backup).
 
 The browser only ever talks to the local server, which owns the Qobuz session;
