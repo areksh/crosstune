@@ -103,6 +103,14 @@ import {
   type WordPlaySource,
 } from "../features/word-play.js";
 import { resolveDiscography } from "../features/discography.js";
+import {
+  commitNewReleases,
+  DEFAULT_NEW_RELEASE_INCLUDE,
+  findNewReleases,
+  isIsoDate,
+  type ArtistSource,
+  type NewReleasesTarget,
+} from "../features/new-releases.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -215,6 +223,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/resolve-discography") {
     return resolveDiscographyRoute(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/new-releases") {
+    return newReleases(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/new-releases/commit") {
+    return commitNewReleasesRoute(req.body, deps);
   }
   if (req.method === "POST" && req.path === "/api/similar/estimate") {
     return estimateSimilarRun(req.body);
@@ -1539,4 +1553,120 @@ function parseReleaseTypes(
     };
   }
   return { ok: true, value: [...new Set(raw as ReleaseType[])] };
+}
+
+// --- New releases ------------------------------------------------------------
+
+/** The most releases one commit takes. */
+const MAX_COMMIT_RELEASES = 500;
+
+/**
+ * Find recent releases of the user's artists, without writing anything.
+ * Body: `{ source: { type: "favourites" } | { type: "playlist", playlistId },
+ * since?: "YYYY-MM-DD", include?: ReleaseType[], filter? }`.
+ */
+async function newReleases(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (!isRecord(body)) {
+    return { status: 400, body: { error: "expected a JSON object" } };
+  }
+  const source = parseArtistSource(body["source"]);
+  if (!source.ok) {
+    return { status: 400, body: { error: source.error } };
+  }
+  const since = body["since"];
+  if (since !== undefined && (typeof since !== "string" || !isIsoDate(since))) {
+    return { status: 400, body: { error: "since must be a date as YYYY-MM-DD" } };
+  }
+  const include = parseReleaseTypes(body["include"], DEFAULT_NEW_RELEASE_INCLUDE);
+  if (!include.ok) {
+    return { status: 400, body: { error: include.error } };
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return { status: 400, body: { error: filter.error } };
+  }
+  const plan = await findNewReleases(deps.service, {
+    source: source.value,
+    include: include.value,
+    filter: filter.value,
+    ...(since !== undefined && { since }),
+  });
+  return { status: 200, body: plan };
+}
+
+/**
+ * Put chosen releases in a new playlist or the favourite albums.
+ * Body: `{ albumIds: string[], target: { type: "playlist", name, isPublic? } |
+ * { type: "favourite-albums" }, filter? }`.
+ */
+async function commitNewReleasesRoute(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (!isRecord(body)) {
+    return { status: 400, body: { error: "expected a JSON object" } };
+  }
+  const raw = body["albumIds"];
+  if (
+    !Array.isArray(raw) ||
+    raw.length === 0 ||
+    !raw.every((id) => typeof id === "string" && id.length > 0)
+  ) {
+    return { status: 400, body: { error: "albumIds must be a non-empty array of album ids" } };
+  }
+  if (raw.length > MAX_COMMIT_RELEASES) {
+    return {
+      status: 400,
+      body: { error: `at most ${MAX_COMMIT_RELEASES} releases per request` },
+    };
+  }
+  const target = parseNewReleasesTarget(body["target"]);
+  if (!target.ok) {
+    return { status: 400, body: { error: target.error } };
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return { status: 400, body: { error: filter.error } };
+  }
+  const result = await commitNewReleases(deps.service, {
+    albumIds: raw as string[],
+    target: target.value,
+    filter: filter.value,
+  });
+  return { status: 200, body: result };
+}
+
+function parseArtistSource(value: unknown): Parsed<ArtistSource> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "source is required" };
+  }
+  if (value["type"] === "favourites") {
+    return { ok: true, value: { type: "favourites" } };
+  }
+  if (value["type"] === "playlist") {
+    const playlistId = value["playlistId"];
+    if (typeof playlistId !== "number" || !Number.isInteger(playlistId) || playlistId <= 0) {
+      return { ok: false, error: "source.playlistId must be a playlist id" };
+    }
+    return { ok: true, value: { type: "playlist", playlistId } };
+  }
+  return { ok: false, error: "source.type must be favourites or playlist" };
+}
+
+function parseNewReleasesTarget(value: unknown): Parsed<NewReleasesTarget> {
+  if (!isRecord(value)) {
+    return { ok: false, error: "target is required" };
+  }
+  if (value["type"] === "favourite-albums") {
+    return { ok: true, value: { type: "favourite-albums" } };
+  }
+  if (value["type"] === "playlist") {
+    const name = typeof value["name"] === "string" ? value["name"].trim() : "";
+    if (name.length === 0) {
+      return { ok: false, error: "a playlist name is required" };
+    }
+    const isPublic = value["isPublic"] ?? false;
+    if (typeof isPublic !== "boolean") {
+      return { ok: false, error: "target.isPublic must be a boolean" };
+    }
+    return { ok: true, value: { type: "playlist", name, isPublic } };
+  }
+  return { ok: false, error: "target.type must be playlist or favourite-albums" };
 }

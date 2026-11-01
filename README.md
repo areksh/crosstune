@@ -45,6 +45,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   split, tracks by decade, and your most-saved artists and albums. Any decade
   (or top artist, in the web UI) becomes a playlist in one step. Available on
   the CLI and in the web UI.
+- **New releases** -- what your favourite artists (or a playlist's artists)
+  have released lately: albums, EPs and singles, and optionally live albums
+  and compilations, without what you already have or reissues of older
+  albums. Put the ones you pick in a new playlist or your favourite albums.
+  Available on the CLI and in the web UI.
 - **Import & export** -- export favourites or a playlist as JSON, CSV, plain
   text or M3U; back up your whole account (favourites and playlists) to a
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
@@ -412,6 +417,38 @@ given. Each entry is resolved to a Qobuz item by its id when the file carries on
 entries that match nothing are reported. Like `deduplicate`, `import` only
 resolves and **reports** unless `--apply` is given.
 
+```sh
+# What your favourite artists released in the last 30 days (report only)
+npm run dev -- new-releases
+
+# Since a date, from a playlist's artists, live albums too
+npm run dev -- new-releases --since 2026-10-01 --playlist 123456 --include albums,eps,live
+
+# Put the last two weeks' releases in a new playlist, or in your favourite albums
+npm run dev -- new-releases --days 14 --name "Fresh" --apply
+npm run dev -- new-releases --days 14 --favourite-albums --apply
+```
+
+Options for `new-releases`: `--since <YYYY-MM-DD>` or `--days N` (the window,
+up to today; default the last 30 days), `--playlist <id>` (that playlist's
+artists, most frequent first, instead of your favourite artists), `--include`
+(comma-separated `albums`, `eps`, `live`, `compilations`; default
+`albums,eps`), `--exclude-artist <name>` (that artist is not checked),
+`--exclude-album <term>` (matching releases are not listed) and
+`--exclude-track <term>` (left out of a new playlist), and a destination:
+`--name <name>` (a new playlist, with `--public` to make it public) or
+`--favourite-albums`. It lists the releases newest first and, like `import`,
+only **reports** unless `--apply` is given with a destination. A new playlist
+takes each release's tracks in album order, release after release as listed.
+Hidden from the list: releases already among your favourite albums (any
+edition), and reissues of older albums -- a release whose version or title
+says "Remastered", "Anniversary", "Expanded", "Reissue" or "Legacy Edition", or
+an album the artist first released before the window. Editions of one new album
+(standard and deluxe, CD and hi-res) are listed once, the best quality. At most
+200 artists are checked per run (the rest are reported as skipped). The
+releases come from `artist/getReleasesList`, an endpoint inferred from the Qobuz
+web player that has not been verified against the live API.
+
 If the browser does not open automatically, the CLI prints the URL to visit.
 
 #### Logging
@@ -570,6 +607,21 @@ browser.
    the share of the tracks they make up.
 3. Press *Playlist* next to a decade or an artist, check the suggested name
    (e.g. "Favourites: 1990s"), and create the playlist.
+
+**New releases:**
+
+1. Choose whose releases to look at (your favourite artists, or the artists in
+   one of your playlists), the date to look back to (30 days ago by default)
+   and which kinds to include (albums and EPs/singles by default; live albums
+   and compilations too if you tick them). Optionally open *Filters* to leave
+   out artists, releases or tracks by term.
+2. Find new releases: a sentence sums up what was found and what was hidden
+   (releases already in your favourite albums, and reissues or remasters of
+   older albums), then each release is a card -- cover, artist, title, kind,
+   track count, date and quality badge -- newest first, all ticked. Untick any
+   you do not want.
+3. In the bar at the bottom, choose *Add to* a new playlist (named, optionally
+   public) or your favourite albums, and save.
 
 **Import & export:**
 

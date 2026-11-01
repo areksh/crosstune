@@ -7,6 +7,7 @@ import {
   parseDedupeArgs,
   parseExportArgs,
   parseImportArgs,
+  parseNewReleasesArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
@@ -765,5 +766,70 @@ describe("parseWordPlayArgs", () => {
     [["--exact", "x", "positional"], /Unknown argument/],
   ])("rejects %j", (argv, error) => {
     expect(() => parseWordPlayArgs(argv)).toThrow(error);
+  });
+});
+
+describe("parseNewReleasesArgs", () => {
+  it("defaults to favourite artists, the default window, albums and EPs, report only", () => {
+    expect(parseNewReleasesArgs([])).toEqual({
+      source: { type: "favourites" },
+      include: ["album", "ep-single"],
+      apply: false,
+    });
+  });
+
+  it("parses the window, source, kinds and filters", () => {
+    expect(
+      parseNewReleasesArgs([
+        "--since",
+        "2026-10-01",
+        "--playlist",
+        "123",
+        "--include",
+        "albums,live",
+        "--exclude-artist",
+        "Drake",
+      ]),
+    ).toEqual({
+      source: { type: "playlist", playlistId: 123 },
+      since: "2026-10-01",
+      include: ["album", "live"],
+      apply: false,
+      filter: { excludeTracks: [], excludeAlbums: [], excludeArtists: ["Drake"] },
+    });
+    expect(parseNewReleasesArgs(["--days", "7"]).days).toBe(7);
+  });
+
+  it("parses a destination, written only with --apply", () => {
+    expect(parseNewReleasesArgs(["--name", "Fresh", "--public"])).toMatchObject({
+      target: { type: "playlist", name: "Fresh", isPublic: true },
+      apply: false,
+    });
+    expect(parseNewReleasesArgs(["--favourite-albums", "--apply"])).toMatchObject({
+      target: { type: "favourite-albums" },
+      apply: true,
+    });
+    expect(parseNewReleasesArgs(["--favorite-albums"]).target).toEqual({
+      type: "favourite-albums",
+    });
+  });
+
+  it("rejects invalid or conflicting options", () => {
+    const cases: Array<[string[], RegExp]> = [
+      [["--since", "2026-13-01"], /--since/],
+      [["--since"], /--since/],
+      [["--days", "0"], /--days/],
+      [["--since", "2026-10-01", "--days", "3"], /only one of/],
+      [["--playlist", "abc"], /--playlist/],
+      [["--include", "bootlegs"], /bootlegs/],
+      [["--name"], /--name/],
+      [["--name", "x", "--favourite-albums"], /one destination/],
+      [["--public"], /--public/],
+      [["--apply"], /destination/],
+      [["--frobnicate"], /Unknown argument/],
+    ];
+    for (const [argv, message] of cases) {
+      expect(() => parseNewReleasesArgs(argv)).toThrow(message);
+    }
   });
 });

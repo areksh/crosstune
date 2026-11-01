@@ -38,6 +38,7 @@
           <div class="nav-group">
             <span class="nav-label">Explore</span>
             <a class="nav-link" data-view="stats" href="#/stats">Library stats</a>
+            <a class="nav-link" data-view="new-releases" href="#/new-releases">New releases</a>
           </div>
           <div class="nav-group">
             <span class="nav-label">Your data</span>
@@ -125,6 +126,13 @@
                 <span class="tool-desc">
                   Your favourites or a playlist by quality, decade and artist,
                   with a playlist of any decade a click away.
+                </span>
+              </a>
+              <a class="tool-link" href="#/new-releases">
+                <span class="tool-name">New releases</span>
+                <span class="tool-desc">
+                  What your favourite artists, or a playlist's, have released
+                  lately, into a playlist or your favourite albums.
                 </span>
               </a>
             </section>
@@ -1082,6 +1090,135 @@
               <button id="stats-commit" type="button">Create playlist</button>
               <p id="stats-commit-error" class="error" hidden></p>
               <p id="stats-commit-result" class="result" hidden></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- New releases -->
+        <section id="view-new-releases" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>New releases</h1>
+              <p class="lede">What your artists have released lately.</p>
+            </div>
+          </header>
+
+          <section class="panel">
+            <div class="release-inputs">
+              <label class="field">
+                <span>Artists</span>
+                <select id="releases-source">
+                  <option value="favourites">My favourite artists</option>
+                  <option value="playlist">Artists in a playlist</option>
+                </select>
+              </label>
+              <label id="releases-playlist-field" class="field" hidden>
+                <span>Playlist</span>
+                <select id="releases-playlist">
+                  <option value="">Loading...</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Released since</span>
+                <input id="releases-since" type="date" />
+              </label>
+              <fieldset class="choice-group choice-row">
+                <legend>Include</legend>
+                <label class="checkbox">
+                  <input type="checkbox" name="releases-include" value="album" checked />
+                  Albums
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="releases-include" value="ep-single" checked />
+                  EPs and singles
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="releases-include" value="live" />
+                  Live
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="releases-include" value="compilation" />
+                  Compilations
+                </label>
+              </fieldset>
+            </div>
+            <details class="filters">
+              <summary>Filters</summary>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Exclude artists (one per line)</span>
+                  <textarea
+                    id="releases-exclude-artists"
+                    rows="3"
+                    placeholder="Drake&#10;bjork&#10;/^the /"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude releases matching (one per line)</span>
+                  <textarea
+                    id="releases-exclude-albums"
+                    rows="3"
+                    placeholder="christmas&#10;/remix(es)?/"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude tracks matching (one per line)</span>
+                  <textarea
+                    id="releases-exclude-tracks"
+                    rows="3"
+                    placeholder="instrumental&#10;radio edit"
+                  ></textarea>
+                </label>
+              </div>
+              <p class="hint">
+                Excluded artists are not checked at all. Releases matching a
+                release term are not listed. Tracks matching a track term are
+                left out of a new playlist. Terms match whole words, ignoring
+                case; wrap one in slashes for a regular expression.
+              </p>
+            </details>
+            <p class="hint">
+              Releases already in your favourite albums are hidden, and so are
+              reissues and remasters of older albums: a release labelled
+              "Remastered", "Anniversary", "Expanded" or the like, or one the
+              artist first released before this date.
+            </p>
+            <div class="actions">
+              <button id="find-releases" type="button">Find new releases</button>
+            </div>
+            <p id="find-releases-error" class="error" hidden></p>
+          </section>
+
+          <section id="releases-review" class="review" hidden>
+            <p id="releases-summary" class="release-summary" aria-live="polite"></p>
+            <div id="releases-notes" class="info" hidden></div>
+            <div id="releases-failed" class="warning" hidden></div>
+            <div id="release-grid" class="release-grid"></div>
+
+            <div id="releases-commit-bar" class="commit-bar">
+              <p id="releases-selected-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <label class="field field-inline">
+                  <span>Add to</span>
+                  <select id="releases-target">
+                    <option value="playlist">A new playlist</option>
+                    <option value="favourite-albums">Favourite albums</option>
+                  </select>
+                </label>
+                <div id="releases-new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="releases-playlist-name" type="text" placeholder="New releases" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="releases-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+              </div>
+              <button id="commit-releases" type="button">Create playlist</button>
+              <p id="commit-releases-error" class="error" hidden></p>
+              <p id="commit-releases-result" class="result" hidden></p>
             </div>
           </section>
         </section>

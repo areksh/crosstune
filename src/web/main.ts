@@ -14,6 +14,7 @@ import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
 import { initImportExportView } from "./views/import-export.js";
+import { initNewReleasesView } from "./views/new-releases.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
 import { initStatsView } from "./views/stats.js";
@@ -28,6 +29,7 @@ const VIEWS = [
   "deduplicate",
   "combine",
   "stats",
+  "new-releases",
   "import-export",
 ] as const;
 type View = (typeof VIEWS)[number];
@@ -75,6 +77,7 @@ initDeduplicateView();
 initCombineView();
 initStatsView();
 initImportExportView();
+initNewReleasesView();
 window.addEventListener("hashchange", route);
 route();
 void loadSession();

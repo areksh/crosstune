@@ -112,6 +112,15 @@
  *       a playlist) titles whose first letters spell a word or run A to Z.
  *       Reports the plan only unless --apply is given.
  *
+ *   qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] \
+ *       [--include albums,eps,live,compilations] [filters] \
+ *       [--name "<name>" [--public] --apply | --favourite-albums --apply]
+ *       List what your favourite artists (or a playlist's artists) released
+ *       lately: by default albums, EPs and singles from the last 30 days,
+ *       without releases already in your favourite albums or reissues of older
+ *       albums. With --apply, put them in a new playlist (--name) or add them
+ *       to your favourite albums; otherwise it only reports.
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -128,6 +137,7 @@ import {
   parseDedupeArgs,
   parseExportArgs,
   parseImportArgs,
+  parseNewReleasesArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
@@ -209,6 +219,12 @@ import {
   type WordPlaySplit,
 } from "./features/word-play.js";
 import { buildPlaylistFromDiscography } from "./features/discography.js";
+import {
+  commitNewReleases,
+  daysBefore,
+  DEFAULT_WINDOW_DAYS,
+  findNewReleases,
+} from "./features/new-releases.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -283,6 +299,11 @@ async function main(): Promise<void> {
     }
     case "import": {
       const plan = planImport(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "new-releases": {
+      const plan = planNewReleases(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -1009,6 +1030,91 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
   };
 }
 
+/**
+ * Validate the new-releases command's arguments up front, returning an
+ * executor that reports the new releases and, with --apply, writes them.
+ */
+function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const parsed = parseNewReleasesArgs(argv);
+  const filter = parsed.filter === undefined ? undefined : compileTrackFilter(parsed.filter);
+
+  return async (client: QobuzClient): Promise<void> => {
+    const now = new Date();
+    const since = parsed.since ?? daysBefore(now, parsed.days ?? DEFAULT_WINDOW_DAYS);
+    logger.info(
+      `Looking for releases since ${since} by ${parsed.source.type === "favourites" ? "your favourite artists" : "the playlist's artists"}...`,
+    );
+    const plan = await findNewReleases(client, {
+      source: parsed.source,
+      since,
+      now,
+      include: parsed.include,
+      ...(filter !== undefined && { filter }),
+    });
+
+    const artists = new Set(plan.releases.map((release) => release.artist)).size;
+    logger.info(
+      `\n${plan.releases.length} release${plan.releases.length === 1 ? "" : "s"} from ${artists} artist${artists === 1 ? "" : "s"} since ${plan.since}:`,
+    );
+    for (const release of plan.releases) {
+      const version = release.version === undefined ? "" : ` [${release.version}]`;
+      const details = [
+        release.releaseType,
+        release.trackCount === undefined ? undefined : `${release.trackCount} tracks`,
+        release.bitDepth === undefined || release.samplingRate === undefined
+          ? undefined
+          : `${release.bitDepth}/${release.samplingRate}`,
+      ].filter((part) => part !== undefined);
+      logger.info(
+        `  ${release.releaseDate ?? "?"}  ${release.artist} - ${release.title}${version} (${details.join(", ")})`,
+      );
+    }
+    const { favourites, reissues } = plan.hidden;
+    if (favourites + reissues > 0) {
+      logger.info(
+        `  (hidden: ${favourites} already in your favourite albums, ${reissues} reissues of older albums)`,
+      );
+    }
+    if (plan.capped) {
+      logger.warn(
+        `checked only the first ${plan.checkedArtists} of ${plan.totalArtists} artists`,
+      );
+    }
+    if (plan.excludedArtists.length > 0) {
+      logger.info(`  (left out: ${plan.excludedArtists.join(", ")})`);
+    }
+    if (plan.failedArtists.length > 0) {
+      logger.warn(`could not fetch releases for: ${plan.failedArtists.join(", ")}`);
+    }
+
+    const { target } = parsed;
+    if (target === undefined || plan.releases.length === 0) {
+      return;
+    }
+    const where =
+      target.type === "playlist" ? `a new playlist "${target.name}"` : "your favourite albums";
+    if (!parsed.apply) {
+      logger.info(`\n(dry run -- pass --apply to add these releases to ${where})`);
+      return;
+    }
+    const result = await commitNewReleases(client, {
+      albumIds: plan.releases.map((release) => release.id),
+      target,
+      ...(filter !== undefined && { filter }),
+    });
+    if (result.type === "favourite-albums") {
+      logger.info(`\nAdded ${result.added} releases to your favourite albums.`);
+      return;
+    }
+    logger.info(
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks${excludedNote(result.excludedCount)}.`,
+    );
+    if (result.failedAlbumIds.length > 0) {
+      logger.warn(`could not fetch tracks for releases: ${result.failedAlbumIds.join(", ")}`);
+    }
+  };
+}
+
 /** Read lines from piped stdin (one per line, trimmed); empty when stdin is a TTY. */
 function readLinesFromStdin(): string[] {
   if (process.stdin.isTTY) {
@@ -1132,6 +1238,7 @@ function printUsage(): void {
       '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
+      '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
@@ -1151,6 +1258,7 @@ function printUsage(): void {
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
       "deduplicate reports only unless --apply is given.",
+      "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",
       "import resolves and reports only unless --apply is given; --account restores a backup.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',

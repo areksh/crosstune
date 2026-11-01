@@ -73,6 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version labels by default, can accept close forms ("jumped" for "Jump"),
   avoids repeating an artist, and honours the exclude filters. Each song can be
   swapped for another match before saving.
+
+- New releases: a new tool (CLI `new-releases` and a web view under *Explore*)
+  listing what your favourite artists, or a playlist's artists, have released
+  since a date (default the last 30 days): albums and EPs/singles by default,
+  live albums and compilations on request, newest first. Releases already in
+  your favourite albums are hidden, as are reissues of older albums (a
+  "Remastered", "Anniversary", "Expanded" or similar label, or an album the
+  artist released before the window); editions of one new album are shown
+  once. Pick the ones you want and put them in a new playlist or your
+  favourite albums (the CLI reports only unless `--apply` is given with
+  `--name` or `--favourite-albums`). Excluded artists are not checked; at most
+  200 artists are checked per run. Uses the same unverified
+  `artist/getReleasesList` endpoint as the discography mode.
+
 - Playlist from albums can start from an artist's discography instead of a
   list of albums: CLI `--discography "<artist>"` with `--include
   albums,eps,live,compilations` (default studio albums) and `--all-versions`,

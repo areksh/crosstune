@@ -1410,3 +1410,114 @@ describe("POST /api/resolve-discography", () => {
     }
   });
 });
+
+describe("POST /api/new-releases", () => {
+  const recent = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
+  const svc = () =>
+    service({
+      getFavoriteArtists: vi.fn(async () => [{ id: 1, name: "Tricky" }]),
+      getArtistReleases: vi.fn(async () => ({
+        releases: [
+          { id: "ep", title: "Hell EP", artist: "Tricky", artistId: 1, releaseType: "ep-single", releaseDate: recent },
+          { id: "live", title: "Live", artist: "Tricky", artistId: 1, releaseType: "live", releaseDate: recent },
+          { id: "old", title: "Maxinquaye", artist: "Tricky", artistId: 1, releaseType: "album", releaseDate: "1995-02-20" },
+        ] as Release[],
+        truncated: false,
+      })),
+    });
+
+  it("finds the recent releases of favourite artists (default window and kinds)", async () => {
+    const res = await handleApi(
+      request("POST", "/api/new-releases", { source: { type: "favourites" } }),
+      deps({ service: svc() }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      releases: [{ id: "ep" }],
+      checkedArtists: 1,
+      capped: false,
+      hidden: { favourites: 0, reissues: 0 },
+    });
+  });
+
+  it("takes a playlist source, a start date and kinds", async () => {
+    const service_ = svc();
+    service_.getPlaylistTracks = vi.fn(async () => [
+      { id: 5, title: "x", artistId: 1, artist: "Tricky" },
+    ]);
+    const res = await handleApi(
+      request("POST", "/api/new-releases", {
+        source: { type: "playlist", playlistId: 9 },
+        since: "1990-01-01",
+        include: ["album", "live"],
+      }),
+      deps({ service: service_ }),
+    );
+    const body = res.body as { releases: { id: string }[]; since: string };
+    expect(body.since).toBe("1990-01-01");
+    expect(body.releases.map((r) => r.id)).toEqual(["live", "old"]);
+    expect(service_.getPlaylistTracks).toHaveBeenCalledWith(9);
+  });
+
+  it("validates its input", async () => {
+    for (const body of [
+      {},
+      { source: { type: "radio" } },
+      { source: { type: "playlist", playlistId: -1 } },
+      { source: { type: "favourites" }, since: "last week" },
+      { source: { type: "favourites" }, include: ["bootleg"] },
+      { source: { type: "favourites" }, filter: { excludeArtists: "Drake" } },
+    ]) {
+      const res = await handleApi(request("POST", "/api/new-releases", body), deps());
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
+describe("POST /api/new-releases/commit", () => {
+  it("creates a playlist of the releases' tracks", async () => {
+    const addTracksToPlaylist = vi.fn(async () => {});
+    const svc = service({
+      getAlbumTracks: vi.fn(async (id: string) => [{ id: id === "a" ? 1 : 2, title: id }]),
+      addTracksToPlaylist,
+    });
+    const res = await handleApi(
+      request("POST", "/api/new-releases/commit", {
+        albumIds: ["b", "a"],
+        target: { type: "playlist", name: "Fresh" },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ type: "playlist", trackCount: 2, failedAlbumIds: [] });
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(1, [2, 1]);
+  });
+
+  it("adds the releases to favourite albums", async () => {
+    const addFavoriteAlbums = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/new-releases/commit", {
+        albumIds: ["a"],
+        target: { type: "favourite-albums" },
+      }),
+      deps({ service: service({ addFavoriteAlbums }) }),
+    );
+    expect(res.body).toEqual({ type: "favourite-albums", added: 1 });
+    expect(addFavoriteAlbums).toHaveBeenCalledWith(["a"]);
+  });
+
+  it("validates its input", async () => {
+    for (const body of [
+      { target: { type: "favourite-albums" } },
+      { albumIds: [], target: { type: "favourite-albums" } },
+      { albumIds: [5], target: { type: "favourite-albums" } },
+      { albumIds: ["a"] },
+      { albumIds: ["a"], target: { type: "playlist", name: " " } },
+      { albumIds: ["a"], target: { type: "playlist", name: "x", isPublic: "no" } },
+      { albumIds: ["a"], target: { type: "elsewhere" } },
+    ]) {
+      const res = await handleApi(request("POST", "/api/new-releases/commit", body), deps());
+      expect(res.status).toBe(400);
+    }
+  });
+});

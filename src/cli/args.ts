@@ -16,6 +16,12 @@ import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
 import { DEFAULT_DISCOGRAPHY_INCLUDE, parseIncludeList } from "../features/discography.js";
 import { FORMATS, type Format } from "../features/import-export.js";
 import {
+  DEFAULT_NEW_RELEASE_INCLUDE,
+  isIsoDate,
+  type ArtistSource,
+  type NewReleasesTarget,
+} from "../features/new-releases.js";
+import {
   ALBUM_PREFERENCES,
   DEFAULT_ALBUM_PREFERENCE,
   type AlbumPreference,
@@ -1256,6 +1262,140 @@ export function parseWordPlayArgs(argv: readonly string[]): WordPlayArgs {
     apply,
     ...(name !== undefined && { name }),
     ...(addTo !== undefined && { addTo }),
+    ...(spec !== undefined && { filter: spec }),
+  };
+}
+
+// --- new-releases -----------------------------------------------------------
+
+/** Arguments for the `new-releases` command. */
+export interface NewReleasesArgs {
+  /** Whose releases: favourite artists, or a playlist's artists. */
+  source: ArtistSource;
+  /** First day of the window (YYYY-MM-DD), when given with --since. */
+  since?: string;
+  /** Days back from today, when given with --days (else the default window). */
+  days?: number;
+  include: ReleaseType[];
+  /** Where to put the releases; absent means report only. */
+  target?: NewReleasesTarget;
+  /** Write to the target (otherwise a dry run). */
+  apply: boolean;
+  /** Present only when an exclude flag was given. */
+  filter?: TrackFilterSpec;
+}
+
+/**
+ * Parse the arguments for the `new-releases` command.
+ *
+ * Recognised options: `--since <YYYY-MM-DD>` or `--days <n>` (the window;
+ * default the last 30 days), `--playlist <id>` (that playlist's artists rather
+ * than your favourite artists), `--include <kinds>` (default `albums,eps`),
+ * the repeatable `--exclude-artist`, `--exclude-album` and `--exclude-track`,
+ * and a destination -- `--name <name>` (a new playlist, `--public` optional)
+ * or `--favourite-albums` -- which is only written with `--apply`.
+ *
+ * @throws {Error} on an invalid or conflicting option, or `--apply` without a
+ *   destination.
+ */
+export function parseNewReleasesArgs(argv: readonly string[]): NewReleasesArgs {
+  let since: string | undefined;
+  let days: number | undefined;
+  let playlistId: number | undefined;
+  let include: ReleaseType[] | undefined;
+  let playlistName: string | undefined;
+  let favouriteAlbums = false;
+  let isPublic = false;
+  let apply = false;
+  const filter = new FilterFlags(false);
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const used = filter.take(argv, i);
+    if (used > 0) {
+      i += used - 1;
+      continue;
+    }
+    const arg = argv[i];
+    const value = argv[i + 1];
+    switch (arg) {
+      case "--since":
+        i += 1;
+        if (value === undefined || !isIsoDate(value)) {
+          throw new Error(`--since must be a date as YYYY-MM-DD, got "${value}"`);
+        }
+        since = value;
+        break;
+      case "--days": {
+        i += 1;
+        const n = Number(value);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new Error(`--days must be a positive integer, got "${value}"`);
+        }
+        days = n;
+        break;
+      }
+      case "--playlist": {
+        i += 1;
+        const id = Number(value);
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id, got "${value}"`);
+        }
+        playlistId = id;
+        break;
+      }
+      case "--include":
+        i += 1;
+        include = parseIncludeList(value ?? "");
+        break;
+      case "--name":
+        i += 1;
+        if (value === undefined || value.trim().length === 0) {
+          throw new Error("--name requires a playlist name");
+        }
+        playlistName = value;
+        break;
+      case "--favourite-albums":
+      case "--favorite-albums":
+        favouriteAlbums = true;
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (since !== undefined && days !== undefined) {
+    throw new Error("Give only one of --since or --days");
+  }
+  if (playlistName !== undefined && favouriteAlbums) {
+    throw new Error("Give only one destination: --name <name> or --favourite-albums");
+  }
+  if (isPublic && playlistName === undefined) {
+    throw new Error("--public only applies with --name");
+  }
+  if (apply && playlistName === undefined && !favouriteAlbums) {
+    throw new Error("--apply needs a destination: --name <name> or --favourite-albums");
+  }
+
+  const target: NewReleasesTarget | undefined =
+    playlistName !== undefined
+      ? { type: "playlist", name: playlistName, isPublic }
+      : favouriteAlbums
+        ? { type: "favourite-albums" }
+        : undefined;
+  const spec = filter.spec();
+  return {
+    source: playlistId === undefined ? { type: "favourites" } : { type: "playlist", playlistId },
+    include: include ?? [...DEFAULT_NEW_RELEASE_INCLUDE],
+    apply,
+    ...(since !== undefined && { since }),
+    ...(days !== undefined && { days }),
+    ...(target !== undefined && { target }),
     ...(spec !== undefined && { filter: spec }),
   };
 }

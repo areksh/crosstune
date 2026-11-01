@@ -932,6 +932,114 @@ button:disabled {
   color: var(--error);
 }
 
+/* New releases: the inputs in one row, then a grid of release cards. */
+
+.release-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 28px;
+}
+
+.release-inputs .field,
+.release-inputs .choice-group {
+  margin: 8px 0;
+}
+
+input[type="date"] {
+  background: var(--inset);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 0 12px;
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+  font-size: 15px;
+}
+
+/* Checkboxes side by side, wrapping (instead of one per line). */
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 18px;
+}
+
+.choice-row legend {
+  flex-basis: 100%;
+}
+
+.release-summary {
+  margin: 0 0 18px;
+  color: var(--text-2);
+}
+
+.release-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.release-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.release-card:hover {
+  border-color: var(--line-strong);
+}
+
+.release-card > .cover {
+  width: 88px;
+  height: 88px;
+}
+
+.release-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.release-artist,
+.release-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.release-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.release-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.release-foot input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+}
+
+/* Unticked: dimmed, so the selection reads at a glance. */
+.release-card:has(input:not(:checked)) > :not(.release-text),
+.release-card:has(input:not(:checked)) .release-text > :not(.release-foot) {
+  opacity: 0.55;
+}
+
 /* Deduplicator: duplicate groups, the kept copy green and the rest red. */
 
 .dedup-group {
