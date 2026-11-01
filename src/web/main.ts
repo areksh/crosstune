@@ -10,9 +10,11 @@
 import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
+import { applyPrefill } from "./prefill.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
+import { initHomeView } from "./views/home.js";
 import { initImportExportView } from "./views/import-export.js";
 import { initNewReleasesView } from "./views/new-releases.js";
 import { initPlaylistView } from "./views/playlist.js";
@@ -54,6 +56,8 @@ function route(): void {
   for (const link of document.querySelectorAll<HTMLAnchorElement>(".nav-link")) {
     link.classList.toggle("active", link.dataset["view"] === active);
   }
+  // Fill in what the home paste box handed over, if it was for this view.
+  applyPrefill(active);
 }
 
 /** Show who is signed in, or that the session could not be read. */
@@ -71,6 +75,7 @@ async function loadSession(): Promise<void> {
 }
 
 initArtworkToggle();
+initHomeView();
 initPlaylistView();
 initAlbumsView();
 initSimilarView();

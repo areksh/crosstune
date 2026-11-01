@@ -28,7 +28,11 @@ import {
   type ResolveAlbumsResult,
   type ResolvedAlbumVersions,
 } from "./playlist-from-albums.js";
-import { pickArtist, type PlaylistWriterClient } from "./playlist-from-artists.js";
+import {
+  lookUpArtist,
+  type ArtistLookupClient,
+  type PlaylistWriterClient,
+} from "./playlist-from-artists.js";
 import type { FavouriteTracksClient } from "./song-picker.js";
 import { albumExclusion, NO_FILTER, type TrackFilter } from "./track-filter.js";
 
@@ -38,9 +42,7 @@ export interface ArtistReleasesClient {
 }
 
 /** The client surface needed to resolve an artist's discography. */
-export interface DiscographyResolverClient extends ArtistReleasesClient {
-  searchArtists(query: string, limit?: number): Promise<Artist[]>;
-}
+export interface DiscographyResolverClient extends ArtistReleasesClient, ArtistLookupClient {}
 
 /** The include names the CLI and API accept, mapped to release types. */
 export const INCLUDE_NAMES: Readonly<Record<string, ReleaseType>> = {
@@ -118,7 +120,7 @@ function byDateAscending(a: Release, b: Release): number {
 }
 
 export interface ResolveDiscographyOptions {
-  /** The artist's name, resolved as the artists tool does. */
+  /** The artist: a name, resolved as the artists tool does, or an artist link. */
   artist: string;
   /** Kinds of release to include (default: studio albums only). */
   include?: readonly ReleaseType[];
@@ -151,10 +153,11 @@ export async function resolveDiscography(
   const filter = options.filter ?? NO_FILTER;
   const empty = { resolvedAlbums: [], unresolvedAlbums: [], excludedAlbums: [] };
 
-  const artist = pickArtist(await client.searchArtists(options.artist, 5), options.artist);
-  if (artist === undefined) {
-    return { ...empty, unresolvedAlbums: [options.artist], truncated: false };
+  const match = await lookUpArtist(client, options.artist);
+  if ("problem" in match) {
+    return { ...empty, unresolvedAlbums: [match.problem], truncated: false };
   }
+  const { artist } = match;
   const { releases, truncated } = await client.getArtistReleases(artist.id);
   const wanted = releases
     .filter((release) => isByArtist(release, artist.id) && include.has(release.releaseType))

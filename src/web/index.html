@@ -63,14 +63,28 @@
       <main class="content">
         <!-- Home -->
         <section id="view-home" class="view">
-          <header class="view-header">
-            <div class="view-title">
-              <h1>qobuz-helper</h1>
-              <p class="lede">
-                Local-first utilities for your Qobuz account. Pick a tool to begin.
-              </p>
+          <section class="paste-hero" aria-labelledby="home-title">
+            <h1 id="home-title">Start with a link or a list</h1>
+            <p class="lede">
+              Paste Qobuz links, or artists or albums one per line. qobuz-helper
+              works out what they are and suggests a tool. Or pick a tool below.
+            </p>
+            <div class="paste-box">
+              <label for="home-paste" class="field-label">Links or a list</label>
+              <textarea
+                id="home-paste"
+                rows="4"
+                placeholder="https://play.qobuz.com/playlist/...&#10;https://play.qobuz.com/album/...&#10;Portishead&#10;Massive Attack - Mezzanine"
+              ></textarea>
+              <div class="paste-actions">
+                <p id="home-found" class="paste-found" aria-live="polite">
+                  Paste links or a list to begin.
+                </p>
+                <div id="home-tools" class="paste-tools"></div>
+              </div>
+              <p id="home-note" class="hint" hidden></p>
             </div>
-          </header>
+          </section>
           <!-- Each tool is one tool-link block in its group. -->
           <div class="tool-groups">
             <section class="tool-group">
@@ -175,7 +189,7 @@
 
           <section class="panel">
             <label class="field">
-              <span>Artists</span>
+              <span>Artists (names or Qobuz artist links, one per line)</span>
               <textarea
                 id="artists"
                 rows="8"
@@ -350,7 +364,7 @@
               </label>
             </div>
             <label id="album-list-fields" class="field">
-              <span>Albums (one per line, as "Artist - Album")</span>
+              <span>Albums (one per line, as "Artist - Album" or a Qobuz album link)</span>
               <textarea
                 id="albums"
                 rows="8"
@@ -567,7 +581,7 @@
             </div>
             <div id="similar-artists-fields">
               <label class="field">
-                <span>Artists (one per line)</span>
+                <span>Artists (names or Qobuz artist links, one per line)</span>
                 <textarea
                   id="similar-artists"
                   rows="6"
@@ -585,6 +599,14 @@
                 <select id="similar-source-playlist">
                   <option value="">Loading...</option>
                 </select>
+              </label>
+              <label class="field">
+                <span>Or paste a Qobuz playlist link (any playlist, not only yours)</span>
+                <input
+                  id="similar-source-link"
+                  type="text"
+                  placeholder="https://play.qobuz.com/playlist/..."
+                />
               </label>
               <label class="field field-inline">
                 <span>Start from its most frequent artists, up to</span>

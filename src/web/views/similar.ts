@@ -16,6 +16,7 @@
 
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { playlistIdOf } from "../../features/qobuz-links.js";
 import { PlanControls } from "../plan.js";
 import {
   groupHead,
@@ -29,6 +30,8 @@ import {
 interface SeedGroup {
   query: string;
   artist: Artist;
+  /** The line was a Qobuz artist link. */
+  fromLink?: boolean;
   tracks: Track[];
   excluded: ExcludedTrack[];
 }
@@ -91,6 +94,7 @@ const TRACK_BATCH = 25;
 /** Inputs whose change alters the estimate. */
 const ESTIMATE_INPUTS = [
   "similar-artists",
+  "similar-source-link",
   "similar-seed-tracks",
   "similar-source-playlist",
   "similar-max-seeds",
@@ -180,13 +184,16 @@ function onSourceChange(): void {
 function settingsBody(): { body: Record<string, unknown> } | { missing: string } {
   let source: unknown;
   if (checkedValue("similar-source", "artists") === "playlist") {
-    const playlistId = el<HTMLSelectElement>("similar-source-playlist").value;
-    if (playlistId === "") {
+    const playlistId = sourcePlaylistId();
+    if (playlistId === undefined) {
       return { missing: "Choose a playlist." };
+    }
+    if (Number.isNaN(playlistId)) {
+      return { missing: "That is not a Qobuz playlist link." };
     }
     source = {
       type: "playlist",
-      playlistId: Number(playlistId),
+      playlistId,
       maxSeeds: numberInput("similar-max-seeds"),
     };
   } else {
@@ -393,9 +400,10 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
     );
   }
 
-  // Expanding a playlist most naturally adds back into it.
-  if (fromPlaylist) {
-    void preselectExisting(Number(el<HTMLSelectElement>("similar-source-playlist").value));
+  // Expanding a playlist most naturally adds back into it (when it is yours).
+  const sourceId = sourcePlaylistId();
+  if (fromPlaylist && sourceId !== undefined && !Number.isNaN(sourceId)) {
+    void preselectExisting(sourceId);
   }
 
   el("similar-preview").hidden = false;
@@ -422,7 +430,11 @@ function renderSeed(
   const ownTracks = seed.tracks.length > 0 || seed.excluded.length > 0;
   group.appendChild(
     groupHead("h3", seed.artist.name, {
-      note: fromPlaylist ? "in the playlist" : ownTracks ? "" : "none of its own tracks",
+      note: fromPlaylist
+        ? "in the playlist"
+        : [seed.fromLink === true ? "from a link" : "", ownTracks ? "" : "none of its own tracks"]
+            .filter((part) => part.length > 0)
+            .join("; "),
       ...(ownTracks && { count: trackCountLabel(seed) }),
     }),
   );
@@ -497,8 +509,16 @@ function onTargetChange(): void {
   }
 }
 
-/** Switch the destination to "existing" with the given playlist selected. */
+/**
+ * Switch the destination to "existing" with the given playlist selected, if
+ * it is one of yours (a pasted link may be someone else's).
+ */
 async function preselectExisting(playlistId: number): Promise<void> {
+  await loadPlaylists();
+  const select = el<HTMLSelectElement>("similar-playlist-select");
+  if (![...select.options].some((option) => option.value === String(playlistId))) {
+    return;
+  }
   const radio = document.querySelector<HTMLInputElement>(
     'input[name="similar-target"][value="existing"]',
   );
@@ -506,8 +526,21 @@ async function preselectExisting(playlistId: number): Promise<void> {
     radio.checked = true;
     onTargetChange();
   }
-  await loadPlaylists();
-  el<HTMLSelectElement>("similar-playlist-select").value = String(playlistId);
+  select.value = String(playlistId);
+}
+
+/**
+ * The source playlist: a pasted link (any playlist) wins over the picker of
+ * your playlists. NaN for a link that is not a playlist link; undefined when
+ * neither is given.
+ */
+function sourcePlaylistId(): number | undefined {
+  const link = el<HTMLInputElement>("similar-source-link").value.trim();
+  if (link.length > 0) {
+    return playlistIdOf(link);
+  }
+  const chosen = el<HTMLSelectElement>("similar-source-playlist").value;
+  return chosen === "" ? undefined : Number(chosen);
 }
 
 /** Fill both playlist pickers (source and destination) once. */

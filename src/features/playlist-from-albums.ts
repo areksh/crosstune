@@ -30,6 +30,7 @@
 import type { Album, Playlist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
+import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";
 import {
   createPlaylistWithTracks,
   type PlaylistWriterClient,
@@ -81,6 +82,32 @@ export function parseAlbumEntry(line: string): AlbumEntry | undefined {
   return { artist, album };
 }
 
+/** A pasted Qobuz album link: one release, resolved by its id. */
+export interface AlbumLinkEntry {
+  /** The line as typed, for reporting. */
+  link: string;
+  albumId: string;
+}
+
+/**
+ * Parse an input line: an album link, or an "Artist - Album" line. Anything
+ * else is a problem to report -- the line itself, or a link to something
+ * other than an album with the reason.
+ */
+export function parseAlbumLine(
+  line: string,
+): { entry: AlbumEntry | AlbumLinkEntry } | { problem: string } {
+  const link = parseQobuzLink(line);
+  if (link?.kind === "album") {
+    return { entry: { link: line.trim(), albumId: link.id } };
+  }
+  if (link !== undefined) {
+    return { problem: `${line.trim()} (${describeLinkMismatch(link, "album")})` };
+  }
+  const entry = parseAlbumEntry(line);
+  return entry === undefined ? { problem: line.trim() } : { entry };
+}
+
 /** Render an entry back as its "Artist - Album" form (for display/reporting). */
 function formatEntry(entry: AlbumEntry): string {
   return `${entry.artist}${ENTRY_SEPARATOR}${entry.album}`;
@@ -99,9 +126,14 @@ export const ALBUM_PREFERENCES: readonly AlbumPreference[] = [
 /** The default version preference when none is given. */
 export const DEFAULT_ALBUM_PREFERENCE: AlbumPreference = "highest-quality";
 
-/** The client surface needed to resolve entries to their album versions. */
-export interface AlbumResolverClient {
+/** The client surface needed to resolve "Artist - Album" entries to their versions. */
+export interface AlbumSearchClient {
   searchAlbums(query: string, limit?: number): Promise<Album[]>;
+}
+
+/** The client surface needed to resolve entries and album links to their versions. */
+export interface AlbumResolverClient extends AlbumSearchClient {
+  getAlbum(albumId: string): Promise<Album>;
 }
 
 /** The client surface needed to fetch an album's tracks. */
@@ -117,6 +149,8 @@ export interface ResolvedAlbumVersions {
   album: string;
   /** The matching album releases, most relevant first. */
   versions: Album[];
+  /** True when the line was an album link: the one release it names. */
+  fromLink?: boolean;
 }
 
 export interface ResolveAlbumsResult {
@@ -127,7 +161,8 @@ export interface ResolveAlbumsResult {
 }
 
 export interface ResolveAlbumsOptions {
-  entries: AlbumEntry[];
+  /** "Artist - Album" entries and album links, in the order typed. */
+  entries: (AlbumEntry | AlbumLinkEntry)[];
   /** Releases matching one of its album terms are dropped from the versions. */
   filter?: TrackFilter;
 }
@@ -135,13 +170,14 @@ export interface ResolveAlbumsOptions {
 /**
  * Resolve each entry to its matching album versions (phase 1).
  *
- * Searches Qobuz for "artist album" and keeps the results whose artist and
+ * An album link resolves to the one release it names (by id). Otherwise this
+ * searches Qobuz for "artist album" and keeps the results whose artist and
  * title match the entry (normalised, so case and edition noise are ignored).
  * Entries with no match are collected in `unresolvedAlbums`; entries whose
  * every match was excluded by the filter's album terms in `excludedAlbums`.
  */
 export async function resolveAlbumVersions(
-  client: AlbumResolverClient,
+  client: AlbumSearchClient & Partial<Pick<AlbumResolverClient, "getAlbum">>,
   options: ResolveAlbumsOptions,
 ): Promise<ResolveAlbumsResult> {
   // Resolve entries through a bounded pool (results stay in input order) so a
@@ -150,14 +186,37 @@ export async function resolveAlbumVersions(
   const outcomes = await mapWithConcurrency(
     options.entries,
     DEFAULT_CONCURRENCY,
-    async (entry) => ({ entry, versions: await findAlbumVersions(client, entry) }),
+    async (input): Promise<{ entry: AlbumEntry; versions: Album[]; fromLink?: boolean } | string> => {
+      if (!("albumId" in input)) {
+        return { entry: input, versions: await findAlbumVersions(client, input) };
+      }
+      // A link names one release: use it as the only version.
+      if (client.getAlbum === undefined) {
+        return `${input.link} (album links are not accepted here)`;
+      }
+      try {
+        const album = await client.getAlbum(input.albumId);
+        return {
+          entry: { artist: album.artist, album: album.title },
+          versions: [album],
+          fromLink: true,
+        };
+      } catch {
+        return `${input.link} (no Qobuz album has this id)`;
+      }
+    },
   );
 
   const filter = options.filter ?? NO_FILTER;
   const resolvedAlbums: ResolvedAlbumVersions[] = [];
   const unresolvedAlbums: string[] = [];
   const excludedAlbums: string[] = [];
-  for (const { entry, versions: matched } of outcomes) {
+  for (const outcome of outcomes) {
+    if (typeof outcome === "string") {
+      unresolvedAlbums.push(outcome);
+      continue;
+    }
+    const { entry, versions: matched } = outcome;
     if (matched.length === 0) {
       unresolvedAlbums.push(formatEntry(entry));
       continue;
@@ -172,6 +231,7 @@ export async function resolveAlbumVersions(
       artist: entry.artist,
       album: entry.album,
       versions,
+      ...(outcome.fromLink === true && { fromLink: true }),
     });
   }
 
@@ -187,7 +247,7 @@ export async function resolveAlbumVersions(
  * not, so the fallback markedly improves recall.
  */
 async function findAlbumVersions(
-  client: AlbumResolverClient,
+  client: AlbumSearchClient,
   entry: AlbumEntry,
 ): Promise<Album[]> {
   const combined = await client.searchAlbums(
@@ -435,7 +495,7 @@ export interface BuildAlbumPlaylistOptions extends SongPickerOptions {
   /** Random source for `shuffle`; default `Math.random`. */
   random?: () => number;
   /** Artist/album entries to include. */
-  entries: AlbumEntry[];
+  entries: (AlbumEntry | AlbumLinkEntry)[];
   /** Name for the new playlist. */
   playlistName: string;
   /** Which version to pick when an album has several (default highest-quality). */

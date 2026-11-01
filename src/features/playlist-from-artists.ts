@@ -25,6 +25,7 @@
 import type { Artist, Playlist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
+import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";
 import {
   createSongPicker,
   type FavouriteTracksClient,
@@ -40,9 +41,14 @@ import {
 } from "./track-filter.js";
 
 /** The client surface needed to resolve artists to their top tracks. */
-export interface ArtistResolverClient {
-  searchArtists(query: string, limit?: number): Promise<Artist[]>;
+export interface ArtistResolverClient extends ArtistLookupClient {
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
+}
+
+/** The client surface needed to find an artist by name or by link. */
+export interface ArtistLookupClient {
+  searchArtists(query: string, limit?: number): Promise<Artist[]>;
+  getArtist(artistId: number): Promise<Artist>;
 }
 
 /** The client surface needed to create a playlist and add tracks to it. */
@@ -82,6 +88,8 @@ export type ExcludedTrack = Required<FilteredTrack> & { position: number };
 export interface ResolvedArtistTracks {
   query: string;
   artist: Artist;
+  /** True when the line was a Qobuz artist link, resolved by id. */
+  fromLink?: boolean;
   /** The kept tracks, most popular first (at most `tracksPerArtist`). */
   tracks: Track[];
   /**
@@ -108,7 +116,11 @@ export interface UnderfilledArtist {
 export interface ResolveArtistsResult {
   /** Artists resolved to at least one track, in input order. */
   resolvedArtists: ResolvedArtistTracks[];
-  /** Input names that matched no artist. */
+  /**
+   * Input names that matched no artist, and links that are not artist links
+   * or lead to no artist, the latter with the reason ("<link> (an album link,
+   * not an artist)").
+   */
   unresolvedArtists: string[];
   /** Resolved artists for which no tracks at all could be fetched. */
   emptyArtists: UnderfilledArtist[];
@@ -215,26 +227,26 @@ export async function resolveArtistTracks(
   const lookups = await mapWithConcurrency(
     options.artists,
     DEFAULT_CONCURRENCY,
-    async (query): Promise<{ artist: Artist; pool: Track[] } | undefined> => {
-      const candidates = await client.searchArtists(query, ARTIST_SEARCH_LIMIT);
-      const artist = pickArtist(candidates, query);
-      if (artist === undefined) {
-        return undefined;
+    async (query): Promise<(ArtistMatch & { pool: Track[] }) | { problem: string }> => {
+      const match = await lookUpArtist(client, query);
+      if ("problem" in match || tracksPerArtist === 0) {
+        return { ...match, pool: [] };
       }
-      if (tracksPerArtist === 0) {
-        return { artist, pool: [] };
-      }
-      return { artist, pool: await fetchTopTrackPool(client, artist.id, tracksPerArtist, deep) };
+      return {
+        ...match,
+        pool: await fetchTopTrackPool(client, match.artist.id, tracksPerArtist, deep),
+      };
     },
   );
   // Then take each artist's tracks in input order: the picker's "first copy"
   // must not depend on which fetch finished first.
-  const outcomes = lookups.map((lookup, index): ResolvedArtistTracks | undefined =>
-    lookup === undefined
-      ? undefined
+  const outcomes = lookups.map((lookup, index): ResolvedArtistTracks | string =>
+    "problem" in lookup
+      ? lookup.problem
       : {
           query: options.artists[index]!,
           artist: lookup.artist,
+          ...(lookup.fromLink && { fromLink: true }),
           ...takeTopTracks(lookup.pool, tracksPerArtist, filter, options.picker),
         },
   );
@@ -245,8 +257,8 @@ export async function resolveArtistTracks(
   const partialArtists: UnderfilledArtist[] = [];
   options.artists.forEach((query, index) => {
     const outcome = outcomes[index];
-    if (outcome === undefined) {
-      unresolvedArtists.push(query);
+    if (outcome === undefined || typeof outcome === "string") {
+      unresolvedArtists.push(outcome ?? query);
       return;
     }
     const trackCount = outcome.tracks.length;
@@ -485,6 +497,37 @@ export function shapeArtistGroups(
     ...(options.fitMinutes !== undefined && { fitMinutes: options.fitMinutes }),
     ...(options.random !== undefined && { random: options.random }),
   });
+}
+
+/** An artist found for a typed line, and whether the line was a link. */
+export interface ArtistMatch {
+  artist: Artist;
+  fromLink: boolean;
+}
+
+/**
+ * Find the artist a typed line names: a Qobuz artist link by its id, anything
+ * else by a name search ({@link pickArtist}). A link to something else (an
+ * album, a playlist...) or to no artist is a problem, given as the line with
+ * the reason; so is a name that matches nothing (the line alone).
+ */
+export async function lookUpArtist(
+  client: ArtistLookupClient,
+  query: string,
+): Promise<ArtistMatch | { problem: string }> {
+  const link = parseQobuzLink(query);
+  if (link === undefined) {
+    const artist = pickArtist(await client.searchArtists(query, ARTIST_SEARCH_LIMIT), query);
+    return artist === undefined ? { problem: query } : { artist, fromLink: false };
+  }
+  if (link.kind !== "artist") {
+    return { problem: `${query} (${describeLinkMismatch(link, "artist")})` };
+  }
+  try {
+    return { artist: await client.getArtist(link.id), fromLink: true };
+  } catch {
+    return { problem: `${query} (no Qobuz artist has this id)` };
+  }
 }
 
 /** Prefer an exact (case-insensitive) name match, else the first (most relevant) result. */

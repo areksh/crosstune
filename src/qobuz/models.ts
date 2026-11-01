@@ -209,6 +209,26 @@ function parseAlbum(item: unknown): Album | undefined {
   return album;
 }
 
+/** Parse a single album object (e.g. an album/get response), or undefined if it is not one. */
+export function parseAlbumDetails(response: unknown): Album | undefined {
+  return parseAlbum(response);
+}
+
+/**
+ * Parse the artist an `/artist/page` response describes: its `id` and
+ * `name.display` (the page nests the name, unlike search results).
+ */
+export function parseArtistPage(response: unknown): Artist | undefined {
+  if (!isRecord(response) || typeof response["id"] !== "number") {
+    return undefined;
+  }
+  const name = response["name"];
+  const display = isRecord(name) ? name["display"] : name;
+  return typeof display === "string" && display.length > 0
+    ? { id: response["id"], name: display }
+    : undefined;
+}
+
 /** Parse an albums container into its albums plus the total (for pagination). */
 export function parseAlbumsPage(response: unknown): AlbumsPage {
   const container =

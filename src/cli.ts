@@ -22,8 +22,8 @@
  *       [--exclude-track <term>]... [--exclude-album <term>]... \
  *       [--exclude-artist <name>]... [--order by-artist|take-turns|shuffle] \
  *       [--skip-favourites] [--one-copy] [--fit <minutes>] "Artist One" ...
- *       Build a playlist from the given artists' top tracks. Artist names may
- *       also be piped on stdin, one per line. Tracks whose title, album's
+ *       Build a playlist from the given artists' top tracks. Artist names (or
+ *       Qobuz artist links) may also be piped on stdin, one per line. Tracks whose title, album's
  *       title or performer matches an exclude term -- or, with
  *       --skip-favourites, already in your favourites, or with --one-copy, a
  *       later copy of a song already in the playlist -- are replaced by the
@@ -35,8 +35,9 @@
  *       [--public] [--discs <list>] [--exclude-track <term>]... \
  *       [--exclude-album <term>]... [--exclude-artist <name>]... \
  *       "Artist One - Album One" ...
- *       Build a playlist from whole albums. Each entry is "Artist - Album";
- *       entries may also be piped on stdin, one per line. When an album has
+ *       Build a playlist from whole albums. Each entry is "Artist - Album" or
+ *       a Qobuz album link (that exact release); entries may also be piped on
+ *       stdin, one per line. When an album has
  *       several versions, --prefer picks one: highest-quality (default), newest,
  *       or oldest. Releases matching --exclude-album are never picked; tracks
  *       matching --exclude-track or --exclude-artist, or on a disc outside
@@ -256,8 +257,9 @@ import {
 } from "./features/import-export.js";
 import {
   buildPlaylistFromAlbums,
-  parseAlbumEntry,
+  parseAlbumLine,
   type AlbumEntry,
+  type AlbumLinkEntry,
   type BuildAlbumPlaylistResult,
 } from "./features/playlist-from-albums.js";
 import {
@@ -569,26 +571,27 @@ function planPlaylistFromAlbums(
     );
   }
 
-  // Split each "Artist - Album" line up front so bad input fails before sign-in.
-  const entries: AlbumEntry[] = [];
+  // Split each "Artist - Album" line (or album link) up front so bad input
+  // fails before sign-in.
+  const entries: (AlbumEntry | AlbumLinkEntry)[] = [];
   const malformed: string[] = [];
   for (const line of lines) {
-    const entry = parseAlbumEntry(line);
-    if (entry === undefined) {
-      malformed.push(line);
+    const parsed = parseAlbumLine(line);
+    if ("problem" in parsed) {
+      malformed.push(parsed.problem);
     } else {
-      entries.push(entry);
+      entries.push(parsed.entry);
     }
   }
   if (entries.length === 0) {
     throw new Error(
-      'No albums in the expected "Artist - Album" format were given.',
+      'No albums in the expected "Artist - Album" format, or album links, were given.',
     );
   }
 
   return async (client: QobuzClient): Promise<void> => {
     if (malformed.length > 0) {
-      logger.warn(`ignored (not "Artist - Album"): ${malformed.join(", ")}`);
+      logger.warn(`ignored (not "Artist - Album" or an album link): ${malformed.join(", ")}`);
     }
     logger.info(
       `Building playlist "${parsed.playlistName}" from ${entries.length} albums (preferring ${parsed.preference})...`,
@@ -1568,6 +1571,7 @@ function printUsage(): void {
       "",
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
+      "Qobuz links work wherever a list is typed: artist links for artists (also --discography), album links for albums (that exact release), and a playlist link wherever --playlist (or --add-to) takes an id.",
       "Album version preferences: highest-quality (default), newest, oldest.",
       "--discography takes an artist's studio albums, oldest first, one version of each (per --prefer); --include widens the kinds (albums, eps, live, compilations), --all-versions keeps every edition.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",

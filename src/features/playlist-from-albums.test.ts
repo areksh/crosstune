@@ -5,6 +5,7 @@ import {
   buildPlaylistFromAlbums,
   fetchAlbumTracks,
   parseAlbumEntry,
+  parseAlbumLine,
   resolveAlbumVersions,
   selectAlbumVersion,
   type AlbumPlaylistBuilderClient,
@@ -26,12 +27,14 @@ function stubClient(config: {
   favourites?: Track[];
 }): AlbumPlaylistBuilderClient & {
   searchAlbums: ReturnType<typeof vi.fn>;
+  getAlbum: ReturnType<typeof vi.fn>;
   getAlbumTracks: ReturnType<typeof vi.fn>;
   createPlaylist: ReturnType<typeof vi.fn>;
   addTracksToPlaylist: ReturnType<typeof vi.fn>;
 } {
   return {
     getFavoriteTracks: vi.fn(async () => config.favourites ?? []),
+    getAlbum: vi.fn(async (albumId: string): Promise<Album> => album({ id: albumId })),
     searchAlbums: vi.fn(async (query: string) => config.albumsByQuery?.[query] ?? []),
     getAlbumTracks: vi.fn(async (albumId: string) => config.tracksByAlbum?.[albumId] ?? []),
     createPlaylist: vi.fn(async (name: string) => config.playlist ?? { id: 1, name }),
@@ -401,6 +404,64 @@ describe("buildPlaylistFromAlbums with a filter", () => {
       ["cd", 1, 1],
     ]);
     expect(result.excludedAlbums).toEqual(["Pink Floyd - Pulse"]);
+  });
+});
+
+describe("album links", () => {
+  it("parses a line as an album entry, an album link, or a problem", () => {
+    expect(parseAlbumLine("Portishead - Dummy")).toEqual({
+      entry: { artist: "Portishead", album: "Dummy" },
+    });
+    expect(parseAlbumLine("https://open.qobuz.com/album/pvsb64n704d0b")).toEqual({
+      entry: { link: "https://open.qobuz.com/album/pvsb64n704d0b", albumId: "pvsb64n704d0b" },
+    });
+    expect(parseAlbumLine("https://play.qobuz.com/artist/41259")).toEqual({
+      problem: "https://play.qobuz.com/artist/41259 (an artist link, not an album)",
+    });
+    expect(parseAlbumLine("Portishead")).toEqual({ problem: "Portishead" });
+  });
+
+  it("resolves an album link by id, in input order, without searching", async () => {
+    const mezzanine = album({ id: "pvsb64n704d0b", title: "Mezzanine", artist: "Massive Attack" });
+    const client = stubClient({
+      albumsByQuery: { "Portishead Dummy": [album({ id: "d", title: "Dummy", artist: "Portishead" })] },
+    });
+    client.getAlbum = vi.fn(async () => mezzanine);
+    const link = "https://open.qobuz.com/album/pvsb64n704d0b";
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ link, albumId: "pvsb64n704d0b" }, { artist: "Portishead", album: "Dummy" }],
+    });
+
+    expect(client.getAlbum).toHaveBeenCalledWith("pvsb64n704d0b");
+    expect(client.searchAlbums).not.toHaveBeenCalledWith(expect.stringContaining("Mezzanine"), expect.anything());
+    expect(result.resolvedAlbums.map((r) => [r.query, r.fromLink, r.versions.map((v) => v.id)])).toEqual([
+      ["Massive Attack - Mezzanine", true, ["pvsb64n704d0b"]],
+      ["Portishead - Dummy", undefined, ["d"]],
+    ]);
+  });
+
+  it("reports a link to no album, and an excluded linked release", async () => {
+    const client = stubClient({});
+    client.getAlbum = vi.fn(async (id: string) => {
+      if (id === "live") {
+        return album({ id, title: "Live at Roseland", artist: "Portishead" });
+      }
+      throw new Error("album/get failed with HTTP 404");
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [
+        { link: "https://play.qobuz.com/album/zzz", albumId: "zzz" },
+        { link: "https://play.qobuz.com/album/live", albumId: "live" },
+      ],
+      filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+    });
+
+    expect(result.unresolvedAlbums).toEqual([
+      "https://play.qobuz.com/album/zzz (no Qobuz album has this id)",
+    ]);
+    expect(result.excludedAlbums).toEqual(["Portishead - Live at Roseland"]);
   });
 });
 

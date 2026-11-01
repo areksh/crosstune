@@ -51,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Qobuz links wherever a list is typed. Artist links resolve by id (no name
+  search) in playlist from artists, similar artists and a discography, and are
+  marked "from a link"; album links resolve to that exact release in playlist
+  from albums; and every playlist id (`--playlist`, `--add-to`, and a new
+  "Or paste a Qobuz playlist link" field in Similar artists, which can then
+  expand any playlist) also takes a playlist link. Player links
+  (`play.qobuz.com`, `open.qobuz.com`) and store links (`www.qobuz.com/<locale>
+  /album/...`, `.../interpreter/...`) are recognised; a link of the wrong kind,
+  or to nothing, is reported as unresolved with the reason.
+- The web UI's home page starts with a paste box ("Start with a link or a
+  list"): it sorts pasted links, names and "Artist - Album" lines, says what it
+  found, and opens the fitting tool with the list filled in.
 - A global `--json` option: report commands print exactly one JSON document
   on stdout -- the plan or result (deduplicate, upgrade, import dry runs and
   applied results, export summaries with `--out`/`--out-dir`, similar-artists,

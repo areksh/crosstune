@@ -33,6 +33,8 @@ interface ResolvedAlbum {
   artist: string;
   album: string;
   versions: Album[];
+  /** The line was a Qobuz album link: the one release it names. */
+  fromLink?: boolean;
 }
 
 interface ResolveResponse {
@@ -255,6 +257,7 @@ function renderAlbumGroup(resolved: ResolvedAlbum, index: number): HTMLElement {
 
   const count = resolved.versions.length;
   const head = groupHead("h3", resolved.query, {
+    ...(resolved.fromLink === true && { note: "from a link" }),
     count: `${count} version${count === 1 ? "" : "s"}`,
   });
   group.appendChild(head);

@@ -26,9 +26,11 @@ function stubClient(config: {
   addTracksToPlaylist: ReturnType<typeof vi.fn>;
   getArtistTopTracks: ReturnType<typeof vi.fn>;
   getFavoriteTracks: ReturnType<typeof vi.fn>;
+  getArtist: ReturnType<typeof vi.fn>;
 } {
   return {
     getFavoriteTracks: vi.fn(async () => config.favourites ?? []),
+    getArtist: vi.fn(async (id: number): Promise<Artist> => ({ id, name: `Artist ${id}` })),
     searchArtists: vi.fn(async (query: string) => config.artistsByQuery?.[query] ?? []),
     // Honour the limit like the real client, so pool sizes are observable.
     getArtistTopTracks: vi.fn(async (artistId: number, limit?: number) =>
@@ -551,6 +553,45 @@ describe("resolveArtistTracks with a song picker", () => {
     expect(portishead!.excluded).toEqual([
       { track: tracksByArtist[1]![1], exclusion: { kind: "favourite" }, position: 1 },
     ]);
+  });
+});
+
+describe("resolveArtistTracks with Qobuz links", () => {
+  it("resolves an artist link by id instead of searching, marking it", async () => {
+    const client = stubClient({ tracksByArtist: { 41259: [{ id: 1, title: "Roads" }] } });
+    client.getArtist = vi.fn(async (id: number) => ({ id, name: "Portishead" }));
+    const link = "https://play.qobuz.com/artist/41259";
+
+    const result = await resolveArtistTracks(client, { artists: [link], tracksPerArtist: 1 });
+
+    expect(client.getArtist).toHaveBeenCalledWith(41259);
+    expect(client.searchArtists).not.toHaveBeenCalled();
+    expect(result.resolvedArtists).toEqual([
+      {
+        query: link,
+        artist: { id: 41259, name: "Portishead" },
+        fromLink: true,
+        tracks: [{ id: 1, title: "Roads" }],
+        excluded: [],
+      },
+    ]);
+  });
+
+  it("reports a link to something else, or to no artist, with the reason", async () => {
+    const client = stubClient({});
+    client.getArtist = vi.fn(async () => {
+      throw new Error("artist/page failed with HTTP 404");
+    });
+    const album = "https://open.qobuz.com/album/pvsb64n704d0b";
+    const missing = "https://play.qobuz.com/artist/999";
+
+    const result = await resolveArtistTracks(client, { artists: [album, missing] });
+
+    expect(result.unresolvedArtists).toEqual([
+      `${album} (an album link, not an artist)`,
+      `${missing} (no Qobuz artist has this id)`,
+    ]);
+    expect(client.searchArtists).not.toHaveBeenCalled();
   });
 });
 

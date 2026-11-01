@@ -40,9 +40,10 @@ import {
 } from "../features/playlist-from-artists.js";
 import {
   fetchAlbumTracks,
-  parseAlbumEntry,
+  parseAlbumLine,
   resolveAlbumVersions,
   type AlbumEntry,
+  type AlbumLinkEntry,
 } from "../features/playlist-from-albums.js";
 import {
   compileTrackFilter,
@@ -74,6 +75,7 @@ import {
   type MatchedItem,
 } from "../features/import-export.js";
 import { createZip } from "../features/zip.js";
+import { playlistIdOf } from "../features/qobuz-links.js";
 import {
   createSongPicker,
   parseSongPickerState,
@@ -140,6 +142,8 @@ import { authorise, type RequestHeaders } from "./security.js";
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
 export interface QobuzApiService {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
+  getArtist(artistId: number): Promise<Artist>;
+  getAlbum(albumId: string): Promise<Album>;
   getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
   getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
   getArtistReleases(artistId: number, maxReleases?: number): Promise<ArtistReleases>;
@@ -881,9 +885,11 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
     }
     source = { type: "artists", artists, tracksPerSeed: tracksPerSeed.value };
   } else if (rawSource["type"] === "playlist") {
-    const playlistId = rawSource["playlistId"];
+    // A playlist id, or a pasted playlist link (any playlist, not only yours).
+    const raw = rawSource["playlistId"];
+    const playlistId = typeof raw === "string" ? playlistIdOf(raw) : raw;
     if (typeof playlistId !== "number" || !Number.isInteger(playlistId) || playlistId <= 0) {
-      return { ok: false, error: "source.playlistId must be a playlist id" };
+      return { ok: false, error: "source.playlistId must be a playlist id or a playlist link" };
     }
     const maxSeeds = intField(rawSource, "maxSeeds", "source.maxSeeds", SIMILAR_SETTINGS.maxSeeds);
     if (!maxSeeds.ok) {
@@ -1051,8 +1057,11 @@ function parseCommitTarget(value: unknown): Parsed<CommitTarget> {
 }
 
 interface ResolveAlbumsInput {
-  entries: AlbumEntry[];
-  /** Input lines that were not in the "Artist - Album" format. */
+  entries: (AlbumEntry | AlbumLinkEntry)[];
+  /**
+   * Input lines that were neither "Artist - Album" lines nor album links (a
+   * link to something else carries the reason).
+   */
   malformed: string[];
   filter: TrackFilter;
 }
@@ -1068,20 +1077,20 @@ function parseResolveAlbumsInput(body: unknown): Parsed<ResolveAlbumsInput> {
     .filter((line): line is string => typeof line === "string")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  const entries: AlbumEntry[] = [];
+  const entries: (AlbumEntry | AlbumLinkEntry)[] = [];
   const malformed: string[] = [];
   for (const line of lines) {
-    const entry = parseAlbumEntry(line);
-    if (entry === undefined) {
-      malformed.push(line);
+    const parsed = parseAlbumLine(line);
+    if ("problem" in parsed) {
+      malformed.push(parsed.problem);
     } else {
-      entries.push(entry);
+      entries.push(parsed.entry);
     }
   }
   if (entries.length === 0) {
     return {
       ok: false,
-      error: "at least one album in 'Artist - Album' format is required",
+      error: "at least one album in 'Artist - Album' format, or an album link, is required",
     };
   }
   const filter = parseFilterInput(body["filter"]);

@@ -938,6 +938,57 @@ describe("QobuzClient.getFavoriteTracks", () => {
   });
 });
 
+describe("QobuzClient.getArtist", () => {
+  it("reads the artist's id and display name from artist/page", async () => {
+    const { client, recorded } = await initedClient({
+      artistTracks: { id: 41259, name: { display: "Portishead" }, top_tracks: [] },
+    });
+
+    await expect(client.getArtist(41259)).resolves.toEqual({ id: 41259, name: "Portishead" });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/artist/page"));
+    expect(request?.url.searchParams.get("artist_id")).toBe("41259");
+  });
+
+  it("throws when the response names no artist", async () => {
+    const { client } = await initedClient({ artistTracks: { top_tracks: [] } });
+    await expect(client.getArtist(1)).rejects.toThrow(/artist/);
+  });
+});
+
+describe("QobuzClient.getAlbum", () => {
+  it("reads an album (a version) from album/get", async () => {
+    const { client, recorded } = await initedClient({
+      album: {
+        id: "pvsb64n704d0b",
+        title: "Mezzanine",
+        artist: { id: 1, name: "Massive Attack" },
+        maximum_bit_depth: 24,
+        maximum_sampling_rate: 44.1,
+        release_date_original: "1998-04-20",
+        tracks_count: 11,
+        tracks: { items: [{ id: 1, title: "Angel" }] },
+      },
+    });
+
+    await expect(client.getAlbum("pvsb64n704d0b")).resolves.toEqual({
+      id: "pvsb64n704d0b",
+      title: "Mezzanine",
+      artist: "Massive Attack",
+      bitDepth: 24,
+      samplingRate: 44.1,
+      releaseDate: "1998-04-20",
+      trackCount: 11,
+    });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/album/get"));
+    expect(request?.url.searchParams.get("album_id")).toBe("pvsb64n704d0b");
+  });
+
+  it("throws when the response is not an album", async () => {
+    const { client } = await initedClient({ album: { status: "error" } });
+    await expect(client.getAlbum("x")).rejects.toThrow(/album/);
+  });
+});
+
 describe("QobuzClient.getAlbumReleaseDate", () => {
   it("returns the album's original release date", async () => {
     const { client } = await initedClient({

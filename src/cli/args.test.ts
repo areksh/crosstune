@@ -931,6 +931,35 @@ describe("parseUpgradeArgs", () => {
   });
 });
 
+describe("playlist links for --playlist", () => {
+  const link = "https://play.qobuz.com/playlist/72685925";
+
+  it("accepts a Qobuz playlist link wherever a playlist id is typed", () => {
+    expect(parseDedupeArgs(["--playlist", link]).source).toEqual({
+      type: "playlist",
+      playlistId: 72685925,
+    });
+    expect(parseSimilarArgs(["--playlist", link]).source).toMatchObject({
+      type: "playlist",
+      playlistId: 72685925,
+    });
+    expect(parseUpgradeArgs(["--playlist", link]).source).toEqual({
+      type: "playlist",
+      playlistId: 72685925,
+    });
+    expect(parseStatsArgs(["--playlist", link]).source).toEqual({
+      type: "playlist",
+      playlistId: 72685925,
+    });
+  });
+
+  it("rejects a link to something other than a playlist", () => {
+    expect(() =>
+      parseDedupeArgs(["--playlist", "https://play.qobuz.com/album/abc"]),
+    ).toThrow(/numeric id or a playlist link/);
+  });
+});
+
 describe("playlist plan flags", () => {
   it("parses order, skip-favourites, one-copy and fit for playlist-from-artists", () => {
     const parsed = parsePlaylistArgs([

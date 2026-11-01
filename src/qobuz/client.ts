@@ -12,9 +12,11 @@ import { fetchBundleTokens, type BundleTokens } from "./bundle.js";
 import { buildUrl, paths } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
+  parseAlbumDetails,
   parseAlbumReleaseDate,
   parseAlbums,
   parseAlbumsPage,
+  parseArtistPage,
   parseArtistPageTracks,
   parseArtists,
   parseArtistsPage,
@@ -748,6 +750,43 @@ export class QobuzClient {
       }
       return parseTracksPage(await response.json());
     });
+  }
+
+  /**
+   * Look up an artist by id (e.g. from a pasted link), via `/artist/page`.
+   *
+   * @throws {QobuzError} kind `api-response` if Qobuz has no such artist.
+   */
+  async getArtist(artistId: number): Promise<Artist> {
+    const response = await this.#signedGet("artistpage", paths.artistPage, [
+      ["artist_id", String(artistId)],
+    ]);
+    if (!response.ok) {
+      throw new QobuzError("api-response", `artist/page failed with HTTP ${response.status}`);
+    }
+    const artist = parseArtistPage(await response.json());
+    if (artist === undefined) {
+      throw new QobuzError("api-response", `artist/page returned no artist for ${artistId}`);
+    }
+    return artist;
+  }
+
+  /**
+   * Look up one album (a single version) by id (e.g. from a pasted link), via
+   * `album/get`.
+   *
+   * @throws {QobuzError} kind `api-response` if Qobuz has no such album.
+   */
+  async getAlbum(albumId: string): Promise<Album> {
+    const response = await this.#signedGet("albumget", paths.albumGet, [["album_id", albumId]]);
+    if (!response.ok) {
+      throw new QobuzError("api-response", `album/get failed with HTTP ${response.status}`);
+    }
+    const album = parseAlbumDetails(await response.json());
+    if (album === undefined) {
+      throw new QobuzError("api-response", `album/get returned no album for ${albumId}`);
+    }
+    return album;
   }
 
   /** Look up an album's original release date (YYYY-MM-DD), if Qobuz has one. */

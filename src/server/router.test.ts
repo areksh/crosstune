@@ -16,6 +16,8 @@ const PORT = 4747;
 function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
   return {
     searchArtists: vi.fn(async () => [] as Artist[]),
+    getArtist: vi.fn(async (id: number) => ({ id, name: `Artist ${id}` })),
+    getAlbum: vi.fn(async (id: string): Promise<Album> => ({ id, title: "Album", artist: "Artist" })),
     getArtistTopTracks: vi.fn(async () => [] as Track[]),
     getSimilarArtists: vi.fn(async () => [] as Artist[]),
     getArtistReleases: vi.fn(async () => ({ releases: [] as Release[], truncated: false })),
@@ -1928,5 +1930,78 @@ describe("playlist plan options", () => {
   ])("rejects malformed plan options on %s", async (path, body) => {
     const res = await handleApi(request("POST", path, body), deps());
     expect(res.status).toBe(400);
+  });
+});
+
+describe("Qobuz links in lists", () => {
+  it("resolves an artist link by id and reports a link of another kind", async () => {
+    const svc = service({
+      getArtist: vi.fn(async (id: number) => ({ id, name: "Portishead" })),
+      getArtistTopTracks: vi.fn(async () => [{ id: 1, title: "Roads" }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve", {
+        artists: ["https://play.qobuz.com/artist/41259", "https://play.qobuz.com/playlist/5"],
+        tracksPerArtist: 1,
+      }),
+      deps({ service: svc }),
+    );
+    const body = res.body as {
+      resolvedArtists: Array<{ artist: Artist; fromLink?: boolean }>;
+      unresolvedArtists: string[];
+    };
+    expect(body.resolvedArtists.map((r) => [r.artist.name, r.fromLink])).toEqual([
+      ["Portishead", true],
+    ]);
+    expect(body.unresolvedArtists).toEqual([
+      "https://play.qobuz.com/playlist/5 (a playlist link, not an artist)",
+    ]);
+    expect(svc.searchArtists).not.toHaveBeenCalled();
+  });
+
+  it("resolves album links by id alongside 'Artist - Album' lines", async () => {
+    const svc = service({
+      getAlbum: vi.fn(async (id: string) => ({ id, title: "Mezzanine", artist: "Massive Attack" })),
+    });
+    const res = await handleApi(
+      request("POST", "/api/resolve-albums", {
+        entries: [
+          "https://www.qobuz.com/gb-en/album/mezzanine-massive-attack/pvsb64n704d0b",
+          "https://play.qobuz.com/artist/41259",
+        ],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      resolvedAlbums: Array<{ query: string; versions: Album[] }>;
+      unresolvedAlbums: string[];
+    };
+    expect(body.resolvedAlbums.map((r) => [r.query, r.versions.map((v) => v.id)])).toEqual([
+      ["Massive Attack - Mezzanine", ["pvsb64n704d0b"]],
+    ]);
+    expect(body.unresolvedAlbums).toEqual([
+      "https://play.qobuz.com/artist/41259 (an artist link, not an album)",
+    ]);
+  });
+
+  it("walks similar artists from a pasted playlist link", async () => {
+    const svc = similarService();
+    const res = await handleApi(
+      request("POST", "/api/similar/walk", {
+        source: { type: "playlist", playlistId: "https://play.qobuz.com/playlist/777" },
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(777);
+
+    const bad = await handleApi(
+      request("POST", "/api/similar/walk", {
+        source: { type: "playlist", playlistId: "https://play.qobuz.com/album/x" },
+      }),
+      deps({ service: svc }),
+    );
+    expect(bad.status).toBe(400);
   });
 });

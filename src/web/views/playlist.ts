@@ -12,6 +12,7 @@
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { PlanControls } from "../plan.js";
+import { parseQobuzLink } from "../../features/qobuz-links.js";
 import {
   groupHead,
   inRankOrder,
@@ -29,6 +30,8 @@ interface Artist {
 interface ResolvedArtist {
   query: string;
   artist: Artist;
+  /** The line was a Qobuz artist link. */
+  fromLink?: boolean;
   tracks: Track[];
   excluded: ExcludedTrack[];
 }
@@ -157,7 +160,7 @@ function renderPreview(result: ResolveResponse): void {
 
 /** The artist's name, noting the typed query when it differs from the match. */
 function artistLabel(a: { artist: Artist; query: string }): string {
-  if (a.artist.name.toLowerCase() === a.query.toLowerCase()) {
+  if (a.artist.name.toLowerCase() === a.query.toLowerCase() || isLink(a.query)) {
     return a.artist.name;
   }
   return `${a.artist.name} (matched "${a.query}")`;
@@ -169,9 +172,15 @@ function renderArtistGroup(resolvedArtist: ResolvedArtist): HTMLElement {
 
   const renamed =
     resolvedArtist.artist.name.toLowerCase() !== resolvedArtist.query.toLowerCase();
+  const note =
+    resolvedArtist.fromLink === true
+      ? "from a link"
+      : renamed
+        ? `matched "${resolvedArtist.query}"`
+        : undefined;
   group.appendChild(
     groupHead("h3", resolvedArtist.artist.name, {
-      ...(renamed && { note: `matched "${resolvedArtist.query}"` }),
+      ...(note !== undefined && { note }),
       count: trackCountLabel(resolvedArtist),
     }),
   );
@@ -315,4 +324,9 @@ function showResult(
         : "";
     node.textContent = `Added ${result.added.length} tracks to the playlist${skipped}.`;
   }
+}
+
+/** True when a typed line is a Qobuz link (shown by name, not as typed). */
+function isLink(query: string): boolean {
+  return parseQobuzLink(query) !== undefined;
 }
