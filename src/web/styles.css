@@ -1454,3 +1454,244 @@ button.small {
     height: 40px;
   }
 }
+
+/* Word play: mode cards, the phrase cards of a reading, and its other splits. */
+
+.wp-setup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 28px;
+}
+
+.wp-modes,
+.wp-options,
+.wp-splits {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.wp-modes legend,
+.wp-options legend,
+.wp-splits legend {
+  padding: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.wp-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wp-mode {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.wp-mode:hover {
+  border-color: var(--line-strong);
+}
+
+.wp-mode:has(input:checked) {
+  background: var(--nav-active-bg);
+  border-color: var(--notice-line);
+}
+
+.wp-mode input {
+  margin-top: 2px;
+}
+
+.wp-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wp-mode-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wp-mode-desc {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.wp-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.wp-inputs .field {
+  margin: 0;
+}
+
+.wp-text {
+  min-height: 48px;
+  font-size: 17px;
+}
+
+.wp-heading {
+  font-size: 30px;
+}
+
+.wp-cards {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.wp-card {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.wp-phrase {
+  font-stretch: 70%;
+  font-weight: 800;
+  font-size: 34px;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.wp-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.wp-song {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wp-song > .track-text {
+  flex: 1;
+}
+
+.wp-song .title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wp-song .meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Cards stay text-only unless artwork is on. */
+.wp-song > .cover {
+  display: none;
+}
+
+.artwork-on .wp-song > .cover {
+  display: block;
+}
+
+.wp-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wp-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--hires-text);
+  border: 1px solid var(--notice-line);
+  background: var(--hires-bg);
+}
+
+.wp-swap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wp-swap select {
+  min-height: 38px;
+  padding: 0 8px;
+  font-size: 13px;
+  width: 100%;
+}
+
+/* A phrase or letter nothing matched: called out in the notice colours. */
+.wp-card.wp-gap {
+  background: var(--notice-bg);
+  border-color: var(--notice-line);
+}
+
+.wp-gap .wp-phrase {
+  color: var(--notice-text);
+}
+
+.wp-gap .wp-bar {
+  background: var(--notice-line);
+}
+
+.wp-none {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.wp-splits {
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.wp-splits legend {
+  padding: 0 6px;
+}
+
+.wp-split-option {
+  flex-wrap: wrap;
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.wp-split-count {
+  color: var(--muted);
+}
+
+.wp-split-gap {
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .wp-phrase {
+    font-size: 28px;
+  }
+
+  .wp-card {
+    flex-basis: 100%;
+  }
+}

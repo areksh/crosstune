@@ -26,6 +26,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   like them) or from one of your playlists (expand it with artists it does not
   have yet), walking one to three levels deep. Available on the CLI and in the
   web UI.
+- **Word play** -- make a playlist out of song titles: songs whose title
+  contains or is a word, titles that read as a sentence in order ("a quick
+  brown fox / jumped / over / ..."), or titles from your favourites or a
+  playlist whose first letters spell a word or run from A to Z. Available on
+  the CLI and in the web UI.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
@@ -209,6 +214,50 @@ refuses a very large run (over about 1000 tracks or 1500 Qobuz requests) unless
 `--yes` is given. Each similar artist is fetched and added once, artists already in a
 source playlist are never added, and the command says when the walk stopped at
 `--max-artists`.
+
+```sh
+# A sentence told in song titles (report only; add --apply to create it)
+npm run dev -- word-play --sentence "a quick brown fox jumped over the lazy dog"
+
+# One word per song, letting "jumped" match "Jump"
+npm run dev -- word-play --sentence "a quick brown fox jumped over the lazy dog" \
+  --split words --close-forms --apply
+
+# 25 songs with "night" in the title, or 10 called exactly "Home"
+npm run dev -- word-play --contains night --apply
+npm run dev -- word-play --exact home --count 10 --name "Home x10" --apply
+
+# Spell QOBUZ, or run A to Z, from your favourites or a playlist
+npm run dev -- word-play --acrostic QOBUZ --favourites --apply
+npm run dev -- word-play --a-to-z --playlist 12345678 --add-to 87654321 --apply
+```
+
+`word-play` makes a playlist out of song titles. Pick one mode:
+`--contains <word>` (titles containing the word or phrase as whole words) or
+`--exact <word>` (titles that *are* it), each taking up to `--count N` songs
+(1-100, default 25) from a catalogue search; `--sentence "<text>"`, which splits
+the sentence into consecutive phrases that are each a song title, in order; or
+`--acrostic <word>` / `--a-to-z`, whose titles' first letters spell the word or
+run through the alphabet, picked from `--favourites` or `--playlist <id>`.
+Matching ignores punctuation, case and accents ("Dog." counts as "dog") and
+version labels ("(Live)", "[Remastered 2011]", "- 2011 Remaster") unless
+`--keep-punctuation` / `--keep-versions` is given; `--close-forms` lets a light
+English stemmer match "jumped" with "Jump" or "dogs" with "Dog". Each song comes
+from a different artist where another one could fill its place
+(`--allow-repeat-artists` turns this off), `--prefer-hires` breaks ties towards
+hi-res, and the [filters](#filters) leave tracks out of the candidates.
+
+`--split` chooses how a sentence is split: `fewest` (default; the fewest songs,
+i.e. the longest phrases), `words` (one word per song) or `any` (any mix,
+preferring exact matches over close forms, then fewer songs). All three first
+leave as few words unmatched as they can; words no title matches are reported
+and left out. The command also lists up to three other ways to split it. Each
+run of up to `--max-span K` words (1-8, default 6) is searched once, shorter
+runs first, with at most 120 searches per sentence (of up to 30 words).
+
+The playlist is named after the text (title-cased) unless `--name` is given;
+`--public` makes it public, or `--add-to <id>` appends to an existing playlist
+instead. Without `--apply` the command only reports what it would add.
 
 ```sh
 # Report duplicate tracks in a playlist, or across your favourites
@@ -438,6 +487,24 @@ browser.
 4. Choose a destination -- a new playlist, or an existing one (tracks already in
    it are skipped; when starting from a playlist, that playlist is preselected)
    -- and commit.
+
+**Word play:**
+
+1. Pick a mode (contains a word, is exactly a word, sentence, acrostic, or A to
+   Z) and type the word or sentence. For a sentence, choose how to split it (as
+   few songs as possible, one word per song, or any mix that works); for an
+   acrostic or A to Z, choose whether to pick from your favourites or a
+   playlist. Adjust the matching (punctuation and capitals, version labels,
+   close forms, a different artist per song, hi-res first) and, optionally,
+   the *Filters*.
+2. Find songs: the reading is shown as cards in order, each with its phrase or
+   letter, the chosen song and a list to swap it for another match. Badges mark
+   a song matched as a close form or only by ignoring punctuation; phrases and
+   letters nothing matched are called out and left out. For a sentence, the
+   other ways to split it are offered underneath.
+3. Choose a destination -- a new playlist (named after your text by default)
+   or an existing one (songs already in it are skipped) -- and save. Songs are
+   added in sentence or letter order.
 
 **Deduplicator:**
 

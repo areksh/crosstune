@@ -27,6 +27,16 @@ import {
   parseDiscList,
   type TrackFilterSpec,
 } from "../features/track-filter.js";
+import {
+  DEFAULT_MATCH_OPTIONS,
+  SPLIT_OBJECTIVES,
+  WORD_PLAY_COUNT,
+  WORD_PLAY_MAX_SPAN,
+  type MatchOptions,
+  type SplitObjective,
+  type WordPlayRequest,
+  type WordPlaySource,
+} from "../features/word-play.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
 export interface ExtractedLogLevel {
@@ -1004,4 +1014,201 @@ function oneOf<T extends string>(
     throw new Error(`${flag} must be one of: ${allowed.join(", ")} (got "${value}")`);
   }
   return value as T;
+}
+
+/** Arguments for the `word-play` command. */
+export interface WordPlayArgs {
+  request: WordPlayRequest;
+  match: MatchOptions;
+  /** Name for a new playlist; absent uses the plan's suggested name. */
+  name?: string;
+  /** Add to this existing playlist instead of creating one. */
+  addTo?: number;
+  isPublic: boolean;
+  /** Whether to actually write (otherwise resolve and report only). */
+  apply: boolean;
+  /** Present only when an exclude flag was given. */
+  filter?: TrackFilterSpec;
+}
+
+/** Flags of `word-play` that only make sense in some modes. */
+const WORD_PLAY_MODE_FLAGS: Record<string, readonly string[]> = {
+  "--split": ["sentence"],
+  "--max-span": ["sentence"],
+  "--count": ["contains", "exact"],
+  "--favourites": ["acrostic", "a-to-z"],
+  "--playlist": ["acrostic", "a-to-z"],
+};
+
+/**
+ * Parse the arguments for the `word-play` command.
+ *
+ * Exactly one mode: `--sentence <text>`, `--contains <word>`, `--exact <word>`,
+ * `--acrostic <word>` or `--a-to-z`. Sentence only: `--split
+ * fewest|words|any` and `--max-span K` (1-8, default 6). Contains/exact only:
+ * `--count N` (1-100, default 25). Acrostic and A-to-Z need a source:
+ * `--favourites` (or `--favorites`) or `--playlist <id>`. Matching:
+ * `--close-forms`, `--keep-punctuation`, `--keep-versions`,
+ * `--allow-repeat-artists`, `--prefer-hires`. Writing: `--name <name>` (default:
+ * the text, title-cased) and `--public` for a new playlist, or `--add-to <id>`
+ * for an existing one; nothing is written without `--apply`. The repeatable
+ * `--exclude-track`/`--exclude-album`/`--exclude-artist` filter candidates.
+ *
+ * @throws {Error} on a missing or doubled mode or source, a flag for another
+ *   mode, an out-of-range number, or an unknown argument.
+ */
+export function parseWordPlayArgs(argv: readonly string[]): WordPlayArgs {
+  const modes: { mode: WordPlayRequest["mode"]; text: string }[] = [];
+  const sources: WordPlaySource[] = [];
+  const used = new Set<string>();
+  const match: MatchOptions = { ...DEFAULT_MATCH_OPTIONS };
+  let split: SplitObjective | undefined;
+  let maxSpan: number | undefined;
+  let count: number | undefined;
+  let name: string | undefined;
+  let addTo: number | undefined;
+  let isPublic = false;
+  let apply = false;
+  const filter = new FilterFlags(false);
+
+  const textOf = (flag: string, value: string | undefined): string => {
+    if (value === undefined || value.trim().length === 0) {
+      throw new Error(`${flag} requires a value`);
+    }
+    return value;
+  };
+  const idOf = (flag: string, value: string | undefined): number => {
+    const id = Number(value);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error(`${flag} must be a numeric id, got "${value}"`);
+    }
+    return id;
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const consumed = filter.take(argv, i);
+    if (consumed > 0) {
+      i += consumed - 1;
+      continue;
+    }
+    const arg = argv[i]!;
+    const value = argv[i + 1];
+    used.add(arg === "--favorites" ? "--favourites" : arg);
+    switch (arg) {
+      case "--sentence":
+      case "--contains":
+      case "--exact":
+      case "--acrostic":
+        modes.push({ mode: arg.slice(2) as WordPlayRequest["mode"], text: textOf(arg, value) });
+        i += 1;
+        break;
+      case "--a-to-z":
+        modes.push({ mode: "a-to-z", text: "" });
+        break;
+      case "--split":
+        if (value === undefined || !(SPLIT_OBJECTIVES as readonly string[]).includes(value)) {
+          throw new Error(`--split must be one of: ${SPLIT_OBJECTIVES.join(", ")} (got "${value}")`);
+        }
+        split = value as SplitObjective;
+        i += 1;
+        break;
+      case "--max-span":
+        maxSpan = boundedInt(arg, value, WORD_PLAY_MAX_SPAN);
+        i += 1;
+        break;
+      case "--count":
+        count = boundedInt(arg, value, WORD_PLAY_COUNT);
+        i += 1;
+        break;
+      case "--favourites":
+      case "--favorites":
+        sources.push({ type: "favourites" });
+        break;
+      case "--playlist":
+        sources.push({ type: "playlist", playlistId: idOf(arg, value) });
+        i += 1;
+        break;
+      case "--close-forms":
+        match.closeForms = true;
+        break;
+      case "--keep-punctuation":
+        match.ignorePunctuation = false;
+        break;
+      case "--keep-versions":
+        match.ignoreVersions = false;
+        break;
+      case "--allow-repeat-artists":
+        match.onePerArtist = false;
+        break;
+      case "--prefer-hires":
+        match.preferHires = true;
+        break;
+      case "--name":
+        name = textOf(arg, value);
+        i += 1;
+        break;
+      case "--add-to":
+        addTo = idOf(arg, value);
+        i += 1;
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (modes.length !== 1) {
+    throw new Error(
+      modes.length === 0
+        ? "A mode is required: --sentence <text>, --contains <word>, --exact <word>, --acrostic <word> or --a-to-z"
+        : "Give only one of --sentence, --contains, --exact, --acrostic or --a-to-z",
+    );
+  }
+  const { mode, text } = modes[0]!;
+  for (const [flag, allowed] of Object.entries(WORD_PLAY_MODE_FLAGS)) {
+    if (used.has(flag) && !allowed.includes(mode)) {
+      throw new Error(`${flag} does not apply to --${mode}`);
+    }
+  }
+  if (addTo !== undefined && (name !== undefined || isPublic)) {
+    throw new Error("--add-to cannot be combined with --name or --public");
+  }
+
+  let request: WordPlayRequest;
+  if (mode === "acrostic" || mode === "a-to-z") {
+    if (sources.length !== 1) {
+      throw new Error(
+        sources.length === 0
+          ? `--${mode} needs a source: --favourites or --playlist <id>`
+          : "Give only one of --favourites or --playlist",
+      );
+    }
+    const source = sources[0]!;
+    request = mode === "acrostic" ? { mode, text, source } : { mode, source };
+  } else if (mode === "sentence") {
+    request = {
+      mode,
+      text,
+      ...(split !== undefined && { split }),
+      ...(maxSpan !== undefined && { maxSpan }),
+    };
+  } else {
+    request = { mode, text, ...(count !== undefined && { count }) };
+  }
+
+  const spec = filter.spec();
+  return {
+    request,
+    match,
+    isPublic,
+    apply,
+    ...(name !== undefined && { name }),
+    ...(addTo !== undefined && { addTo }),
+    ...(spec !== undefined && { filter: spec }),
+  };
 }

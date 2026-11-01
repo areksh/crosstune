@@ -10,6 +10,7 @@ import {
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
+  parseWordPlayArgs,
 } from "./args.js";
 
 describe("extractLogLevel", () => {
@@ -608,5 +609,114 @@ describe("parseStatsArgs", () => {
 
   it("rejects unknown arguments", () => {
     expect(() => parseStatsArgs(["--favourites", "--top", "5"])).toThrow(/Unknown argument/);
+  });
+});
+
+describe("parseWordPlayArgs", () => {
+  const defaults = {
+    ignorePunctuation: true,
+    ignoreVersions: true,
+    closeForms: false,
+    onePerArtist: true,
+    preferHires: false,
+  };
+
+  it("parses a sentence with defaults (report only)", () => {
+    expect(parseWordPlayArgs(["--sentence", "a quick brown fox"])).toEqual({
+      request: { mode: "sentence", text: "a quick brown fox" },
+      match: defaults,
+      isPublic: false,
+      apply: false,
+    });
+  });
+
+  it("parses the sentence options", () => {
+    expect(
+      parseWordPlayArgs(["--sentence", "x y", "--split", "words", "--max-span", "3"]).request,
+    ).toEqual({ mode: "sentence", text: "x y", split: "words", maxSpan: 3 });
+  });
+
+  it("parses contains and exact with a count", () => {
+    expect(parseWordPlayArgs(["--contains", "night", "--count", "10"]).request).toEqual({
+      mode: "contains",
+      text: "night",
+      count: 10,
+    });
+    expect(parseWordPlayArgs(["--exact", "home"]).request).toEqual({
+      mode: "exact",
+      text: "home",
+    });
+  });
+
+  it("parses acrostic and A-to-Z sources", () => {
+    expect(parseWordPlayArgs(["--acrostic", "QOBUZ", "--favorites"]).request).toEqual({
+      mode: "acrostic",
+      text: "QOBUZ",
+      source: { type: "favourites" },
+    });
+    expect(parseWordPlayArgs(["--a-to-z", "--playlist", "42"]).request).toEqual({
+      mode: "a-to-z",
+      source: { type: "playlist", playlistId: 42 },
+    });
+  });
+
+  it("parses the matching flags", () => {
+    expect(
+      parseWordPlayArgs([
+        "--exact",
+        "x",
+        "--close-forms",
+        "--keep-punctuation",
+        "--keep-versions",
+        "--allow-repeat-artists",
+        "--prefer-hires",
+      ]).match,
+    ).toEqual({
+      ignorePunctuation: false,
+      ignoreVersions: false,
+      closeForms: true,
+      onePerArtist: false,
+      preferHires: true,
+    });
+  });
+
+  it("parses the destination, --apply and filters", () => {
+    expect(
+      parseWordPlayArgs([
+        "--exact",
+        "x",
+        "--name",
+        "Mine",
+        "--public",
+        "--apply",
+        "--exclude-artist",
+        "Drake",
+      ]),
+    ).toMatchObject({
+      name: "Mine",
+      isPublic: true,
+      apply: true,
+      filter: { excludeArtists: ["Drake"], excludeTracks: [], excludeAlbums: [] },
+    });
+    expect(parseWordPlayArgs(["--exact", "x", "--add-to", "7"]).addTo).toBe(7);
+  });
+
+  it.each([
+    [[], /mode is required/],
+    [["--exact", "x", "--contains", "y"], /only one/],
+    [["--sentence"], /requires a value/],
+    [["--exact", "x", "--split", "words"], /--split does not apply/],
+    [["--sentence", "x", "--count", "5"], /--count does not apply/],
+    [["--sentence", "x", "--favourites"], /--favourites does not apply/],
+    [["--sentence", "x", "--split", "longest"], /--split must be one of/],
+    [["--sentence", "x", "--max-span", "9"], /--max-span/],
+    [["--contains", "x", "--count", "0"], /--count/],
+    [["--acrostic", "x"], /needs a source/],
+    [["--a-to-z", "--favourites", "--playlist", "1"], /only one of --favourites/],
+    [["--a-to-z", "--playlist", "abc"], /numeric id/],
+    [["--exact", "x", "--add-to", "1", "--name", "y"], /--add-to/],
+    [["--exact", "x", "positional"], /Unknown argument/],
+  ])("rejects %j", (argv, error) => {
+    expect(() => parseWordPlayArgs(argv)).toThrow(error);
   });
 });

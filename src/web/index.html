@@ -28,6 +28,7 @@
             <a class="nav-link" data-view="playlist" href="#/playlist">Playlist from artists</a>
             <a class="nav-link" data-view="albums" href="#/albums">Playlist from albums</a>
             <a class="nav-link" data-view="similar" href="#/similar">Similar artists</a>
+            <a class="nav-link" data-view="word-play" href="#/word-play">Word play</a>
           </div>
           <div class="nav-group">
             <span class="nav-label">Tidy up</span>
@@ -90,6 +91,13 @@
                 <span class="tool-desc">
                   Grow a list of artists or a playlist through the artists like
                   them.
+                </span>
+              </a>
+              <a class="tool-link" href="#/word-play">
+                <span class="tool-name">Word play</span>
+                <span class="tool-desc">
+                  A playlist out of song titles: a sentence told in titles, an
+                  acrostic, A to Z, or every song called "Home".
                 </span>
               </a>
             </section>
@@ -559,6 +567,220 @@
               <button id="commit-similar" type="button">Create playlist</button>
               <p id="commit-similar-error" class="error" hidden></p>
               <p id="commit-similar-result" class="result" hidden></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- Word play -->
+        <section id="view-word-play" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Word play</h1>
+              <p class="lede">Make a playlist out of song titles.</p>
+            </div>
+            <ol id="wp-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Words</li>
+              <li>2 Review</li>
+              <li>3 Save</li>
+            </ol>
+          </header>
+
+          <section class="panel">
+            <div class="wp-setup">
+              <fieldset class="wp-modes">
+                <legend>Mode</legend>
+                <label class="wp-mode">
+                  <input type="radio" name="wp-mode" value="contains" />
+                  <span class="wp-mode-text">
+                    <span class="wp-mode-name">Contains a word</span>
+                    <span class="wp-mode-desc">Every title has the word in it, e.g. 25 songs with "night".</span>
+                  </span>
+                </label>
+                <label class="wp-mode">
+                  <input type="radio" name="wp-mode" value="exact" />
+                  <span class="wp-mode-text">
+                    <span class="wp-mode-name">Is exactly a word</span>
+                    <span class="wp-mode-desc">Titles that are just the word, e.g. every song called "Home".</span>
+                  </span>
+                </label>
+                <label class="wp-mode">
+                  <input type="radio" name="wp-mode" value="sentence" checked />
+                  <span class="wp-mode-text">
+                    <span class="wp-mode-name">Sentence</span>
+                    <span class="wp-mode-desc">Titles that read as your sentence, in order.</span>
+                  </span>
+                </label>
+                <label class="wp-mode">
+                  <input type="radio" name="wp-mode" value="acrostic" />
+                  <span class="wp-mode-text">
+                    <span class="wp-mode-name">Acrostic</span>
+                    <span class="wp-mode-desc">First letters spell a word: Q, O, B, U, Z.</span>
+                  </span>
+                </label>
+                <label class="wp-mode">
+                  <input type="radio" name="wp-mode" value="a-to-z" />
+                  <span class="wp-mode-text">
+                    <span class="wp-mode-name">A to Z</span>
+                    <span class="wp-mode-desc">One song for each letter of the alphabet.</span>
+                  </span>
+                </label>
+              </fieldset>
+
+              <div class="wp-inputs">
+                <label id="wp-text-field" class="field">
+                  <span id="wp-text-label">Sentence</span>
+                  <input
+                    id="wp-text"
+                    class="wp-text"
+                    type="text"
+                    placeholder="A quick brown fox jumped over the lazy dog"
+                  />
+                </label>
+                <label id="wp-count-field" class="field field-inline" hidden>
+                  <span>Songs</span>
+                  <input id="wp-count" type="number" min="1" max="100" value="25" />
+                </label>
+                <fieldset id="wp-split-field" class="wp-options">
+                  <legend>Split it into</legend>
+                  <label class="radio">
+                    <input type="radio" name="wp-split" value="fewest" checked />
+                    As few songs as possible
+                  </label>
+                  <label class="radio">
+                    <input type="radio" name="wp-split" value="words" />
+                    One word per song
+                  </label>
+                  <label class="radio">
+                    <input type="radio" name="wp-split" value="any" />
+                    Any mix that works (exact matches first)
+                  </label>
+                </fieldset>
+                <fieldset id="wp-source-field" class="wp-options" hidden>
+                  <legend>Pick songs from</legend>
+                  <label class="radio">
+                    <input type="radio" name="wp-source" value="favourites" checked />
+                    Your favourite tracks
+                  </label>
+                  <label class="radio">
+                    <input type="radio" name="wp-source" value="playlist" />
+                    A playlist
+                  </label>
+                  <div id="wp-source-playlist-fields" class="target-fields" hidden>
+                    <select id="wp-source-playlist" aria-label="Playlist">
+                      <option value="">Loading...</option>
+                    </select>
+                  </div>
+                </fieldset>
+                <fieldset class="wp-options">
+                  <legend>Matching</legend>
+                  <label class="checkbox">
+                    <input id="wp-ignore-punctuation" type="checkbox" checked />
+                    Ignore punctuation and capitals (Dog. counts as dog)
+                  </label>
+                  <label class="checkbox">
+                    <input id="wp-ignore-versions" type="checkbox" checked />
+                    Ignore version labels (Live, Remastered)
+                  </label>
+                  <label class="checkbox">
+                    <input id="wp-close-forms" type="checkbox" />
+                    Allow close forms (jumped can be Jump)
+                  </label>
+                  <label class="checkbox">
+                    <input id="wp-one-per-artist" type="checkbox" checked />
+                    A different artist for every song
+                  </label>
+                  <label class="checkbox">
+                    <input id="wp-prefer-hires" type="checkbox" />
+                    Prefer hi-res
+                  </label>
+                </fieldset>
+              </div>
+            </div>
+            <details class="filters">
+              <summary>Filters</summary>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Exclude tracks matching (one per line)</span>
+                  <textarea
+                    id="wp-exclude-tracks"
+                    rows="3"
+                    placeholder="karaoke&#10;/instrumental|tribute/"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude albums matching (one per line)</span>
+                  <textarea
+                    id="wp-exclude-albums"
+                    rows="3"
+                    placeholder="greatest hits&#10;live at"
+                  ></textarea>
+                </label>
+                <label class="field">
+                  <span>Exclude artists (one per line)</span>
+                  <textarea
+                    id="wp-exclude-artists"
+                    rows="3"
+                    placeholder="Drake&#10;bjork&#10;/^the /"
+                  ></textarea>
+                </label>
+              </div>
+              <p class="hint">
+                Terms match whole words, ignoring case: "live" skips "Live at
+                Leeds" but not "Alive". Wrap a term in slashes for a regular
+                expression. Excluded songs are never offered.
+              </p>
+            </details>
+            <div class="actions">
+              <button id="wp-find" type="button">Find songs</button>
+            </div>
+            <p id="wp-find-error" class="error" hidden></p>
+          </section>
+
+          <section id="wp-review" class="review" hidden>
+            <h2 id="wp-heading" class="wp-heading">Review</h2>
+            <p id="wp-summary" class="hint"></p>
+            <div id="wp-unmatched" class="warning" hidden></div>
+            <ol id="wp-cards" class="wp-cards"></ol>
+            <fieldset id="wp-splits" class="wp-splits" hidden>
+              <legend>Other ways to split it</legend>
+              <div id="wp-split-options"></div>
+            </fieldset>
+
+            <div class="commit-bar">
+              <p id="wp-selected-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="segmented" role="radiogroup" aria-label="Save to">
+                  <label>
+                    <input type="radio" name="wp-target" value="new" checked />
+                    New playlist
+                  </label>
+                  <label>
+                    <input type="radio" name="wp-target" value="existing" />
+                    Existing playlist
+                  </label>
+                </div>
+                <div id="wp-new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="wp-playlist-name" type="text" placeholder="My playlist" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="wp-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+                <div id="wp-existing-fields" class="target-fields" hidden>
+                  <label class="field field-inline">
+                    <span>Playlist</span>
+                    <select id="wp-playlist-select">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <button id="wp-commit" type="button">Create playlist</button>
+              <p id="wp-commit-error" class="error" hidden></p>
+              <p id="wp-commit-result" class="result" hidden></p>
             </div>
           </section>
         </section>

@@ -93,6 +93,18 @@
  *       by decade and the most-saved artists and albums. --decade-playlist
  *       (e.g. 1990s) makes a playlist of one decade's tracks (with --apply).
  *
+ *   qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] \
+ *       [--max-span K] | --contains <word> [--count N] | --exact <word> \
+ *       [--count N] | --acrostic <word> (--favourites | --playlist <id>) \
+ *       | --a-to-z (--favourites | --playlist <id>)) [--close-forms] \
+ *       [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] \
+ *       [--prefer-hires] [--name <name>] [--public] [--add-to <id>] \
+ *       [filters] [--apply]
+ *       Make a playlist out of song titles: titles containing or equal to a
+ *       word, titles that read as a sentence in order, or (from favourites or
+ *       a playlist) titles whose first letters spell a word or run A to Z.
+ *       Reports the plan only unless --apply is given.
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -112,6 +124,7 @@ import {
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
+  parseWordPlayArgs,
   type DedupeSource,
   type ExportArgs,
   type ImportArgs,
@@ -179,6 +192,14 @@ import {
   findDecade,
   formatStatsReport,
 } from "./features/stats.js";
+import {
+  commitWordPlay,
+  resolveWordPlay,
+  splitTrackIds,
+  type WordPlayPlan,
+  type WordPlaySlot,
+  type WordPlaySplit,
+} from "./features/word-play.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -263,6 +284,11 @@ async function main(): Promise<void> {
     }
     case "stats": {
       const plan = planStats(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "word-play": {
+      const plan = planWordPlay(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -959,6 +985,100 @@ function readLinesFromStdin(): string[] {
   }
 }
 
+/**
+ * Validate the word-play command's arguments up front, returning an executor
+ * that resolves the plan, reports it, and writes it only with --apply.
+ */
+function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const parsed = parseWordPlayArgs(argv);
+  const filter =
+    parsed.filter === undefined ? undefined : compileTrackFilter(parsed.filter);
+
+  return async (client: QobuzClient): Promise<void> => {
+    logger.info("Finding songs...");
+    const plan = await resolveWordPlay(client, parsed.request, {
+      match: parsed.match,
+      ...(filter !== undefined && { filter }),
+    });
+    const split = plan.splits[0]!;
+    reportWordPlay(plan, split);
+
+    const trackIds = splitTrackIds(split);
+    if (trackIds.length === 0) {
+      logger.warn("No songs found to add.");
+      return;
+    }
+    const name = parsed.name ?? plan.suggestedName;
+    if (!parsed.apply) {
+      logger.info(
+        parsed.addTo === undefined
+          ? `\n(dry run -- pass --apply to create "${name}" with ${trackIds.length} songs)`
+          : `\n(dry run -- pass --apply to add ${trackIds.length} songs to playlist ${parsed.addTo})`,
+      );
+      return;
+    }
+    const result = await commitWordPlay(client, {
+      target:
+        parsed.addTo === undefined
+          ? { type: "new", name, isPublic: parsed.isPublic }
+          : { type: "existing", playlistId: parsed.addTo },
+      trackIds,
+    });
+    logger.info(
+      result.playlist === undefined
+        ? `\nAdded ${result.added.length} songs to the playlist${result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : ""}.`
+        : `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.added.length} songs.`,
+    );
+  };
+}
+
+/** Log a word-play plan: each slot and its song, then other splits and gaps. */
+function reportWordPlay(plan: WordPlayPlan, split: WordPlaySplit): void {
+  const numbered = plan.mode === "contains" || plan.mode === "exact";
+  logger.info(`\n${split.songCount} song${split.songCount === 1 ? "" : "s"}:`);
+  split.slots.forEach((slot, index) => {
+    const label = numbered ? `${index + 1}.` : slot.label;
+    logger.info(`  ${label}  ->  ${describeSlot(slot)}`);
+  });
+  if (plan.requested !== undefined && split.songCount < plan.requested) {
+    logger.warn(`only ${split.songCount} of ${plan.requested} songs found`);
+  }
+  if (split.unmatched.length > 0) {
+    logger.warn(`nothing found for: ${split.unmatched.join(", ")}`);
+  }
+  if (plan.splits.length > 1) {
+    logger.info("\nOther ways to split it:");
+    for (const other of plan.splits.slice(1)) {
+      const gaps =
+        other.unmatched.length > 0 ? `; nothing for: ${other.unmatched.join(", ")}` : "";
+      logger.info(
+        `  ${other.slots.map((slot) => slot.label).join(" / ")}  (${other.songCount} songs${gaps})`,
+      );
+    }
+  }
+  if (plan.skippedSearches > 0) {
+    logger.warn(
+      `searched ${plan.searches} phrases; ${plan.skippedSearches} longer ones were not searched (lower --max-span or shorten the sentence)`,
+    );
+  }
+  if (plan.excludedCount > 0) {
+    logger.info(`(${plan.excludedCount} matching tracks left out by the filters)`);
+  }
+}
+
+function describeSlot(slot: WordPlaySlot): string {
+  if (slot.chosen === undefined) {
+    return "(nothing found)";
+  }
+  const { track } = slot.chosen;
+  const notes = [
+    slot.chosen.closeForm ? "close form" : undefined,
+    slot.chosen.punctuationIgnored ? "punctuation ignored" : undefined,
+    `${slot.matchCount} match${slot.matchCount === 1 ? "" : "es"}`,
+  ].filter((note): note is string => note !== undefined);
+  return `${track.artist ?? "?"} - ${track.title}${track.version === undefined ? "" : ` (${track.version})`}  [${notes.join(", ")}]`;
+}
+
 function printUsage(): void {
   logger.info(
     [
@@ -976,6 +1096,7 @@ function printUsage(): void {
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
       "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
+      '  qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
@@ -993,6 +1114,7 @@ function printUsage(): void {
       "import resolves and reports only unless --apply is given; --account restores a backup.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',
       'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
+      "word-play reports only unless --apply is given; --split defaults to fewest, --max-span to 6 (1-8), --count to 25 (1-100); the playlist is named after the text unless --name is given.",
     ].join("\n"),
   );
 }

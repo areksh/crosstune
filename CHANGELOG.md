@@ -64,7 +64,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   playlists, or be shuffled. The web UI shows the overlap as a bar above the
   reviewable track list, and saves to a new playlist ("A + B") or an existing
   one.
-
+- Word play: make a playlist out of song titles, on the CLI (`word-play`) and
+  in the web UI. Five modes: titles containing a word, titles that are exactly
+  a word, a sentence told in consecutive titles (split into the fewest songs,
+  one word per song, or any mix, with up to three alternative splits and
+  unmatched words called out), and, from your favourites or a playlist, an
+  acrostic or an A-to-Z. Matching ignores punctuation, case, accents and
+  version labels by default, can accept close forms ("jumped" for "Jump"),
+  avoids repeating an artist, and honours the exclude filters. Each song can be
+  swapped for another match before saving.
 - Optional album artwork in the web UI. A *Show artwork* checkbox in the sidebar
   (off by default, remembered in the browser) shows covers next to tracks in
   every review and the deduplicator, and next to each album in playlist from

@@ -1209,3 +1209,147 @@ describe("POST /api/stats", () => {
     },
   );
 });
+
+describe("POST /api/word-play/resolve", () => {
+  it("splits a sentence into song titles", async () => {
+    const titles: Record<string, Track> = {
+      lazy: { id: 1, title: "Lazy", artist: "Deep Purple" },
+      dog: { id: 2, title: "Dog.", artist: "Band" },
+    };
+    const searchTracks = vi.fn(async (query: string) => {
+      const hit = titles[query];
+      return hit === undefined ? [] : [hit];
+    });
+    const res = await handleApi(
+      request("POST", "/api/word-play/resolve", {
+        mode: "sentence",
+        text: "lazy dog",
+        split: "words",
+      }),
+      deps({ service: service({ searchTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      splits: { slots: { label: string; chosen?: { track: Track } }[] }[];
+      suggestedName: string;
+    };
+    expect(body.splits[0]!.slots.map((s) => [s.label, s.chosen?.track.id])).toEqual([
+      ["lazy", 1],
+      ["dog", 2],
+    ]);
+    expect(body.suggestedName).toBe("Lazy Dog");
+  });
+
+  it("passes the match options and filter through", async () => {
+    const searchTracks = vi.fn(async () => [
+      { id: 1, title: "Jump", artist: "Van Halen" },
+      { id: 2, title: "Jump", artist: "Kris Kross" },
+    ]);
+    const res = await handleApi(
+      request("POST", "/api/word-play/resolve", {
+        mode: "exact",
+        text: "jumped",
+        match: { closeForms: true },
+        filter: { excludeArtists: ["Van Halen"] },
+      }),
+      deps({ service: service({ searchTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      splits: { slots: { chosen?: { track: Track; closeForm: boolean } }[] }[];
+      excludedCount: number;
+    };
+    expect(body.splits[0]!.slots.map((s) => s.chosen?.track.id)).toEqual([2]);
+    expect(body.splits[0]!.slots[0]!.chosen?.closeForm).toBe(true);
+    expect(body.excludedCount).toBe(1);
+  });
+
+  it("reads an acrostic's source playlist", async () => {
+    const getPlaylistTracks = vi.fn(async () => [{ id: 7, title: "Hello", artist: "Adele" }]);
+    const res = await handleApi(
+      request("POST", "/api/word-play/resolve", {
+        mode: "acrostic",
+        text: "hi",
+        source: { type: "playlist", playlistId: 42 },
+      }),
+      deps({ service: service({ getPlaylistTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(getPlaylistTracks).toHaveBeenCalledWith(42);
+    expect((res.body as { splits: { unmatched: string[] }[] }).splits[0]!.unmatched).toEqual([
+      "I",
+    ]);
+  });
+
+  it.each([
+    [{ mode: "riddle", text: "x" }, /mode/],
+    [{ mode: "sentence" }, /sentence is required/],
+    [{ mode: "contains", text: "x", count: 0 }, /count/],
+    [{ mode: "sentence", text: "x", split: "longest" }, /split/],
+    [{ mode: "sentence", text: "x", maxSpan: 99 }, /maxSpan/],
+    [{ mode: "a-to-z" }, /source/],
+    [{ mode: "acrostic", text: "x", source: { type: "playlist", playlistId: -1 } }, /playlistId/],
+    [{ mode: "exact", text: "x", match: { closeForms: "yes" } }, /closeForms/],
+    [{ mode: "exact", text: "x", filter: { excludeTracks: "live" } }, /filter/],
+    [{ mode: "acrostic", text: "--", source: { type: "favourites" } }, /word/],
+    [{ mode: "sentence", text: Array.from({ length: 31 }, () => "la").join(" ") }, /at most 30/],
+  ])("rejects %j", async (body, error) => {
+    const res = await handleApi(request("POST", "/api/word-play/resolve", body), deps());
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(error);
+  });
+
+  it("maps a Qobuz failure to 502", async () => {
+    const searchTracks = vi.fn(async () => {
+      throw new QobuzError("api-response", "boom");
+    });
+    const res = await handleApi(
+      request("POST", "/api/word-play/resolve", { mode: "exact", text: "home" }),
+      deps({ service: service({ searchTracks }) }),
+    );
+    expect(res.status).toBe(502);
+  });
+});
+
+describe("POST /api/word-play/commit", () => {
+  it("creates a playlist with the songs in order", async () => {
+    const createPlaylist = vi.fn(async (name: string) => ({ id: 3, name }));
+    const addTracksToPlaylist = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/word-play/commit", {
+        target: { type: "new", name: "Lazy Dog" },
+        trackIds: [2, 1, 2],
+      }),
+      deps({ service: service({ createPlaylist, addTracksToPlaylist }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(3, [2, 1]);
+    expect(res.body).toMatchObject({ playlistId: 3, added: [2, 1], skipped: [2] });
+  });
+
+  it("adds to an existing playlist", async () => {
+    const addTracksToPlaylist = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/word-play/commit", {
+        target: { type: "existing", playlistId: 8 },
+        trackIds: [5],
+      }),
+      deps({ service: service({ addTracksToPlaylist }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(8, [5]);
+  });
+
+  it("rejects a commit without tracks or a name", async () => {
+    const noTracks = await handleApi(
+      request("POST", "/api/word-play/commit", { target: { type: "new", name: "x" }, trackIds: [] }),
+      deps(),
+    );
+    expect(noTracks.status).toBe(400);
+    const noName = await handleApi(
+      request("POST", "/api/word-play/commit", { target: { type: "new" }, trackIds: [1] }),
+      deps(),
+    );
+    expect(noName.status).toBe(400);
+  });
+});

@@ -17,12 +17,14 @@ import { initImportExportView } from "./views/import-export.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
 import { initStatsView } from "./views/stats.js";
+import { initWordPlayView } from "./views/word-play.js";
 
 const VIEWS = [
   "home",
   "playlist",
   "albums",
   "similar",
+  "word-play",
   "deduplicate",
   "combine",
   "stats",
@@ -68,6 +70,7 @@ initArtworkToggle();
 initPlaylistView();
 initAlbumsView();
 initSimilarView();
+initWordPlayView();
 initDeduplicateView();
 initCombineView();
 initStatsView();

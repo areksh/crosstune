@@ -85,6 +85,20 @@ import {
   type CombineSource,
 } from "../features/combine.js";
 import { collectLibrary, computeStats, type StatsSource } from "../features/stats.js";
+import {
+  commitWordPlay,
+  resolveWordPlay,
+  DEFAULT_MATCH_OPTIONS,
+  SPLIT_OBJECTIVES,
+  WORD_PLAY_COUNT,
+  WORD_PLAY_MAX_SPAN,
+  WORD_PLAY_MODES,
+  type MatchOptions,
+  type SplitObjective,
+  type WordPlayMode,
+  type WordPlayRequest,
+  type WordPlaySource,
+} from "../features/word-play.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -97,7 +111,7 @@ export interface QobuzApiService {
   getFavoriteTracks(): Promise<Track[]>;
   getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
   searchAlbums(query: string, limit?: number): Promise<Album[]>;
-  searchTracks(query: string, limit?: number): Promise<Track[]>;
+  searchTracks(query: string, limit?: number, offset?: number): Promise<Track[]>;
   getAlbumTracks(albumId: string): Promise<Track[]>;
   getFavoriteAlbums(): Promise<Album[]>;
   getFavoriteArtists(): Promise<Artist[]>;
@@ -226,6 +240,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/stats") {
     return libraryStats(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/word-play/resolve") {
+    return wordPlayResolve(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/word-play/commit") {
+    return wordPlayCommit(req.body, deps);
   }
   return { status: 404, body: { error: "not found" } };
 }
@@ -1296,4 +1316,164 @@ function isKeepStrategy(value: unknown): value is KeepStrategy {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Word play: playlists made out of song titles.
+
+/** The longest word-play text accepted, in characters. */
+const MAX_WORD_PLAY_TEXT = 1000;
+
+/**
+ * Build a word-play plan. Input the feature rejects (an empty or overlong
+ * sentence, an acrostic without letters) is a 400; Qobuz failures stay 502.
+ */
+async function wordPlayResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseWordPlayInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  try {
+    const plan = await resolveWordPlay(deps.service, input.value.request, {
+      match: input.value.match,
+      filter: input.value.filter,
+    });
+    return { status: 200, body: plan };
+  } catch (error) {
+    if (error instanceof QobuzError) {
+      throw error;
+    }
+    return {
+      status: 400,
+      body: { error: error instanceof Error ? error.message : "invalid request" },
+    };
+  }
+}
+
+/** Write the chosen songs, in order, to a new or existing playlist. */
+async function wordPlayCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseCommitInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const result = await commitWordPlay(deps.service, {
+    target: input.value.target,
+    trackIds: input.value.trackIds,
+  });
+  return { status: 200, body: result };
+}
+
+interface WordPlayInput {
+  request: WordPlayRequest;
+  match: MatchOptions;
+  filter: TrackFilter;
+}
+
+/**
+ * Parse `{ mode, text?, count?, split?, maxSpan?, source?, match?, filter? }`:
+ * `text` for every mode but `a-to-z`; `count` for contains/exact; `split` and
+ * `maxSpan` for sentence; `source` (`{ type: "favourites" }` or
+ * `{ type: "playlist", playlistId }`) for acrostic and a-to-z; `match` holds
+ * optional booleans overriding {@link DEFAULT_MATCH_OPTIONS}.
+ */
+function parseWordPlayInput(body: unknown): Parsed<WordPlayInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  const mode = body["mode"];
+  if (typeof mode !== "string" || !(WORD_PLAY_MODES as readonly string[]).includes(mode)) {
+    return { ok: false, error: `mode must be one of: ${WORD_PLAY_MODES.join(", ")}` };
+  }
+  const match = parseMatchOptions(body["match"]);
+  if (!match.ok) {
+    return match;
+  }
+  const filter = parseFilterInput(body["filter"]);
+  if (!filter.ok) {
+    return filter;
+  }
+  const request = parseWordPlayRequest(mode as WordPlayMode, body);
+  if (!request.ok) {
+    return request;
+  }
+  return {
+    ok: true,
+    value: { request: request.value, match: match.value, filter: filter.value },
+  };
+}
+
+function parseWordPlayRequest(
+  mode: WordPlayMode,
+  body: Record<string, unknown>,
+): Parsed<WordPlayRequest> {
+  if (mode === "a-to-z") {
+    const source = parseWordPlaySource(body["source"]);
+    return source.ok ? { ok: true, value: { mode, source: source.value } } : source;
+  }
+  const raw = body["text"];
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (text.length === 0) {
+    return {
+      ok: false,
+      error: mode === "sentence" ? "a sentence is required" : "a word is required",
+    };
+  }
+  if (text.length > MAX_WORD_PLAY_TEXT) {
+    return { ok: false, error: `text must be at most ${MAX_WORD_PLAY_TEXT} characters` };
+  }
+  if (mode === "contains" || mode === "exact") {
+    const count = intField(body, "count", "count", WORD_PLAY_COUNT);
+    return count.ok ? { ok: true, value: { mode, text, count: count.value } } : count;
+  }
+  if (mode === "sentence") {
+    const split = body["split"] ?? "fewest";
+    if (typeof split !== "string" || !(SPLIT_OBJECTIVES as readonly string[]).includes(split)) {
+      return { ok: false, error: `split must be one of: ${SPLIT_OBJECTIVES.join(", ")}` };
+    }
+    const maxSpan = intField(body, "maxSpan", "maxSpan", WORD_PLAY_MAX_SPAN);
+    if (!maxSpan.ok) {
+      return maxSpan;
+    }
+    return {
+      ok: true,
+      value: { mode, text, split: split as SplitObjective, maxSpan: maxSpan.value },
+    };
+  }
+  const source = parseWordPlaySource(body["source"]);
+  return source.ok ? { ok: true, value: { mode, text, source: source.value } } : source;
+}
+
+function parseWordPlaySource(value: unknown): Parsed<WordPlaySource> {
+  if (isRecord(value) && value["type"] === "favourites") {
+    return { ok: true, value: { type: "favourites" } };
+  }
+  if (isRecord(value) && value["type"] === "playlist") {
+    const id = value["playlistId"];
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+      return { ok: false, error: "source.playlistId must be a playlist id" };
+    }
+    return { ok: true, value: { type: "playlist", playlistId: id } };
+  }
+  return { ok: false, error: "source.type must be favourites or playlist" };
+}
+
+function parseMatchOptions(value: unknown): Parsed<MatchOptions> {
+  if (value === undefined) {
+    return { ok: true, value: { ...DEFAULT_MATCH_OPTIONS } };
+  }
+  if (!isRecord(value)) {
+    return { ok: false, error: "match must be an object" };
+  }
+  const options: MatchOptions = { ...DEFAULT_MATCH_OPTIONS };
+  for (const key of Object.keys(DEFAULT_MATCH_OPTIONS) as (keyof MatchOptions)[]) {
+    const raw = value[key];
+    if (raw === undefined) {
+      continue;
+    }
+    if (typeof raw !== "boolean") {
+      return { ok: false, error: `match.${key} must be a boolean` };
+    }
+    options[key] = raw;
+  }
+  return { ok: true, value: options };
 }
