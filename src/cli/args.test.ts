@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractLogLevel,
   parseAlbumArgs,
+  parseCombineArgs,
   parseDedupeArgs,
   parseExportArgs,
   parseImportArgs,
@@ -464,5 +465,86 @@ describe("parseSimilarArgs", () => {
 
   it("rejects --discs, which only the album tool has", () => {
     expect(() => parseSimilarArgs(["--name", "x", "--discs", "1", "A"])).toThrow(/--discs/);
+  });
+});
+
+describe("parseCombineArgs", () => {
+  it("takes the inputs in the order given, with defaults", () => {
+    expect(parseCombineArgs(["--playlist", "12", "--favourites", "--playlist", "34"])).toEqual({
+      sources: [
+        { type: "playlist", playlistId: 12 },
+        { type: "favourites" },
+        { type: "playlist", playlistId: 34 },
+      ],
+      mode: "merge",
+      order: "sequential",
+      keep: "highest-quality",
+      matchSongs: true,
+      isPublic: false,
+      apply: false,
+    });
+  });
+
+  it("parses every option", () => {
+    expect(
+      parseCombineArgs([
+        "--favorites",
+        "--playlist",
+        "1",
+        "--mode",
+        "common",
+        "--order",
+        "shuffle",
+        "--keep",
+        "first",
+        "--exact-ids-only",
+        "--name",
+        "Both",
+        "--public",
+        "--apply",
+      ]),
+    ).toEqual({
+      sources: [{ type: "favourites" }, { type: "playlist", playlistId: 1 }],
+      mode: "common",
+      order: "shuffle",
+      keep: "first",
+      matchSongs: false,
+      playlistName: "Both",
+      isPublic: true,
+      apply: true,
+    });
+  });
+
+  it("needs at least two inputs", () => {
+    expect(() => parseCombineArgs(["--playlist", "1"])).toThrow(/at least two/);
+  });
+
+  it("rejects an input given twice", () => {
+    expect(() => parseCombineArgs(["--favourites", "--favourites"])).toThrow(/only once/);
+  });
+
+  it("rejects a non-numeric playlist id", () => {
+    expect(() => parseCombineArgs(["--playlist", "abc", "--favourites"])).toThrow(
+      /numeric id/,
+    );
+  });
+
+  it.each([
+    ["--mode", "union"],
+    ["--order", "random"],
+    ["--keep", "newest"],
+  ])("rejects an invalid %s", (flag, value) => {
+    expect(() =>
+      parseCombineArgs(["--playlist", "1", "--favourites", flag, value]),
+    ).toThrow(new RegExp(`${flag} must be one of`));
+  });
+
+  it("rejects an empty name and unknown arguments", () => {
+    expect(() => parseCombineArgs(["--playlist", "1", "--favourites", "--name", " "])).toThrow(
+      /--name/,
+    );
+    expect(() => parseCombineArgs(["--playlist", "1", "--favourites", "--dry"])).toThrow(
+      /Unknown argument/,
+    );
   });
 });

@@ -1009,6 +1009,208 @@ button:disabled {
   margin: 0;
 }
 
+/* Choice cards: radios with a name and a description, the chosen one lit. */
+
+.choice-cards {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.choice-cards legend {
+  padding: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.choice-card {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.choice-card input {
+  margin-top: 2px;
+}
+
+.choice-card:has(input:checked) {
+  background: var(--nav-active-bg);
+  border-color: var(--notice-line);
+}
+
+.choice-card > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.choice-desc {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* Combine playlists: numbered pickers, the overlap bar and the options. */
+
+.combine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 28px;
+  margin-bottom: 12px;
+}
+
+.combine-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.field-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#combine-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.source-number {
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.source-row select {
+  grid-column: 2;
+  width: 100%;
+}
+
+button.add-row {
+  align-self: flex-start;
+  margin-left: 32px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+button.add-row:hover:not(:disabled) {
+  background: var(--inset);
+  border-color: var(--muted);
+}
+
+button.remove-row {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.overlap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.overlap-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+}
+
+.overlap-head .hint {
+  margin: 0;
+}
+
+.overlap-total {
+  font-stretch: 75%;
+  font-weight: 700;
+  font-size: 30px;
+}
+
+.overlap-bar {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--inset);
+}
+
+.overlap-bar > span {
+  flex-basis: 0;
+}
+
+.overlap-first {
+  background: var(--accent);
+}
+
+.overlap-shared {
+  background: #f6d8a8;
+}
+
+.overlap-others {
+  background: #6e7c84;
+}
+
+.overlap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.combine-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 36px;
+  margin-bottom: 8px;
+}
+
+.combine-options .field {
+  margin: 0 0 16px;
+}
+
 /* Motion and small screens */
 
 @media (prefers-reduced-motion: reduce) {

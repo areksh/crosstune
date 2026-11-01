@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Combine playlists (`combine` on the CLI, and in the web UI under *Tidy up*):
+  merge two or more playlists, optionally with your favourites, into one with
+  each song once; or keep only the songs of the first that the others lack, or
+  only the songs all of them share. Remasters and the same song on another
+  album count as one song (the deduplicator's matching) unless
+  `--exact-ids-only` is given; of a song in several, the highest-quality copy is
+  kept by default. The result can be in input order, take turns between the
+  playlists, or be shuffled. The web UI shows the overlap as a bar above the
+  reviewable track list, and saves to a new playlist ("A + B") or an existing
+  one.
+
 - Optional album artwork in the web UI. A *Show artwork* checkbox in the sidebar
   (off by default, remembered in the browser) shows covers next to tracks in
   every review and the deduplicator, and next to each album in playlist from

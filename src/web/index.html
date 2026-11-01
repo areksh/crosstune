@@ -32,6 +32,7 @@
           <div class="nav-group">
             <span class="nav-label">Tidy up</span>
             <a class="nav-link" data-view="deduplicate" href="#/deduplicate">Deduplicator</a>
+            <a class="nav-link" data-view="combine" href="#/combine">Combine playlists</a>
           </div>
           <div class="nav-group">
             <span class="nav-label">Your data</span>
@@ -95,6 +96,13 @@
                 <span class="tool-desc">
                   Find repeats in a playlist or your favourites, remasters
                   included, and choose which copy to keep.
+                </span>
+              </a>
+              <a class="tool-link" href="#/combine">
+                <span class="tool-name">Combine playlists</span>
+                <span class="tool-desc">
+                  Merge playlists into one, each song once, or see what they
+                  share and what only one has.
                 </span>
               </a>
             </section>
@@ -605,6 +613,132 @@
               <button id="dedup-apply" type="button" hidden>Remove tracks</button>
               <p id="dedup-apply-error" class="error" hidden></p>
               <p id="dedup-apply-result" class="result" hidden></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- Combine playlists -->
+        <section id="view-combine" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Combine playlists</h1>
+              <p class="lede">Merge playlists into one, or compare them.</p>
+            </div>
+            <ol id="combine-steps" class="steps" aria-label="Steps">
+              <li aria-current="step">1 Playlists</li>
+              <li>2 Review</li>
+              <li>3 Save</li>
+            </ol>
+          </header>
+
+          <section class="panel">
+            <div class="combine-grid">
+              <div class="combine-sources">
+                <span class="field-label" id="combine-sources-label">Playlists</span>
+                <div id="combine-source-list" role="group" aria-labelledby="combine-sources-label"></div>
+                <button id="combine-add" type="button" class="add-row">Add a playlist</button>
+              </div>
+              <fieldset class="choice-cards">
+                <legend>Keep</legend>
+                <label class="choice-card">
+                  <input type="radio" name="combine-mode" value="merge" checked />
+                  <span>
+                    <span class="choice-name">Everything</span>
+                    <span class="choice-desc">All tracks from every playlist, each song once.</span>
+                  </span>
+                </label>
+                <label class="choice-card">
+                  <input type="radio" name="combine-mode" value="only-first" />
+                  <span>
+                    <span class="choice-name">Only in the first</span>
+                    <span class="choice-desc">Tracks in playlist 1 that none of the others have.</span>
+                  </span>
+                </label>
+                <label class="choice-card">
+                  <input type="radio" name="combine-mode" value="common" />
+                  <span>
+                    <span class="choice-name">In all of them</span>
+                    <span class="choice-desc">Only the tracks every playlist shares.</span>
+                  </span>
+                </label>
+              </fieldset>
+            </div>
+            <label class="checkbox">
+              <input id="combine-match-songs" type="checkbox" checked />
+              Treat remasters and the same song on another album as the same song
+            </label>
+            <div class="actions">
+              <button id="combine-resolve" type="button">Combine</button>
+            </div>
+            <p id="combine-resolve-error" class="error" hidden></p>
+          </section>
+
+          <section id="combine-review" class="review" hidden>
+            <section class="panel overlap" aria-label="Overlap">
+              <div class="overlap-head">
+                <span id="combine-total" class="overlap-total"></span>
+                <span id="combine-overlap-note" class="hint"></span>
+              </div>
+              <div id="combine-overlap-bar" class="overlap-bar" role="img"></div>
+              <div id="combine-overlap-legend" class="overlap-legend"></div>
+            </section>
+
+            <div class="combine-options">
+              <label class="field">
+                <span>Order</span>
+                <select id="combine-order">
+                  <option value="sequential">Playlist 1 first, then 2</option>
+                  <option value="interleave">Take turns</option>
+                  <option value="shuffle">Shuffle</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>When a song is in more than one, keep</span>
+                <select id="combine-keep">
+                  <option value="highest-quality">The highest-quality copy</option>
+                  <option value="first">The first copy</option>
+                </select>
+              </label>
+            </div>
+
+            <p class="hint">Untick any track you do not want.</p>
+            <div id="combine-tracks"></div>
+
+            <div class="commit-bar">
+              <p id="combine-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="segmented" role="radiogroup" aria-label="Save to">
+                  <label>
+                    <input type="radio" name="combine-target" value="new" checked />
+                    New playlist
+                  </label>
+                  <label>
+                    <input type="radio" name="combine-target" value="existing" />
+                    Existing playlist
+                  </label>
+                </div>
+                <div id="combine-new-fields" class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="combine-playlist-name" type="text" placeholder="A + B" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="combine-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+                <div id="combine-existing-fields" class="target-fields" hidden>
+                  <label class="field field-inline">
+                    <span>Playlist</span>
+                    <select id="combine-playlist-select">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <button id="combine-commit" type="button">Create playlist</button>
+              <p id="combine-commit-error" class="error" hidden></p>
+              <p id="combine-commit-result" class="result" hidden></p>
             </div>
           </section>
         </section>

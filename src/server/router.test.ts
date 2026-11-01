@@ -1080,3 +1080,72 @@ describe("POST /api/restore", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("POST /api/combine/resolve", () => {
+  const roads = { id: 1, title: "Roads", artist: "Portishead" };
+  const glory = { id: 2, title: "Glory Box", artist: "Portishead" };
+  const angel = { id: 3, title: "Angel", artist: "Massive Attack" };
+
+  function combineService() {
+    return service({
+      getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
+      getPlaylistTracks: vi.fn(async () => [roads, glory]),
+      getFavoriteTracks: vi.fn(async () => [glory, angel]),
+    });
+  }
+
+  it("returns the plan for the chosen sources and mode", async () => {
+    const res = await handleApi(
+      request("POST", "/api/combine/resolve", {
+        sources: [{ type: "playlist", playlistId: 7 }, { type: "favourites" }],
+        mode: "common",
+      }),
+      deps({ service: combineService() }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      labels: ["Road Trip", "Favourites"],
+      tracks: [{ track: glory, inputs: [0, 1] }],
+      counts: { onlyIn: [1, 1], shared: 1, result: 1 },
+      suggestedName: "Road Trip + Favourites",
+    });
+  });
+
+  it("merges by default, in input order", async () => {
+    const res = await handleApi(
+      request("POST", "/api/combine/resolve", {
+        sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }],
+      }),
+      deps({ service: combineService() }),
+    );
+    const body = res.body as { tracks: { track: { id: number } }[] };
+    expect(body.tracks.map((t) => t.track.id)).toEqual([2, 3, 1]);
+  });
+
+  it("shuffles reproducibly with a seed", async () => {
+    const body = {
+      sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }],
+      order: "shuffle",
+      seed: 123,
+    };
+    const first = await handleApi(request("POST", "/api/combine/resolve", body), deps({ service: combineService() }));
+    const second = await handleApi(request("POST", "/api/combine/resolve", body), deps({ service: combineService() }));
+    expect(first.body).toEqual(second.body);
+  });
+
+  it.each([
+    [{ sources: [{ type: "favourites" }] }, /at least two/],
+    [{ sources: [{ type: "favourites" }, { type: "favourites" }] }, /only once/],
+    [{ sources: [{ type: "playlist" }, { type: "favourites" }] }, /each source/],
+    [{ sources: "x" }, /sources must be an array/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], mode: "x" }, /mode/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], order: 1 }, /order/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], keep: "x" }, /keep/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], matchSongs: "no" }, /matchSongs/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], seed: 1.5 }, /seed/],
+  ])("rejects invalid input %#", async (body, error) => {
+    const res = await handleApi(request("POST", "/api/combine/resolve", body), deps());
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(error);
+  });
+});

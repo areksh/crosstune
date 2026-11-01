@@ -29,6 +29,10 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums.
   Available on the CLI and in the web UI.
+- **Combine playlists** -- merge two or more playlists (or a playlist and your
+  favourites) into one, each song once; or keep only what the first has and
+  the others lack, or only what they all share. Shows how they overlap before
+  saving. Available on the CLI and in the web UI.
 - **Import & export** -- export favourites or a playlist as JSON, CSV, plain
   text or M3U; back up your whole account (favourites and playlists) to a
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
@@ -236,6 +240,35 @@ By default the command only **reports** the plan. Add `--apply` to actually
 remove the tracks marked `drop` (from the playlist, or from your favourites).
 
 ```sh
+# Merge two playlists into a new one, each song once (dry run, then --apply)
+npm run dev -- combine --playlist 12345678 --playlist 87654321
+npm run dev -- combine --playlist 12345678 --playlist 87654321 --name "Road Trip + Late Night" --apply
+
+# What a playlist has that your favourites do not
+npm run dev -- combine --playlist 12345678 --favourites --mode only-first
+
+# The songs three playlists share, taking turns between them
+npm run dev -- combine --playlist 1 --playlist 2 --playlist 3 --mode common --order interleave
+```
+
+`combine` takes two or more inputs, in order: `--playlist <id>` (repeatable)
+and `--favourites`. It reports how they overlap and lists the result; with
+`--apply` it saves the result as a new playlist, named after the inputs ("A +
+B") unless `--name` is given (`--public` makes it public).
+
+| Option                 | Values                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `--mode`               | `merge` (every song once, default), `only-first` (in the first input but none of the others), `common` (in all of them) |
+| `--order`              | `sequential` (input 1, then 2, ...; default), `interleave` (take turns), `shuffle`   |
+| `--keep`               | which copy of a song in several inputs: `highest-quality` (default) or `first`      |
+| `--exact-ids-only`     | count tracks as the same song only when their Qobuz ids match                       |
+
+By default "the same song" uses the deduplicator's matching (a shared ISRC, or
+the same normalised artist and title), so a remaster in one playlist and the
+original in another count once; live, acoustic and remixed versions stay
+separate.
+
+```sh
 # Export favourite tracks as CSV to a file
 npm run dev -- export --favourites --out favourites.csv
 
@@ -387,6 +420,21 @@ browser.
    rest in red. Tick the copies you want to keep (you can keep more than one),
    or use "Keep all" to keep the whole group.
 3. Apply to remove the unticked copies.
+
+**Combine playlists:**
+
+1. Choose two or more playlists (*Add a playlist* for more; your favourite
+   tracks can be one of them) and what to keep: everything (each song once),
+   only what the first has and the others lack, or only what all of them
+   share. Untick *Treat remasters ... as the same song* to match by Qobuz id
+   alone.
+2. Combine: a bar shows how the playlists overlap (only in the first, shared,
+   only in the others), above the resulting tracks. Choose the order (playlist
+   1 then 2, taking turns, or shuffled) and, for a song in more than one,
+   whether to keep its highest-quality or its first copy. Untick any track you
+   do not want.
+3. Save to a new playlist (named "A + B" until you change it) or add to an
+   existing one (tracks already in it are skipped).
 
 **Import & export:**
 

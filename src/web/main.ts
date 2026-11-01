@@ -11,12 +11,21 @@ import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { initAlbumsView } from "./views/albums.js";
+import { initCombineView } from "./views/combine.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
 import { initImportExportView } from "./views/import-export.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
 
-const VIEWS = ["home", "playlist", "albums", "similar", "deduplicate", "import-export"] as const;
+const VIEWS = [
+  "home",
+  "playlist",
+  "albums",
+  "similar",
+  "deduplicate",
+  "combine",
+  "import-export",
+] as const;
 type View = (typeof VIEWS)[number];
 
 function isView(value: string): value is View {
@@ -58,6 +67,7 @@ initPlaylistView();
 initAlbumsView();
 initSimilarView();
 initDeduplicateView();
+initCombineView();
 initImportExportView();
 window.addEventListener("hashchange", route);
 route();

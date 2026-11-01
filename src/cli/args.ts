@@ -2,6 +2,16 @@
  * Argument parsing for CLI commands.
  */
 
+import {
+  COMBINE_KEEPS,
+  COMBINE_MODES,
+  COMBINE_ORDERS,
+  sourcesProblem,
+  type CombineKeep,
+  type CombineMode,
+  type CombineOrder,
+  type CombineSource,
+} from "../features/combine.js";
 import { KEEP_STRATEGIES, type KeepStrategy } from "../features/deduplicate.js";
 import { FORMATS, type Format } from "../features/import-export.js";
 import {
@@ -766,4 +776,121 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
     },
     ...shared,
   };
+}
+
+/** Arguments for the `combine` command. */
+export interface CombineArgs {
+  /** The inputs, in the order given. */
+  sources: CombineSource[];
+  mode: CombineMode;
+  order: CombineOrder;
+  keep: CombineKeep;
+  /** Match songs by the deduplicator's rules too (off with `--exact-ids-only`). */
+  matchSongs: boolean;
+  /** Name for the new playlist; undefined uses the suggested "A + B". */
+  playlistName?: string;
+  isPublic: boolean;
+  /** Whether to create the playlist (otherwise report only). */
+  apply: boolean;
+}
+
+/**
+ * Parse the arguments for the `combine` command.
+ *
+ * Inputs are the repeatable `--playlist <id>` and `--favourites`, in the order
+ * given (at least two, each once). Options: `--mode merge|only-first|common`
+ * (default merge), `--order sequential|interleave|shuffle` (default
+ * sequential), `--keep highest-quality|first` (default highest-quality),
+ * `--exact-ids-only`, `--name <name>`, `--public`, and `--apply` to create the
+ * playlist (otherwise it only reports).
+ *
+ * @throws {Error} on fewer than two inputs, a repeated input, an invalid value,
+ *   or an unknown argument.
+ */
+export function parseCombineArgs(argv: readonly string[]): CombineArgs {
+  const sources: CombineSource[] = [];
+  let mode: CombineMode = "merge";
+  let order: CombineOrder = "sequential";
+  let keep: CombineKeep = "highest-quality";
+  let matchSongs = true;
+  let playlistName: string | undefined;
+  let isPublic = false;
+  let apply = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const value = argv[i + 1];
+    switch (arg) {
+      case "--playlist": {
+        const id = Number(value);
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id, got "${value}"`);
+        }
+        sources.push({ type: "playlist", playlistId: id });
+        i += 1;
+        break;
+      }
+      case "--favourites":
+      case "--favorites":
+        sources.push({ type: "favourites" });
+        break;
+      case "--mode":
+        mode = oneOf(arg, value, COMBINE_MODES);
+        i += 1;
+        break;
+      case "--order":
+        order = oneOf(arg, value, COMBINE_ORDERS);
+        i += 1;
+        break;
+      case "--keep":
+        keep = oneOf(arg, value, COMBINE_KEEPS);
+        i += 1;
+        break;
+      case "--exact-ids-only":
+        matchSongs = false;
+        break;
+      case "--name":
+        if (value === undefined || value.trim().length === 0) {
+          throw new Error("--name requires a playlist name");
+        }
+        playlistName = value;
+        i += 1;
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  const problem = sourcesProblem(sources);
+  if (problem !== undefined) {
+    throw new Error(`combine: ${problem} (--playlist <id>, repeatable, and/or --favourites)`);
+  }
+  return {
+    sources,
+    mode,
+    order,
+    keep,
+    matchSongs,
+    isPublic,
+    apply,
+    ...(playlistName !== undefined && { playlistName }),
+  };
+}
+
+/** `value` if it is one of `allowed`, else an error naming `flag`. */
+function oneOf<T extends string>(
+  flag: string,
+  value: string | undefined,
+  allowed: readonly T[],
+): T {
+  if (value === undefined || !(allowed as readonly string[]).includes(value)) {
+    throw new Error(`${flag} must be one of: ${allowed.join(", ")} (got "${value}")`);
+  }
+  return value as T;
 }

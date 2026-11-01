@@ -78,6 +78,15 @@
  *       --exclude-artist is left out (and not walked from), and the next most
  *       similar one takes its place; seeds are used regardless.
  *
+ *   qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] \
+ *       [--mode merge|only-first|common] [--order sequential|interleave|shuffle] \
+ *       [--keep highest-quality|first] [--exact-ids-only] [--name <name>] \
+ *       [--public] [--apply]
+ *       Merge two or more playlists (and/or your favourites) into a new
+ *       playlist, each song once; or keep only the songs of the first that the
+ *       others lack, or only the songs all of them share. Remasters count as
+ *       the same song unless --exact-ids-only. Without --apply it only reports.
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -90,6 +99,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import {
   extractLogLevel,
   parseAlbumArgs,
+  parseCombineArgs,
   parseDedupeArgs,
   parseExportArgs,
   parseImportArgs,
@@ -151,6 +161,11 @@ import {
   parseAlbumEntry,
   type AlbumEntry,
 } from "./features/playlist-from-albums.js";
+import {
+  combinedTrackIds,
+  formatCombineReport,
+  resolveCombine,
+} from "./features/combine.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -225,6 +240,11 @@ async function main(): Promise<void> {
     }
     case "import": {
       const plan = planImport(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "combine": {
+      const plan = planCombine(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -825,6 +845,43 @@ function toImportTarget(target: ImportTargetArg, isPublic: boolean): ImportTarge
   }
 }
 
+/**
+ * Validate the combine command's arguments up front, returning an executor that
+ * reports the combined result and (with `--apply`) saves it as a new playlist.
+ */
+function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const args = parseCombineArgs(argv);
+  return async (client: QobuzClient): Promise<void> => {
+    logger.info(`Fetching ${args.sources.length} track lists...`);
+    const plan = await resolveCombine(client, args.sources, {
+      mode: args.mode,
+      order: args.order,
+      keep: args.keep,
+      matchSongs: args.matchSongs,
+    });
+    logger.info(formatCombineReport(plan, args.mode));
+
+    const trackIds = combinedTrackIds(plan);
+    const name = args.playlistName ?? plan.suggestedName;
+    if (trackIds.length === 0) {
+      logger.warn("Nothing to save: the result is empty.");
+      return;
+    }
+    if (!args.apply) {
+      logger.info(
+        `\n(dry run -- pass --apply to create "${name}" with ${trackIds.length} track${trackIds.length === 1 ? "" : "s"})`,
+      );
+      return;
+    }
+    const playlist = await createPlaylistWithTracks(client, {
+      name,
+      trackIds,
+      isPublic: args.isPublic,
+    });
+    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`);
+  };
+}
+
 /** Read lines from piped stdin (one per line, trimmed); empty when stdin is a TTY. */
 function readLinesFromStdin(): string[] {
   if (process.stdin.isTTY) {
@@ -855,6 +912,7 @@ function printUsage(): void {
       "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
+      "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
@@ -870,6 +928,7 @@ function printUsage(): void {
       "deduplicate reports only unless --apply is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",
       "import resolves and reports only unless --apply is given; --account restores a backup.",
+      'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',
     ].join("\n"),
   );
 }

@@ -72,6 +72,18 @@ import {
   type SettingBounds,
   type WalkOptions,
 } from "../features/similar-artists.js";
+import {
+  COMBINE_KEEPS,
+  COMBINE_MODES,
+  COMBINE_ORDERS,
+  resolveCombine,
+  seededRandom,
+  sourcesProblem,
+  type CombineKeep,
+  type CombineMode,
+  type CombineOrder,
+  type CombineSource,
+} from "../features/combine.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -207,6 +219,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/restore") {
     return restore(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/combine/resolve") {
+    return combineResolve(req.body, deps);
   }
   return { status: 404, body: { error: "not found" } };
 }
@@ -1142,6 +1157,103 @@ function exportBasename(source: Exclude<ExportSource, { type: "account" }>): str
 /** Today's date as YYYY-MM-DD, for backup filenames. */
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Combine playlists (phase one): fetch the chosen sources and return the
+ * reviewable plan. The view saves the ticked tracks through `/api/commit`.
+ */
+async function combineResolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const input = parseCombineInput(body);
+  if (!input.ok) {
+    return { status: 400, body: { error: input.error } };
+  }
+  const { sources, seed, ...options } = input.value;
+  const plan = await resolveCombine(deps.service, sources, {
+    ...options,
+    random: seededRandom(seed),
+  });
+  return { status: 200, body: plan };
+}
+
+interface CombineInput {
+  sources: CombineSource[];
+  mode: CombineMode;
+  order: CombineOrder;
+  keep: CombineKeep;
+  matchSongs: boolean;
+  /** Seed for a shuffle; random when absent. */
+  seed: number;
+}
+
+/**
+ * Parse `{ sources: [{ type: "favourites" } | { type: "playlist", playlistId }],
+ * mode?, order?, keep?, matchSongs?, seed? }`.
+ */
+function parseCombineInput(body: unknown): Parsed<CombineInput> {
+  if (!isRecord(body)) {
+    return { ok: false, error: "expected a JSON object" };
+  }
+  if (!Array.isArray(body["sources"])) {
+    return { ok: false, error: "sources must be an array" };
+  }
+  const sources: CombineSource[] = [];
+  for (const raw of body["sources"]) {
+    if (isRecord(raw) && raw["type"] === "favourites") {
+      sources.push({ type: "favourites" });
+    } else if (
+      isRecord(raw) &&
+      raw["type"] === "playlist" &&
+      Number.isSafeInteger(raw["playlistId"]) &&
+      (raw["playlistId"] as number) > 0
+    ) {
+      sources.push({ type: "playlist", playlistId: raw["playlistId"] as number });
+    } else {
+      return {
+        ok: false,
+        error: "each source must be { type: 'favourites' } or { type: 'playlist', playlistId }",
+      };
+    }
+  }
+  const problem = sourcesProblem(sources);
+  if (problem !== undefined) {
+    return { ok: false, error: problem };
+  }
+  const choice = <T extends string>(
+    key: string,
+    allowed: readonly T[],
+    fallback: T,
+  ): Parsed<T> => {
+    const value = body[key] ?? fallback;
+    return (allowed as readonly unknown[]).includes(value)
+      ? { ok: true, value: value as T }
+      : { ok: false, error: `${key} must be one of: ${allowed.join(", ")}` };
+  };
+  const mode = choice("mode", COMBINE_MODES, "merge");
+  if (!mode.ok) return mode;
+  const order = choice("order", COMBINE_ORDERS, "sequential");
+  if (!order.ok) return order;
+  const keep = choice("keep", COMBINE_KEEPS, "highest-quality");
+  if (!keep.ok) return keep;
+  const matchSongs = body["matchSongs"] ?? true;
+  if (typeof matchSongs !== "boolean") {
+    return { ok: false, error: "matchSongs must be a boolean" };
+  }
+  const seed = body["seed"] ?? Math.floor(Math.random() * 2 ** 32);
+  if (!Number.isSafeInteger(seed)) {
+    return { ok: false, error: "seed must be an integer" };
+  }
+  return {
+    ok: true,
+    value: {
+      sources,
+      mode: mode.value,
+      order: order.value,
+      keep: keep.value,
+      matchSongs,
+      seed: seed as number,
+    },
+  };
 }
 
 function isKeepStrategy(value: unknown): value is KeepStrategy {
