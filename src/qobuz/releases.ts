@@ -1,9 +1,8 @@
 /**
  * An artist's releases: the domain type and a defensive parser.
  *
- * The releases come from `artist/getReleasesList` (see {@link paths}), an
- * endpoint inferred from the Qobuz web player and not verified against the
- * live API. Its exact JSON is therefore unknown, so the parser accepts both
+ * The releases come from `artist/getReleasesList` (see {@link paths}), the
+ * undocumented endpoint the Qobuz web player uses. The parser accepts both
  * shapes Qobuz is known to use for an artist's albums:
  *
  *   - the web player's releases list: `{ has_more, items: [...] }`, each item
@@ -220,13 +219,19 @@ const EP_SINGLE_TITLE = /\b(ep|single)\b/i;
 /** At most this many tracks reads as a single or EP when nothing else says. */
 const SINGLE_MAX_TRACKS = 3;
 
+/** A greatest-hits title strong enough to overrule a plain "album" label. */
+const STRONG_COMPILATION_TITLE = /\b(greatest hits|best of|the very best|anthology)\b/i;
+
 /**
  * Classify a release.
  *
- * A type label Qobuz gives (`release_type`, else `product_type`) decides when
- * it is one we know. Without one, the title and version do: "live" makes a
- * live album, a greatest-hits style title a compilation, "EP"/"single" (or at
- * most three tracks) an EP or single; anything else is an album.
+ * A specific type label Qobuz gives (`release_type`, else `product_type`) --
+ * live, compilation, EP/single -- decides. A plain "album" label only says
+ * "not an EP or single": Qobuz labels live albums that way too, so the title
+ * and version can still make it a live album or (on a greatest-hits title) a
+ * compilation. Without a known label, the title and version decide: "live"
+ * makes a live album, a greatest-hits style title a compilation, "EP"/"single"
+ * (or at most three tracks) an EP or single; anything else is an album.
  */
 export function classifyRelease(info: {
   type?: string;
@@ -236,10 +241,16 @@ export function classifyRelease(info: {
 }): ReleaseType {
   const label = info.type?.toLowerCase().replace(/[^a-z]/g, "");
   const known = label === undefined ? undefined : TYPE_LABELS[label];
+  const text = info.version === undefined ? info.title : `${info.title} (${info.version})`;
+  if (known === "album") {
+    if (LIVE_TITLE.test(text)) {
+      return "live";
+    }
+    return STRONG_COMPILATION_TITLE.test(text) ? "compilation" : "album";
+  }
   if (known !== undefined) {
     return known;
   }
-  const text = info.version === undefined ? info.title : `${info.title} (${info.version})`;
   if (LIVE_TITLE.test(text)) {
     return "live";
   }

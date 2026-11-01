@@ -164,10 +164,11 @@ artist (e.g. various-artists compilations) are left out. By default the
 editions of an album -- remasters, deluxe and anniversary editions, hi-res
 releases -- count as one album, grouped by their title without the edition
 label, and `--prefer` picks one; `--all-versions` keeps every release instead.
-The filters apply as with album lines. The artist's releases come from an
-endpoint inferred from the Qobuz web player (`artist/getReleasesList`) that has
-not been verified against the live API; at most 500 releases are read per
-artist.
+The filters apply as with album lines. The artist's releases come from
+`artist/getReleasesList`, the undocumented endpoint the Qobuz web player uses;
+at most 500 releases are read per artist. Qobuz labels live albums as plain
+albums, so a title or version saying "Live" makes a release a live album (and
+a greatest-hits title a compilation).
 
 #### Filters
 
@@ -498,8 +499,8 @@ says "Remastered", "Anniversary", "Expanded", "Reissue" or "Legacy Edition", or
 an album the artist first released before the window. Editions of one new album
 (standard and deluxe, CD and hi-res) are listed once, the best quality. At most
 200 artists are checked per run (the rest are reported as skipped). The
-releases come from `artist/getReleasesList`, an endpoint inferred from the Qobuz
-web player that has not been verified against the live API.
+releases come from `artist/getReleasesList`, the undocumented endpoint the Qobuz
+web player uses.
 
 If the browser does not open automatically, the CLI prints the URL to visit.
 

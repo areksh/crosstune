@@ -107,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once. Pick the ones you want and put them in a new playlist or your
   favourite albums (the CLI reports only unless `--apply` is given with
   `--name` or `--favourite-albums`). Excluded artists are not checked; at most
-  200 artists are checked per run. Uses the same unverified
+  200 artists are checked per run. Uses the same
   `artist/getReleasesList` endpoint as the discography mode.
 
 - Playlist from albums can start from an artist's discography instead of a
@@ -119,12 +119,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anniversary, hi-res) are grouped by their title without the edition label
   and the version preference picks one, which the web UI still lets you change;
   releases by other main artists are left out, and the usual filters apply.
-  The artist's releases are read from `artist/getReleasesList`, an endpoint
-  inferred from the Qobuz web player and not yet verified against the live API
-  (the parser also accepts the older `artist/get?extra=albums` shape); releases
-  are classified as albums, EPs and singles, live albums or compilations from
-  Qobuz's type, or from the title ("Live at ...", "Greatest Hits") when it gives
-  none.
+  The artist's releases are read from `artist/getReleasesList`, the
+  undocumented endpoint the Qobuz web player uses (the parser also accepts the
+  older `artist/get?extra=albums` shape); releases are classified as albums,
+  EPs and singles, live albums or compilations from Qobuz's type and the title.
+  Qobuz labels live albums as plain albums, so a title or version saying
+  "Live" (or a greatest-hits title) refines an "album" label; without a label
+  the title decides.
 - Optional album artwork in the web UI. A *Show artwork* checkbox in the sidebar
   (off by default, remembered in the browser) shows covers next to tracks in
   every review and the deduplicator, and next to each album in playlist from

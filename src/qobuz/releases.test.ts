@@ -121,8 +121,32 @@ describe("parseReleasesPage", () => {
 });
 
 describe("classifyRelease", () => {
-  it("trusts a known type label", () => {
-    expect(classifyRelease({ type: "album", title: "Live at Roseland" })).toBe("album");
+  it("trusts a specific type label", () => {
+    expect(classifyRelease({ type: "live", title: "Dummy" })).toBe("live");
+    expect(classifyRelease({ type: "epSingle", title: "Glory Box (Live)" })).toBe("ep-single");
+    expect(classifyRelease({ type: "compilation", title: "Roads" })).toBe("compilation");
+  });
+
+  // Qobuz labels live albums plain "album" (seen on the live API, Nov 2026).
+  it.each([
+    [{ title: "Roseland NYC Live", version: "25 Remastered 2023" }],
+    [{ title: "Live in Paris 1997" }],
+    [{ title: "Hail to the Thief Live Recordings 2003-2009" }],
+    [{ title: "Dummy", version: "Live" }],
+  ])("reads an 'album' labelled %j as live from its title", (info) => {
+    expect(classifyRelease({ type: "album", ...info })).toBe("live");
+  });
+
+  it("reads an 'album' with a greatest-hits title as a compilation", () => {
+    expect(classifyRelease({ type: "album", title: "The Best Of Tricky" })).toBe("compilation");
+    expect(classifyRelease({ type: "album", title: "Greatest Hits" })).toBe("compilation");
+  });
+
+  it("keeps an 'album' an album on weaker title hints", () => {
+    expect(classifyRelease({ type: "album", title: "Alive" })).toBe("album");
+    expect(classifyRelease({ type: "album", title: "The Collection" })).toBe("album");
+    expect(classifyRelease({ type: "album", title: "Hits", trackCount: 2 })).toBe("album");
+    expect(classifyRelease({ type: "album", title: "OK Computer OKNOTOK 1997 2017" })).toBe("album");
   });
 
   it("falls back to the title and version without a usable type", () => {

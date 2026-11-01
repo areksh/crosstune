@@ -364,6 +364,43 @@ describe("commitUpgrades: favourites", () => {
  * A fake playlist that applies adds (appending fresh entry ids), deletes and
  * moves, so a commit's effect on the order can be checked end to end.
  */
+/**
+ * Qobuz's playlist/updateTracksPosition as observed on the live API (Nov
+ * 2026): `insert_before` is the 1-based position, in the current playlist, of
+ * the entry the moved entries go in front of; 0 or 1 means the top, and past
+ * the end means the end.
+ */
+function qobuzMove<T>(list: readonly T[], moving: (item: T) => boolean, before: number): T[] {
+  const anchor = before >= 1 ? list[before - 1] : list[0];
+  const moved = list.filter(moving);
+  const rest = list.filter((item) => !moving(item));
+  if (anchor === undefined) {
+    return [...rest, ...moved];
+  }
+  // An anchor that is itself moving: the entries land where it was.
+  const at = moving(anchor) ? list.slice(0, list.indexOf(anchor)).filter((i) => !moving(i)).length
+    : rest.indexOf(anchor);
+  return [...rest.slice(0, at), ...moved, ...rest.slice(at)];
+}
+
+describe("qobuzMove (the live API's reorder semantics)", () => {
+  // Observed on a scratch playlist G S R M I (one entry moved per call).
+  it.each([
+    [0, 1, "GSRMI"],
+    [0, 2, "GSRMI"],
+    [0, 3, "SGRMI"],
+    [0, 5, "SRMGI"],
+    [1, 3, "GSRMI"],
+    [4, 2, "GISRM"],
+    [4, 1, "IGSRM"],
+    [2, 0, "RGSMI"],
+  ])("moves entry %i with insert_before %i to give %s", (from, before, expected) => {
+    const list = [..."GSRMI"];
+    const item = list[from];
+    expect(qobuzMove(list, (x) => x === item, before).join("")).toBe(expected);
+  });
+});
+
 function fakePlaylist(initial: Array<[trackId: number, entryId: number]>) {
   let entries = initial.map(([id, playlistTrackId]) => ({ id, playlistTrackId }));
   let nextEntry = 1000;
@@ -380,9 +417,7 @@ function fakePlaylist(initial: Array<[trackId: number, entryId: number]>) {
       entries = entries.filter((e) => !entryIds.includes(e.playlistTrackId));
     }),
     movePlaylistTracks: vi.fn(async (_pid: number, entryIds: readonly number[], before: number) => {
-      const moving = entries.filter((e) => entryIds.includes(e.playlistTrackId));
-      const rest = entries.filter((e) => !entryIds.includes(e.playlistTrackId));
-      entries = [...rest.slice(0, before), ...moving, ...rest.slice(before)];
+      entries = qobuzMove(entries, (e) => entryIds.includes(e.playlistTrackId), before);
     }),
   });
   return { client, order: () => entries.map((e) => e.id) };

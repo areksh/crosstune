@@ -437,9 +437,9 @@ export interface UpgradeCommitClient {
   addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
   removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
   /**
-   * Move entries to a position (see QobuzClient.movePlaylistTracks, whose
-   * endpoint is unverified). Optional and best-effort: without it, or when it
-   * fails, replacements stay at the end of the playlist.
+   * Move entries in front of the entry at the 1-based position `insertBefore`
+   * (see QobuzClient.movePlaylistTracks). Optional and best-effort: without
+   * it, or when it fails, replacements stay at the end of the playlist.
    */
   movePlaylistTracks?(
     playlistId: number,
@@ -743,7 +743,10 @@ async function moveIntoPlace(
   for (let i = 0; i < runs.length; i += 1) {
     const run = runs[i]!;
     try {
-      await client.movePlaylistTracks(playlistId, run.ids, run.index);
+      // Earlier runs are already in place and this run's entries are still
+      // at the end, so the entry at 0-based `run.index` is the one they go in
+      // front of; Qobuz names it by its 1-based position.
+      await client.movePlaylistTracks(playlistId, run.ids, run.index + 1);
     } catch {
       result.movedToEnd += runs.slice(i).reduce((sum, r) => sum + r.ids.length, 0);
       return;

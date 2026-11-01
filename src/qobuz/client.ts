@@ -497,9 +497,9 @@ export class QobuzClient {
    * Fetch an artist's releases -- albums, EPs and singles, live albums,
    * compilations -- newest first, each classified by type.
    *
-   * Uses `artist/getReleasesList`, inferred from the Qobuz web player and not
-   * verified against the live API (see endpoints.ts); the parser tolerates the
-   * older `artist/get?extra=albums` shape too. Pages until Qobuz reports no
+   * Uses `artist/getReleasesList`, the undocumented endpoint the Qobuz web
+   * player uses (see endpoints.ts); the parser tolerates the older
+   * `artist/get?extra=albums` shape too. Pages until Qobuz reports no
    * more, or until `maxReleases` have been collected (then `truncated`).
    *
    * @param artistId The Qobuz artist id.
@@ -813,15 +813,16 @@ export class QobuzClient {
   }
 
   /**
-   * Move playlist entries (by playlist-track id) so they sit before the entry
-   * currently at 0-based `insertBefore`, keeping their relative order.
+   * Move playlist entries (by playlist-track id) in front of the entry at the
+   * 1-based position `insertBefore` in the playlist as it is now, keeping their
+   * relative order; 0 or 1 means the top.
    *
-   * UNVERIFIED: `playlist/updateTracksPosition` with `playlist_id`,
-   * `playlist_track_ids` and `insert_before` (read as a 0-based position) is
-   * inferred from the Qobuz web player and third-party API wrappers; it is not
-   * documented and has not been exercised against the live API. Callers treat
-   * it as best-effort: a failure leaves the entries where they were (e.g. at
-   * the end after an add), it never loses tracks.
+   * `playlist/updateTracksPosition` is undocumented (it is what the Qobuz web
+   * player uses). Its `insert_before` semantics were checked against the live
+   * API in November 2026 on a scratch playlist: the 1-based position of the
+   * entry to go in front of, counted before the move. Callers still treat it
+   * as best-effort: a failure leaves the entries where they were (e.g. at the
+   * end after an add), it never loses tracks.
    *
    * @throws {QobuzError} kind `authentication` if not signed in, or
    *   `api-response` if Qobuz rejects the move.
