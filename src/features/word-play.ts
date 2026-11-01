@@ -83,6 +83,14 @@ export const MAX_ACROSTIC_LETTERS = 40;
 export const MAX_SENTENCE_SEARCHES = 120;
 /** Results asked for per sentence-phrase search. */
 export const SPAN_SEARCH_LIMIT = 50;
+/**
+ * Extra searches a sentence may spend paging deeper for words that found no
+ * exact title in the first {@link SPAN_SEARCH_LIMIT} results. On the live API
+ * an exact one-word title often ranks deep (e.g. "Brown" at position 308).
+ */
+export const MAX_DEEP_SEARCHES = 40;
+/** How far a deeper search pages, in results. */
+export const DEEP_SEARCH_DEPTH = 550;
 /** Results per page, and the most pages read, for `contains`/`exact`. */
 export const SEARCH_PAGE_SIZE = 100;
 export const MAX_SEARCH_PAGES = 5;
@@ -812,6 +820,8 @@ async function resolveSentence(
   const results = await mapWithConcurrency(searched, DEFAULT_CONCURRENCY, (query) =>
     client.searchTracks(query, SPAN_SEARCH_LIMIT),
   );
+  const deep = await searchDeeper(client, singles, results, options);
+  results.push(...deep.results);
 
   // One pool of every result (in search order), so a run can match a title
   // another search found, indexed by whole-title key and stem key.
@@ -885,10 +895,70 @@ async function resolveSentence(
   );
   return {
     splits,
-    searches: searched.length,
+    searches: searched.length + deep.searches,
     skippedSearches: queries.length - searched.length,
     excludedCount,
   };
+}
+
+/**
+ * Page deeper (past the first {@link SPAN_SEARCH_LIMIT} results, up to
+ * {@link DEEP_SEARCH_DEPTH}) for each single word no first-pass result matches
+ * exactly, stopping a word once a page has its exact title, and stopping
+ * altogether at {@link MAX_DEEP_SEARCHES}. Words are tried in sentence order.
+ */
+async function searchDeeper(
+  client: WordPlaySearchClient,
+  singles: readonly { key: string; query: string }[],
+  firstPass: readonly Track[][],
+  options: MatchOptions,
+): Promise<{ results: Track[][]; searches: number }> {
+  const found = new Set(firstPass.flat().map((track) => prepare(track, 0, options).key));
+  const words: { key: string; query: string }[] = [];
+  for (const single of singles) {
+    if (!found.has(single.key) && !words.some((w) => w.key === single.key)) {
+      words.push(single);
+    }
+  }
+  let budget = MAX_DEEP_SEARCHES;
+  const results: Track[][] = [];
+  let searches = 0;
+  const pages: { word: { key: string; query: string }; offset: number }[] = [];
+  for (let offset = SPAN_SEARCH_LIMIT; offset < DEEP_SEARCH_DEPTH; offset += SEARCH_PAGE_SIZE) {
+    for (const word of words) {
+      pages.push({ word, offset });
+    }
+  }
+  // Breadth first: every word's next page before anyone's page after it, so
+  // the budget is shared fairly; a word is dropped once it is found.
+  const done = new Set<string>();
+  for (let i = 0; i < pages.length && budget > 0; ) {
+    const batch: typeof pages = [];
+    for (; i < pages.length && batch.length < Math.min(budget, DEFAULT_CONCURRENCY); i += 1) {
+      if (!done.has(pages[i]!.word.key)) {
+        batch.push(pages[i]!);
+      }
+    }
+    if (batch.length === 0) {
+      break;
+    }
+    budget -= batch.length;
+    searches += batch.length;
+    const fetched = await Promise.all(
+      batch.map((page) => client.searchTracks(page.word.query, SEARCH_PAGE_SIZE, page.offset)),
+    );
+    fetched.forEach((tracks, index) => {
+      const word = batch[index]!.word;
+      results.push(tracks);
+      if (
+        tracks.length < SEARCH_PAGE_SIZE ||
+        tracks.some((track) => prepare(track, 0, options).key === word.key)
+      ) {
+        done.add(word.key);
+      }
+    });
+  }
+  return { results, searches };
 }
 
 function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {

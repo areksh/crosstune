@@ -287,7 +287,13 @@ preferring exact matches over close forms, then fewer songs). All three first
 leave as few words unmatched as they can; words no title matches are reported
 and left out. The command also lists up to three other ways to split it. Each
 run of up to `--max-span K` words (1-8, default 6) is searched once, shorter
-runs first, with at most 120 searches per sentence (of up to 30 words).
+runs first, with at most 120 searches per sentence (of up to 30 words). Qobuz
+ranks an exact one-word title deep in its results (a search for "brown" lists
+the song "Brown" around position 300), so a word that found no exact title is
+searched further, up to about 550 results, within 40 extra searches per
+sentence. Very common words such as "a" and "the" find nothing on their own
+(Qobuz's search seems to ignore them); a longer phrase containing them can
+still match.
 
 The playlist is named after the text (title-cased) unless `--name` is given;
 `--public` makes it public, or `--add-to <id>` appends to an existing playlist

@@ -18,6 +18,7 @@ import {
   titleCase,
   DEFAULT_MATCH_OPTIONS,
   MAX_ALTERNATIVES,
+  MAX_DEEP_SEARCHES,
   MAX_SENTENCE_SEARCHES,
   SEARCH_PAGE_SIZE,
   type SpanMatch,
@@ -466,8 +467,14 @@ describe("resolveWordPlay: sentence", () => {
     const { client, searchTracks } = catalogue(songs);
     const words = Array.from({ length: 30 }, (_, i) => `w${i}`).join(" ");
     const plan = await resolveWordPlay(client, { mode: "sentence", text: words });
-    expect(searchTracks).toHaveBeenCalledTimes(MAX_SENTENCE_SEARCHES);
-    expect(plan.searches).toBe(MAX_SENTENCE_SEARCHES);
+    // The run searches are capped; deeper pages for unmatched words have
+    // their own, separate budget.
+    const firstPass = searchTracks.mock.calls.filter(([, , offset]) => (offset ?? 0) === 0);
+    expect(firstPass).toHaveLength(MAX_SENTENCE_SEARCHES);
+    expect(searchTracks.mock.calls.length - firstPass.length).toBeLessThanOrEqual(
+      MAX_DEEP_SEARCHES,
+    );
+    expect(plan.searches).toBe(searchTracks.mock.calls.length);
     expect(plan.skippedSearches).toBeGreaterThan(0);
     // Every single word was searched.
     const queries = new Set(searchTracks.mock.calls.map((call) => call[0]));
@@ -533,6 +540,29 @@ describe("resolveWordPlay: sentence", () => {
       { match: { preferHires: true } },
     );
     expect(preferred.splits[0]!.slots[0]!.chosen?.track.id).toBe(hires.id);
+  });
+
+  // On the live API an exact one-word title often ranks deep: "Brown" first
+  // came up at position 308 of a search for "brown".
+  it("searches deeper for a word that found no exact title", async () => {
+    const nearMisses = Array.from({ length: 120 }, (_, i) => track(`Brown Eyed Girl ${i}`, "V"));
+    const deep = track("Brown", "Colour");
+    const { client, searchTracks } = catalogue([...nearMisses, deep, fox2]);
+    const plan = await resolveWordPlay(client, { mode: "sentence", text: "brown fox" });
+    expect(chosenTitles(plan)).toEqual(["Brown", "Fox"]);
+    // The deeper pages are only fetched for the word that needed them.
+    const deeper = searchTracks.mock.calls.filter(([, , offset]) => (offset ?? 0) > 0);
+    expect(deeper.length).toBeGreaterThan(0);
+    expect(deeper.every(([query]) => query === "brown")).toBe(true);
+    expect(plan.searches).toBe(searchTracks.mock.calls.length);
+  });
+
+  it("stops searching deeper once the extra budget is spent", async () => {
+    const words = Array.from({ length: 30 }, (_, i) => `w${i}`);
+    const { client, searchTracks } = catalogue([]);
+    await resolveWordPlay(client, { mode: "sentence", text: words.join(" "), maxSpan: 1 });
+    const deeper = searchTracks.mock.calls.filter(([, , offset]) => (offset ?? 0) > 0);
+    expect(deeper.length).toBeLessThanOrEqual(MAX_DEEP_SEARCHES);
   });
 });
 
