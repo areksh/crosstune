@@ -1,13 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { Track } from "../qobuz/index.js";
 import {
   deduplicateTracks,
+  entriesByPlaylist,
   enrichReleaseDates,
+  findSongsAcrossPlaylists,
+  formatAcrossPlaylistsReport,
   findDuplicateGroups,
   formatResolutionReport,
+  KEEP_STRATEGIES,
   normalise,
+  removePlaylistEntries,
   removedTracks,
   resolveDuplicateGroups,
+  scanAllPlaylists,
   selectKeeper,
   strategyNeedsReleaseDates,
   tracksToRemove,
@@ -293,5 +300,193 @@ describe("formatResolutionReport", () => {
     expect(report).toContain("Miles Davis - So What");
     expect(report).toContain("keep  id 100: So What  [Kind of Blue]");
     expect(report).toContain("drop  id 200: So What (2015 Remaster)");
+  });
+});
+
+describe("selectKeeper with a chain of strategies", () => {
+  const group: DedupTrack[] = [
+    { id: 100, title: "T", artist: "X", bitDepth: 16, samplingRate: 44.1, releaseDate: "1990-01-01" },
+    { id: 200, title: "T", artist: "X", bitDepth: 24, samplingRate: 96, releaseDate: "2015-01-01" },
+    { id: 300, title: "T", artist: "X", bitDepth: 24, samplingRate: 96, releaseDate: "1999-01-01" },
+  ];
+
+  it("breaks ties of the first strategy with the next", () => {
+    expect(selectKeeper(group, ["highest-quality"])).toBe(200); // tie kept the earlier
+    expect(selectKeeper(group, ["highest-quality", "oldest"])).toBe(300);
+    expect(selectKeeper(group, ["highest-quality", "newest"])).toBe(200);
+    expect(selectKeeper(group, ["highest-quality", "last-added"])).toBe(300);
+  });
+
+  it("ignores later strategies when the first leaves no tie", () => {
+    expect(selectKeeper(group, ["oldest", "highest-quality"])).toBe(100);
+    expect(selectKeeper(group, ["first-added", "highest-quality"])).toBe(100);
+    expect(selectKeeper(group, ["last-added", "oldest"])).toBe(300);
+  });
+
+  it("matches the single strategy for a chain of one", () => {
+    for (const strategy of KEEP_STRATEGIES) {
+      expect(selectKeeper(group, [strategy])).toBe(selectKeeper(group, strategy));
+    }
+  });
+
+  it("throws on an empty chain", () => {
+    expect(() => selectKeeper(group, [])).toThrow(/strategy/);
+  });
+
+  it("needs release dates when any strategy in the chain does", () => {
+    expect(strategyNeedsReleaseDates(["highest-quality", "oldest"])).toBe(true);
+    expect(strategyNeedsReleaseDates(["highest-quality", "last-added"])).toBe(false);
+  });
+
+  it("resolves groups with a chain", () => {
+    expect(resolveDuplicateGroups([group], ["highest-quality", "oldest"])[0]?.keepId).toBe(300);
+  });
+});
+
+describe("toDedupTrack artwork", () => {
+  it("carries the cover URL through", () => {
+    expect(
+      toDedupTrack({ id: 1, title: "T", image: "https://static.qobuz.com/x.jpg" }).image,
+    ).toBe("https://static.qobuz.com/x.jpg");
+  });
+});
+
+describe("findSongsAcrossPlaylists", () => {
+  const road = { id: 1, name: "Road Trip" };
+  const chill = { id: 2, name: "Chill" };
+  const gym = { id: 3, name: "Gym" };
+
+  it("lists songs in more than one playlist, with their copies per playlist", () => {
+    const songs = findSongsAcrossPlaylists([
+      {
+        playlist: road,
+        tracks: [
+          { id: 10, title: "Teardrop", artist: "Massive Attack", isrc: "T1", playlistTrackId: 101 },
+          { id: 20, title: "Only Road", artist: "A", playlistTrackId: 102 },
+        ],
+      },
+      {
+        playlist: chill,
+        tracks: [
+          // The remaster matches by signature.
+          { id: 11, title: "Teardrop (2019 Remaster)", artist: "Massive Attack", playlistTrackId: 201 },
+          { id: 10, title: "Teardrop", artist: "Massive Attack", isrc: "T1", playlistTrackId: 202 },
+        ],
+      },
+      { playlist: gym, tracks: [{ id: 30, title: "Other", artist: "B", playlistTrackId: 301 }] },
+    ]);
+
+    expect(songs).toHaveLength(1);
+    expect(songs[0]?.track.id).toBe(10);
+    expect(
+      songs[0]?.playlists.map((p) => [p.playlist.name, p.tracks.map((t) => t.playlistTrackId)]),
+    ).toEqual([
+      ["Road Trip", [101]],
+      ["Chill", [201, 202]],
+    ]);
+  });
+
+  it("leaves out songs repeated within a single playlist only", () => {
+    const songs = findSongsAcrossPlaylists([
+      {
+        playlist: road,
+        tracks: [
+          { id: 10, title: "Teardrop", artist: "Massive Attack", playlistTrackId: 101 },
+          { id: 10, title: "Teardrop", artist: "Massive Attack", playlistTrackId: 102 },
+        ],
+      },
+      { playlist: chill, tracks: [] },
+    ]);
+    expect(songs).toEqual([]);
+  });
+});
+
+describe("scanAllPlaylists", () => {
+  it("resolves each playlist's own duplicates and finds songs across playlists", async () => {
+    const tracks: Record<number, Track[]> = {
+      1: [
+        { id: 10, title: "Paranoid", artist: "Black Sabbath", isrc: "P", albumId: "a", playlistTrackId: 11 },
+        { id: 12, title: "Paranoid", artist: "Black Sabbath", isrc: "P", albumId: "b", playlistTrackId: 12 },
+      ],
+      2: [{ id: 10, title: "Paranoid", artist: "Black Sabbath", isrc: "P", playlistTrackId: 21 }],
+      3: [{ id: 99, title: "Lonely", artist: "Z", playlistTrackId: 31 }],
+    };
+    const dates: Record<string, string> = { a: "2010-01-01", b: "1970-01-01" };
+    const client = {
+      getUserPlaylists: vi.fn(async () => [
+        { id: 1, name: "One" },
+        { id: 2, name: "Two" },
+        { id: 3, name: "Three" },
+      ]),
+      getPlaylistTracks: vi.fn(async (id: number) => tracks[id] ?? []),
+      getAlbumReleaseDate: vi.fn(async (albumId: string) => dates[albumId]),
+    };
+
+    const scan = await scanAllPlaylists(client, ["highest-quality", "oldest"]);
+
+    expect(scan.playlistCount).toBe(3);
+    expect(scan.within).toHaveLength(1);
+    expect(scan.within[0]?.playlist).toEqual({ id: 1, name: "One" });
+    expect(scan.within[0]?.groups[0]?.keepId).toBe(12); // equal quality, b is older
+    expect(scan.across.map((song) => song.playlists.map((p) => p.playlist.id))).toEqual([[1, 2]]);
+    expect(client.getAlbumReleaseDate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("entriesByPlaylist / removePlaylistEntries", () => {
+  it("groups entries per playlist, each once", () => {
+    expect(
+      entriesByPlaylist([
+        { playlistId: 1, playlistTrackId: 11 },
+        { playlistId: 2, playlistTrackId: 21 },
+        { playlistId: 1, playlistTrackId: 12 },
+        { playlistId: 1, playlistTrackId: 11 },
+      ]),
+    ).toEqual(
+      new Map([
+        [1, [11, 12]],
+        [2, [21]],
+      ]),
+    );
+  });
+
+  it("removes with one request per playlist and counts the entries", async () => {
+    const client = { removeTracksFromPlaylist: vi.fn(async () => {}) };
+    const removed = await removePlaylistEntries(client, [
+      { playlistId: 1, playlistTrackId: 11 },
+      { playlistId: 2, playlistTrackId: 21 },
+      { playlistId: 1, playlistTrackId: 12 },
+    ]);
+    expect(removed).toBe(3);
+    expect(client.removeTracksFromPlaylist).toHaveBeenCalledWith(1, [11, 12]);
+    expect(client.removeTracksFromPlaylist).toHaveBeenCalledWith(2, [21]);
+  });
+});
+
+describe("formatAcrossPlaylistsReport", () => {
+  it("lists each song with the playlists it is in", () => {
+    const report = formatAcrossPlaylistsReport([
+      {
+        track: { id: 1, title: "Teardrop", artist: "Massive Attack" },
+        playlists: [
+          { playlist: { id: 1, name: "Road Trip" }, tracks: [{ id: 1, title: "Teardrop", artist: "Massive Attack" }] },
+          {
+            playlist: { id: 2, name: "Chill" },
+            tracks: [
+              { id: 1, title: "Teardrop", artist: "Massive Attack" },
+              { id: 2, title: "Teardrop", artist: "Massive Attack" },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(report).toContain("1 song is in more than one playlist:");
+    expect(report).toContain("1. Massive Attack - Teardrop");
+    expect(report).toContain('in "Road Trip" (id 1)');
+    expect(report).toContain('in "Chill" (id 2) (2 copies)');
+  });
+
+  it("says when there are none", () => {
+    expect(formatAcrossPlaylistsReport([])).toBe("No song is in more than one playlist.");
   });
 });

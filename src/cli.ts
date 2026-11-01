@@ -44,13 +44,16 @@
  *       lines: studio albums unless --include names other kinds, and one
  *       version of each album (chosen by --prefer) unless --all-versions.
  *
- *   qobuz-helper deduplicate (--playlist <id> | --favourites)
- *                            [--keep <strategy>] [--apply]
+ *   qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists)
+ *                            [--keep <strategy>[,<strategy>...]] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
- *       album) in a playlist or in your favourites, marking which copy to keep.
- *       --keep: first-added (default), last-added, highest-quality, oldest,
- *       newest. Without --apply it only reports; with --apply it removes the
- *       tracks marked "drop".
+ *       album) in a playlist, in your favourites, or in each of your playlists,
+ *       marking which copy to keep. --keep: first-added (default), last-added,
+ *       highest-quality, oldest, newest; a comma-separated chain breaks ties in
+ *       order. --all-playlists also lists songs saved in more than one
+ *       playlist (report only; choose where each stays in the web UI). Without
+ *       --apply it only reports; with --apply it removes the tracks marked
+ *       "drop".
  *
  *   qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists)
  *                        [--allow-signature-match] [--remove-unplayable] [--apply]
@@ -167,11 +170,16 @@ import { startServer } from "./server/http.js";
 import {
   deduplicateTracks,
   enrichReleaseDates,
+  formatAcrossPlaylistsReport,
   formatResolutionReport,
+  removePlaylistEntries,
   resolveDuplicateGroups,
+  scanAllPlaylists,
   strategyNeedsReleaseDates,
   tracksToRemove,
   type DedupTrack,
+  type KeepStrategy,
+  type PlaylistEntry,
 } from "./features/deduplicate.js";
 import {
   addTracksToExistingPlaylist,
@@ -727,6 +735,9 @@ function planDeduplicate(
   argv: string[],
 ): (client: QobuzClient) => Promise<void> {
   const { source, keep, apply } = parseDedupeArgs(argv);
+  if (source.type === "all-playlists") {
+    return planDeduplicateAllPlaylists(keep, apply);
+  }
 
   return async (client: QobuzClient): Promise<void> => {
     const where =
@@ -749,7 +760,7 @@ function planDeduplicate(
     }
 
     const resolved = resolveDuplicateGroups(groups, keep);
-    logger.info(`  keeping the ${keep} copy of each duplicate\n`);
+    logger.info(`  keeping the ${keep.join(", then ")} copy of each duplicate\n`);
     logger.info(formatResolutionReport(resolved));
 
     const removals = tracksToRemove(resolved);
@@ -765,10 +776,61 @@ function planDeduplicate(
   };
 }
 
+/**
+ * Executor for `deduplicate --all-playlists`: report each playlist's own
+ * duplicates (removed with --apply) and the songs saved in more than one
+ * playlist (report only).
+ */
+function planDeduplicateAllPlaylists(
+  keep: readonly KeepStrategy[],
+  apply: boolean,
+): (client: QobuzClient) => Promise<void> {
+  return async (client: QobuzClient): Promise<void> => {
+    logger.info("Fetching all your playlists...");
+    const scan = await scanAllPlaylists(client, keep);
+    logger.info(
+      `  ${scan.playlistCount} playlists scanned; keeping the ${keep.join(", then ")} copy of each duplicate\n`,
+    );
+    const removals: PlaylistEntry[] = [];
+    if (scan.within.length === 0) {
+      logger.info("No duplicates within any playlist.");
+    }
+    for (const { playlist, groups } of scan.within) {
+      logger.info(`"${playlist.name}" (id ${playlist.id}):`);
+      logger.info(`${formatResolutionReport(groups)}\n`);
+      for (const track of tracksToRemove(groups)) {
+        if (track.playlistTrackId !== undefined) {
+          removals.push({ playlistId: playlist.id, playlistTrackId: track.playlistTrackId });
+        }
+      }
+    }
+    logger.info(`\n${formatAcrossPlaylistsReport(scan.across)}`);
+    if (scan.across.length > 0) {
+      logger.info("(nothing is removed for these; choose where each stays in the web UI)");
+    }
+
+    if (!apply) {
+      if (removals.length > 0) {
+        logger.info(
+          `\n(dry run -- pass --apply to remove the ${removals.length} 'drop' track${removals.length === 1 ? "" : "s"})`,
+        );
+      }
+      return;
+    }
+    if (removals.length === 0) {
+      logger.info("\nNothing to remove.");
+      return;
+    }
+    logger.info(`\nRemoving ${removals.length} track(s)...`);
+    await removePlaylistEntries(client, removals);
+    logger.info("  done.");
+  };
+}
+
 /** Execute the removals for an --apply run, using the id each source needs. */
 async function applyRemovals(
   client: QobuzClient,
-  source: DedupeSource,
+  source: Exclude<DedupeSource, { type: "all-playlists" }>,
   removals: readonly DedupTrack[],
 ): Promise<void> {
   if (removals.length === 0) {
@@ -1306,7 +1368,7 @@ function printUsage(): void {
       '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]...',
       '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... "Artist" ...',
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]",
-      "  qobuz-helper deduplicate (--playlist <id> | --favourites) [--keep <strategy>] [--apply]",
+      "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--apply]",
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
       "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
@@ -1326,7 +1388,7 @@ function printUsage(): void {
       "--exclude-artist matches the whole artist name, ignoring case and accents (\"Drake\" skips Drake, not Nick Drake); /pattern/ is a regex on the name. similar-artists never walks to an excluded artist.",
       "--discs keeps only the listed discs of each album, e.g. 1 or 1,3-4.",
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
-      "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest.",
+      "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest; join several with commas to break ties (e.g. highest-quality,oldest).",
       "deduplicate reports only unless --apply is given.",
       "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
       "upgrade reports only unless --apply is given; it matches by ISRC unless --allow-signature-match is given.",

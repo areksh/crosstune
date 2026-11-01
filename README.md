@@ -34,7 +34,8 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   playlist whose first letters spell a word or run from A to Z. Available on
   the CLI and in the web UI.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
-  favourites, including remasters and the same song on different albums.
+  favourites, including remasters and the same song on different albums, or
+  scan all your playlists to also find songs saved in more than one of them.
   Available on the CLI and in the web UI.
 - **Combine playlists** -- merge two or more playlists (or a playlist and your
   favourites) into one, each song once; or keep only what the first has and
@@ -298,6 +299,12 @@ npm run dev -- deduplicate --favourites
 
 # Choose which copy to keep, then actually remove the rest
 npm run dev -- deduplicate --playlist 12345678 --keep highest-quality --apply
+
+# Highest quality, and of equally good copies the oldest release
+npm run dev -- deduplicate --favourites --keep highest-quality,oldest
+
+# Every playlist: its own duplicates, plus songs saved in several playlists
+npm run dev -- deduplicate --all-playlists
 ```
 
 The deduplicator matches tracks by ISRC or by a normalised artist+title
@@ -321,6 +328,17 @@ Which copy is kept is chosen by `--keep <strategy>`:
 | `highest-quality` | the highest bit-depth / sample-rate copy          |
 | `oldest`          | the earliest release (looks up album dates)       |
 | `newest`          | the latest release (looks up album dates)         |
+
+Give several strategies separated by commas to break ties: each later one only
+decides between the copies the earlier ones rank equal
+(`--keep highest-quality,oldest` keeps the oldest of the highest-quality
+copies). Remaining ties keep the first-added copy, as before.
+
+`--all-playlists` deduplicates each of your playlists on its own, as
+`--playlist` would, and also lists the songs (matched the same way) saved in
+more than one playlist, with the playlists each is in. Those are only reported
+-- nothing is removed from other playlists; choose where each song stays in the
+web UI.
 
 By default the command only **reports** the plan. Add `--apply` to actually
 remove the tracks marked `drop` (from the playlist, or from your favourites).
@@ -609,11 +627,15 @@ browser.
 
 **Deduplicator:**
 
-1. Choose a source (your favourites or a playlist) and which copy to keep
-   (first added, highest quality, oldest release, and so on).
+1. Choose a source (your favourites, a playlist, or all your playlists) and
+   which copy to keep (first added, highest quality, oldest release, and so
+   on), optionally with a second choice for when copies are equal.
 2. Scan: each duplicate group shows its copies, the kept ones in green and the
    rest in red. Tick the copies you want to keep (you can keep more than one),
-   or use "Keep all" to keep the whole group.
+   or use "Keep all" to keep the whole group. Scanning all playlists first
+   lists the songs saved in more than one playlist, one row per playlist, all
+   ticked; untick a playlist to remove the song from it. Below that, each
+   playlist's own duplicates are grouped under its name.
 3. Apply to remove the unticked copies.
 
 **Combine playlists:**

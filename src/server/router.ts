@@ -25,10 +25,13 @@ import {
 import {
   deduplicateTracks,
   enrichReleaseDates,
+  removePlaylistEntries,
   resolveDuplicateGroups,
+  scanAllPlaylists,
   strategyNeedsReleaseDates,
   KEEP_STRATEGIES,
   type KeepStrategy,
+  type PlaylistEntry,
 } from "../features/deduplicate.js";
 import {
   addTracksToExistingPlaylist,
@@ -477,6 +480,10 @@ async function scan(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     return { status: 400, body: { error: input.error } };
   }
   const { source, keep } = input.value;
+  if (source.type === "all-playlists") {
+    // { within: [{ playlist, groups }], across: [...], playlistCount }
+    return { status: 200, body: await scanAllPlaylists(deps.service, keep) };
+  }
   const tracks =
     source.type === "playlist"
       ? await deps.service.getPlaylistTracks(source.playlistId)
@@ -498,6 +505,15 @@ async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     return { status: 400, body: { error: input.error } };
   }
   const { source, removals } = input.value;
+  if (source.type === "all-playlists") {
+    const entries: PlaylistEntry[] = removals.flatMap((removal) =>
+      removal.playlistId !== undefined && removal.playlistTrackId !== undefined
+        ? [{ playlistId: removal.playlistId, playlistTrackId: removal.playlistTrackId }]
+        : [],
+    );
+    const removed = await removePlaylistEntries(deps.service, entries);
+    return { status: 200, body: { removed } };
+  }
   if (source.type === "playlist") {
     const ids = removals
       .map((removal) => removal.playlistTrackId)
@@ -984,15 +1000,16 @@ function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
 
 type DedupeSource =
   | { type: "playlist"; playlistId: number }
-  | { type: "favourites" };
+  | { type: "favourites" }
+  | { type: "all-playlists" };
 
 /** Parse the shared source discriminator used by scan and apply. */
 function parseSource(value: unknown): Parsed<DedupeSource> {
   if (!isRecord(value)) {
     return { ok: false, error: "source is required" };
   }
-  if (value["type"] === "favourites") {
-    return { ok: true, value: { type: "favourites" } };
+  if (value["type"] === "favourites" || value["type"] === "all-playlists") {
+    return { ok: true, value: { type: value["type"] } };
   }
   if (value["type"] === "playlist") {
     if (typeof value["playlistId"] !== "number") {
@@ -1000,12 +1017,13 @@ function parseSource(value: unknown): Parsed<DedupeSource> {
     }
     return { ok: true, value: { type: "playlist", playlistId: value["playlistId"] } };
   }
-  return { ok: false, error: "source.type must be 'playlist' or 'favourites'" };
+  return { ok: false, error: "source.type must be 'playlist', 'favourites' or 'all-playlists'" };
 }
 
 interface ScanInput {
   source: DedupeSource;
-  keep: KeepStrategy;
+  /** Keep strategies in order; later ones break the earlier ones' ties. */
+  keep: KeepStrategy[];
 }
 
 function parseScanInput(body: unknown): Parsed<ScanInput> {
@@ -1016,20 +1034,28 @@ function parseScanInput(body: unknown): Parsed<ScanInput> {
   if (!source.ok) {
     return source;
   }
-  const rawKeep = body["keep"];
-  const keep = rawKeep === undefined ? "first-added" : rawKeep;
-  if (!isKeepStrategy(keep)) {
+  // One strategy, a comma-separated chain, or an array of strategies.
+  const rawKeep = body["keep"] ?? "first-added";
+  const parts =
+    typeof rawKeep === "string"
+      ? rawKeep.split(",").map((part) => part.trim())
+      : Array.isArray(rawKeep)
+        ? rawKeep
+        : [];
+  if (parts.length === 0 || !parts.every(isKeepStrategy)) {
     return {
       ok: false,
-      error: `keep must be one of: ${KEEP_STRATEGIES.join(", ")}`,
+      error: `keep must be one of: ${KEEP_STRATEGIES.join(", ")}, or a list of them`,
     };
   }
-  return { ok: true, value: { source: source.value, keep } };
+  return { ok: true, value: { source: source.value, keep: parts } };
 }
 
 interface Removal {
   id: number;
   playlistTrackId?: number;
+  /** The playlist an entry is in (all-playlists removals). */
+  playlistId?: number;
 }
 
 interface ApplyInput {
@@ -1056,6 +1082,18 @@ function parseApplyInput(body: unknown): Parsed<ApplyInput> {
     const removal: Removal = { id: item["id"] };
     if (typeof item["playlistTrackId"] === "number") {
       removal.playlistTrackId = item["playlistTrackId"];
+    }
+    if (typeof item["playlistId"] === "number") {
+      removal.playlistId = item["playlistId"];
+    }
+    if (
+      source.value.type === "all-playlists" &&
+      (removal.playlistId === undefined || removal.playlistTrackId === undefined)
+    ) {
+      return {
+        ok: false,
+        error: "removals across playlists need a playlistId and a playlistTrackId",
+      };
     }
     removals.push(removal);
   }

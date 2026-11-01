@@ -264,7 +264,7 @@ describe("parseDedupeArgs", () => {
   it("parses a playlist source with defaults (first-added, report-only)", () => {
     expect(parseDedupeArgs(["--playlist", "555"])).toEqual({
       source: { type: "playlist", playlistId: 555 },
-      keep: "first-added",
+      keep: ["first-added"],
       apply: false,
     });
   });
@@ -286,8 +286,27 @@ describe("parseDedupeArgs", () => {
       "oldest",
       "newest",
     ] as const) {
-      expect(parseDedupeArgs(["--favourites", "--keep", keep]).keep).toBe(keep);
+      expect(parseDedupeArgs(["--favourites", "--keep", keep]).keep).toEqual([keep]);
     }
+  });
+
+  it("parses a comma-separated --keep chain", () => {
+    expect(
+      parseDedupeArgs(["--favourites", "--keep", "highest-quality, oldest"]).keep,
+    ).toEqual(["highest-quality", "oldest"]);
+  });
+
+  it("throws when any part of a --keep chain is unknown, or it is empty", () => {
+    expect(() =>
+      parseDedupeArgs(["--favourites", "--keep", "highest-quality,cheapest"]),
+    ).toThrow(/keep/i);
+    expect(() => parseDedupeArgs(["--favourites", "--keep", "oldest,"])).toThrow(/keep/i);
+    expect(() => parseDedupeArgs(["--favourites", "--keep"])).toThrow(/keep/i);
+  });
+
+  it("parses the all-playlists source", () => {
+    expect(parseDedupeArgs(["--all-playlists"]).source).toEqual({ type: "all-playlists" });
+    expect(() => parseDedupeArgs(["--all-playlists", "--favourites"])).toThrow(/only one/i);
   });
 
   it("parses --apply", () => {

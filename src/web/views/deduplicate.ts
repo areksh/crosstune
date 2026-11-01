@@ -1,17 +1,20 @@
 /**
  * Deduplicator view.
  *
- * Flow: pick a source (a playlist or your favourites) and a keep strategy, scan
- * for duplicate groups, review each group -- the kept copy is green, the rest
- * red -- and change which copy is kept (or mark a group "not a duplicate" to
- * keep all), then apply the removals. This is DOM glue; the matching, resolving
- * and removal logic lives in the tested server modules.
+ * Flow: pick a source (a playlist, your favourites, or all your playlists) and
+ * a keep strategy (optionally a second one to break ties), scan for duplicate
+ * groups, review each group -- the kept copy is green, the rest red -- and
+ * change which copy is kept (or mark a group "not a duplicate" to keep all),
+ * then apply the removals. Scanning all playlists also lists the songs saved
+ * in more than one playlist, kept everywhere until a playlist is unticked. This
+ * is DOM glue; the matching, resolving and removal logic lives in the tested
+ * server modules.
  */
 
 import { api, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { coverSlot } from "../artwork.js";
-import { qualityPill, trackText } from "../tracks.js";
+import { groupHead, qualityPill, trackText } from "../tracks.js";
 
 interface DedupTrack {
   id: number;
@@ -30,15 +33,39 @@ interface ResolvedGroup {
   keepId: number;
 }
 
+interface PlaylistRef {
+  id: number;
+  name: string;
+}
+
+/** A song saved in more than one playlist (all-playlists scans). */
+interface AcrossSong {
+  track: DedupTrack;
+  playlists: Array<{ playlist: PlaylistRef; tracks: DedupTrack[] }>;
+}
+
+/** `/api/deduplicate/scan`: `groups` for one source, the rest for all playlists. */
 interface ScanResponse {
-  groups: ResolvedGroup[];
+  groups?: ResolvedGroup[];
+  within?: Array<{ playlist: PlaylistRef; groups: ResolvedGroup[] }>;
+  across?: AcrossSong[];
+  playlistCount?: number;
 }
 
 type Source =
   | { type: "playlist"; playlistId: number }
-  | { type: "favourites" };
+  | { type: "favourites" }
+  | { type: "all-playlists" };
 
-let scannedGroups: ResolvedGroup[] = [];
+interface Removal {
+  id: number;
+  playlistTrackId?: number;
+  playlistId?: number;
+}
+
+/** Scanned groups, each with its playlist when scanning all playlists. */
+let scannedGroups: Array<{ group: ResolvedGroup; playlistId?: number }> = [];
+let scannedSongs: AcrossSong[] = [];
 let scannedSource: Source | undefined;
 let playlistsLoaded = false;
 
@@ -61,6 +88,7 @@ function selectedSourceType(): string {
 function onSourceChange(): void {
   const isPlaylist = selectedSourceType() === "playlist";
   el("dedup-playlist-fields").hidden = !isPlaylist;
+  el("dedup-across-hint").hidden = selectedSourceType() !== "all-playlists";
   if (isPlaylist) {
     void loadPlaylists();
   }
@@ -97,14 +125,22 @@ async function loadPlaylists(): Promise<void> {
 }
 
 function currentSource(): Source | undefined {
-  if (selectedSourceType() === "favourites") {
-    return { type: "favourites" };
+  const type = selectedSourceType();
+  if (type === "favourites" || type === "all-playlists") {
+    return { type };
   }
   const value = el<HTMLSelectElement>("dedup-playlist-select").value;
   if (value === "") {
     return undefined;
   }
   return { type: "playlist", playlistId: Number(value) };
+}
+
+/** The keep strategy, then the tie-breaker when one is chosen. */
+function keepChain(): string[] {
+  const keep = el<HTMLSelectElement>("dedup-keep").value;
+  const then = el<HTMLSelectElement>("dedup-keep-then").value;
+  return then === "" || then === keep ? [keep] : [keep, then];
 }
 
 async function onScan(): Promise<void> {
@@ -118,18 +154,26 @@ async function onScan(): Promise<void> {
     showError(errorNode, "Choose a playlist to scan.");
     return;
   }
-  const keep = el<HTMLSelectElement>("dedup-keep").value;
 
   button.disabled = true;
   button.textContent = "Scanning...";
   try {
-    const { groups } = await api<ScanResponse>("POST", "/api/deduplicate/scan", {
+    const scan = await api<ScanResponse>("POST", "/api/deduplicate/scan", {
       source,
-      keep,
+      keep: keepChain(),
     });
-    scannedGroups = groups;
     scannedSource = source;
-    renderGroups(groups);
+    if (source.type === "all-playlists") {
+      scannedGroups = (scan.within ?? []).flatMap(({ playlist, groups }) =>
+        groups.map((group) => ({ group, playlistId: playlist.id })),
+      );
+      scannedSongs = scan.across ?? [];
+      renderAllPlaylists(scan);
+    } else {
+      scannedGroups = (scan.groups ?? []).map((group) => ({ group }));
+      scannedSongs = [];
+      renderGroups(scan.groups ?? []);
+    }
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {
@@ -138,17 +182,22 @@ async function onScan(): Promise<void> {
   }
 }
 
+function showReview(hasAnything: boolean): void {
+  el("dedup-results").hidden = false;
+  el("dedup-bar").hidden = !hasAnything;
+  el<HTMLButtonElement>("dedup-apply").hidden = !hasAnything;
+  setStep("dedup-steps", 1);
+}
+
 function renderGroups(groups: ResolvedGroup[]): void {
   const summary = el("dedup-summary");
   const container = el("dedup-groups");
   container.textContent = "";
-  el("dedup-results").hidden = false;
-  el("dedup-bar").hidden = groups.length === 0;
-  setStep("dedup-steps", 1);
+  showReview(groups.length > 0);
+  el("dedup-bar-note").textContent = "Unticked copies are removed.";
 
   if (groups.length === 0) {
     summary.textContent = "No duplicates found.";
-    el<HTMLButtonElement>("dedup-apply").hidden = true;
     return;
   }
 
@@ -157,8 +206,92 @@ function renderGroups(groups: ResolvedGroup[]): void {
   groups.forEach((group, index) => {
     container.appendChild(renderGroup(group, index));
   });
-  el<HTMLButtonElement>("dedup-apply").hidden = false;
   updateApplyButton();
+}
+
+/**
+ * All playlists: the songs in more than one playlist first, then each
+ * playlist's own duplicate groups under its name.
+ */
+function renderAllPlaylists(scan: ScanResponse): void {
+  const container = el("dedup-groups");
+  container.textContent = "";
+  const within = scan.within ?? [];
+  const across = scan.across ?? [];
+  showReview(across.length > 0 || within.length > 0);
+  el("dedup-bar-note").textContent =
+    "Unticked copies are removed, and songs from unticked playlists.";
+
+  const groupCount = scannedGroups.length;
+  el("dedup-summary").textContent =
+    `Scanned ${scan.playlistCount ?? 0} playlists: ` +
+    `${across.length} song${across.length === 1 ? " is" : "s are"} in more than one playlist, ` +
+    `and ${groupCount} duplicate group${groupCount === 1 ? "" : "s"} within playlists.`;
+
+  if (across.length > 0) {
+    const section = document.createElement("section");
+    section.className = "dedup-section";
+    section.appendChild(
+      groupHead("h3", "In more than one playlist", {
+        note: "Kept everywhere; untick a playlist to remove the song from it.",
+        count: String(across.length),
+      }),
+    );
+    across.forEach((song, index) => section.appendChild(renderSong(song, index)));
+    container.appendChild(section);
+  }
+
+  let index = 0;
+  for (const { playlist, groups } of within) {
+    const section = document.createElement("section");
+    section.className = "dedup-section";
+    section.appendChild(
+      groupHead("h3", playlist.name, {
+        note: "Duplicates within this playlist",
+        count: String(groups.length),
+      }),
+    );
+    for (const group of groups) {
+      section.appendChild(renderGroup(group, index));
+      index += 1;
+    }
+    container.appendChild(section);
+  }
+  updateApplyButton();
+}
+
+/** A song across playlists: one ticked row per playlist holding it. */
+function renderSong(song: AcrossSong, index: number): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "dedup-group dedup-song";
+  wrapper.dataset["song"] = String(index);
+  const title = `${song.track.artist ? `${song.track.artist} - ` : ""}${song.track.title}`;
+  wrapper.appendChild(groupHead("h4", title));
+
+  for (const { playlist, tracks } of song.playlists) {
+    const row = document.createElement("label");
+    row.className = "track dedup-track";
+    row.dataset["playlistId"] = String(playlist.id);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "dedup-keep-box";
+    box.checked = true;
+    box.addEventListener("change", () => {
+      updateGroupStyling(wrapper);
+      updateApplyButton();
+    });
+    row.appendChild(box);
+    row.appendChild(coverSlot(tracks[0]?.image ?? song.track.image));
+    const copies = tracks.length > 1 ? `${tracks.length} copies` : undefined;
+    row.appendChild(trackText(playlist.name, [copies, tracks[0]?.album].filter(Boolean).join(", ") || undefined));
+    const pill = tracks[0] === undefined ? undefined : qualityPill(tracks[0]);
+    if (pill !== undefined) {
+      row.appendChild(pill);
+    }
+    wrapper.appendChild(row);
+  }
+  updateGroupStyling(wrapper);
+  return wrapper;
 }
 
 function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
@@ -238,13 +371,34 @@ function updateGroupStyling(wrapper: HTMLElement): void {
   }
 }
 
-/** Track ids to remove (the unticked copies), with their playlist-track ids. */
-function collectRemovals(): Array<{ id: number; playlistTrackId?: number }> {
-  const removals: Array<{ id: number; playlistTrackId?: number }> = [];
-  document.querySelectorAll<HTMLElement>(".dedup-group").forEach((wrapper) => {
-    const index = Number(wrapper.dataset["index"]);
-    const group = scannedGroups[index];
-    if (group === undefined) {
+/**
+ * Entries to remove: the unticked copies of each group (with their
+ * playlist-track ids, and playlist when scanning all playlists), and every copy
+ * of a song in a playlist unticked for it.
+ */
+function collectRemovals(): Removal[] {
+  const removals: Removal[] = [];
+  document.querySelectorAll<HTMLElement>("#dedup-groups .dedup-group").forEach((wrapper) => {
+    const songIndex = wrapper.dataset["song"];
+    if (songIndex !== undefined) {
+      const song = scannedSongs[Number(songIndex)];
+      for (const row of wrapper.querySelectorAll<HTMLElement>(".dedup-track")) {
+        const box = row.querySelector<HTMLInputElement>(".dedup-keep-box");
+        const playlistId = Number(row.dataset["playlistId"]);
+        const entry = song?.playlists.find((p) => p.playlist.id === playlistId);
+        if (box === null || box.checked || entry === undefined) {
+          continue;
+        }
+        for (const track of entry.tracks) {
+          if (track.playlistTrackId !== undefined) {
+            removals.push({ id: track.id, playlistId, playlistTrackId: track.playlistTrackId });
+          }
+        }
+      }
+      return;
+    }
+    const scanned = scannedGroups[Number(wrapper.dataset["index"])];
+    if (scanned === undefined) {
       return;
     }
     for (const row of wrapper.querySelectorAll<HTMLElement>(".dedup-track")) {
@@ -253,16 +407,26 @@ function collectRemovals(): Array<{ id: number; playlistTrackId?: number }> {
         continue;
       }
       const id = Number(row.dataset["trackId"]);
-      const track = group.tracks.find((t) => t.id === id);
+      const track = scanned.group.tracks.find((t) => t.id === id);
       removals.push({
         id,
         ...(track?.playlistTrackId !== undefined && {
           playlistTrackId: track.playlistTrackId,
         }),
+        ...(scanned.playlistId !== undefined && { playlistId: scanned.playlistId }),
       });
     }
   });
-  return removals;
+  // A copy can be both a duplicate and in an unticked playlist: remove it once.
+  const seen = new Set<string>();
+  return removals.filter((removal) => {
+    const key = `${removal.playlistId ?? ""}:${removal.playlistTrackId ?? removal.id}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function updateApplyButton(): void {
@@ -304,6 +468,7 @@ async function onApply(): Promise<void> {
     setStep("dedup-steps", 3);
     // The scan is now stale; make the user re-scan before applying again.
     scannedGroups = [];
+    scannedSongs = [];
     el("dedup-groups").textContent = "";
     el("dedup-summary").textContent = "";
     button.hidden = true;

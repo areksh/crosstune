@@ -1064,6 +1064,20 @@ input[type="date"] {
   color: var(--muted);
 }
 
+/* All playlists: songs across playlists, then each playlist's own groups. */
+.dedup-section {
+  margin-bottom: 28px;
+}
+
+.dedup-section > .group-head {
+  margin-bottom: 12px;
+}
+
+.dedup-song > .group-head {
+  border-bottom: 0;
+  padding-top: 4px;
+}
+
 .keep-all {
   display: inline-flex;
   align-items: center;

@@ -202,11 +202,13 @@ export interface SimilarArgs {
 /** Where the deduplicator should look for tracks. */
 export type DedupeSource =
   | { type: "playlist"; playlistId: number }
-  | { type: "favourites" };
+  | { type: "favourites" }
+  | { type: "all-playlists" };
 
 export interface DedupeOptions {
   source: DedupeSource;
-  keep: KeepStrategy;
+  /** Keep strategies in order; later ones break the earlier ones' ties. */
+  keep: KeepStrategy[];
   /** Whether to actually remove duplicates (otherwise report only). */
   apply: boolean;
 }
@@ -214,19 +216,42 @@ export interface DedupeOptions {
 const DEFAULT_KEEP: KeepStrategy = "first-added";
 
 /**
+ * Parse a `--keep` value: one strategy, or a comma-separated chain where each
+ * later strategy breaks the ties of the earlier ones
+ * (`highest-quality,oldest`).
+ *
+ * @throws {Error} if any part is not a known strategy.
+ */
+export function parseKeepChain(raw: string | undefined): KeepStrategy[] {
+  const parts = (raw ?? "").split(",").map((part) => part.trim());
+  const chain: KeepStrategy[] = [];
+  for (const part of parts) {
+    if (!isKeepStrategy(part)) {
+      throw new Error(
+        `--keep must be one of: ${KEEP_STRATEGIES.join(", ")}, or several joined by commas (got "${raw}")`,
+      );
+    }
+    chain.push(part);
+  }
+  return chain;
+}
+
+/**
  * Parse the arguments for the `deduplicate` command.
  *
- * Exactly one source must be given: `--playlist <id>` or `--favourites`
- * (`--favorites` is accepted too). `--keep <strategy>` chooses which copy to
- * keep (default `first-added`). `--apply` performs the removal; without it the
- * command only reports.
+ * Exactly one source must be given: `--playlist <id>`, `--favourites`
+ * (`--favorites` is accepted too) or `--all-playlists`. `--keep <strategy>`
+ * chooses which copy to keep (default `first-added`); a comma-separated chain
+ * breaks ties in order. `--apply` performs the removal; without it the command
+ * only reports.
  *
  * @throws {Error} if the source or the keep strategy is missing/invalid.
  */
 export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
   let playlistId: number | undefined;
   let favourites = false;
-  let keep: KeepStrategy = DEFAULT_KEEP;
+  let allPlaylists = false;
+  let keep: KeepStrategy[] = [DEFAULT_KEEP];
   let apply = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -241,15 +266,11 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
       playlistId = value;
     } else if (arg === "--favourites" || arg === "--favorites") {
       favourites = true;
+    } else if (arg === "--all-playlists") {
+      allPlaylists = true;
     } else if (arg === "--keep") {
-      const raw = argv[i + 1];
+      keep = parseKeepChain(argv[i + 1]);
       i += 1;
-      if (!isKeepStrategy(raw)) {
-        throw new Error(
-          `--keep must be one of: ${KEEP_STRATEGIES.join(", ")} (got "${raw}")`,
-        );
-      }
-      keep = raw;
     } else if (arg === "--apply") {
       apply = true;
     } else {
@@ -257,20 +278,18 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
     }
   }
 
-  if (playlistId !== undefined && favourites) {
-    throw new Error("Give only one of --playlist or --favourites");
+  const sources: DedupeSource[] = [
+    ...(playlistId !== undefined ? [{ type: "playlist" as const, playlistId }] : []),
+    ...(favourites ? [{ type: "favourites" as const }] : []),
+    ...(allPlaylists ? [{ type: "all-playlists" as const }] : []),
+  ];
+  if (sources.length > 1) {
+    throw new Error("Give only one of --playlist, --favourites or --all-playlists");
   }
-  const source: DedupeSource =
-    playlistId !== undefined
-      ? { type: "playlist", playlistId }
-      : favourites
-        ? { type: "favourites" }
-        : (() => {
-            throw new Error(
-              "A source is required: --playlist <id> or --favourites",
-            );
-          })();
-
+  const source = sources[0];
+  if (source === undefined) {
+    throw new Error("A source is required: --playlist <id>, --favourites or --all-playlists");
+  }
   return { source, keep, apply };
 }
 

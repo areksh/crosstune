@@ -835,6 +835,92 @@ describe("POST /api/deduplicate/scan", () => {
   });
 });
 
+describe("POST /api/deduplicate/scan (extras)", () => {
+  it("breaks ties with a keep chain (array or comma string)", async () => {
+    const tracks: Track[] = [
+      { id: 1, title: "Paranoid", artist: "Black Sabbath", bitDepth: 16, samplingRate: 44.1 },
+      { id: 2, title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
+      { id: 3, title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
+    ];
+    for (const keep of [["highest-quality", "last-added"], "highest-quality,last-added"]) {
+      const svc = service({ getFavoriteTracks: vi.fn(async () => tracks) });
+      const res = await handleApi(
+        request("POST", "/api/deduplicate/scan", { source: { type: "favourites" }, keep }),
+        deps({ service: svc }),
+      );
+      expect(res.status).toBe(200);
+      expect((res.body as { groups: Array<{ keepId: number }> }).groups[0]?.keepId).toBe(3);
+    }
+  });
+
+  it("rejects a chain with an unknown or no strategy", async () => {
+    for (const keep of [["highest-quality", "cheapest"], [], "oldest,", 5]) {
+      const res = await handleApi(
+        request("POST", "/api/deduplicate/scan", { source: { type: "favourites" }, keep }),
+        deps(),
+      );
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("scans all playlists: duplicates within each, and songs across them", async () => {
+    const svc = service({
+      getUserPlaylists: vi.fn(async () => [
+        { id: 1, name: "One" },
+        { id: 2, name: "Two" },
+      ]),
+      getPlaylistTracks: vi.fn(async (id: number) => [
+        { id: 7, title: "Iron Man", artist: "Black Sabbath", playlistTrackId: id * 10 },
+      ]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/scan", { source: { type: "all-playlists" } }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      within: unknown[];
+      across: Array<{ playlists: Array<{ playlist: { id: number } }> }>;
+      playlistCount: number;
+    };
+    expect(body.within).toEqual([]);
+    expect(body.playlistCount).toBe(2);
+    expect(body.across[0]?.playlists.map((p) => p.playlist.id)).toEqual([1, 2]);
+  });
+});
+
+describe("POST /api/deduplicate/apply (all playlists)", () => {
+  it("removes entries from each playlist", async () => {
+    const svc = service();
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "all-playlists" },
+        removals: [
+          { id: 7, playlistId: 1, playlistTrackId: 10 },
+          { id: 7, playlistId: 2, playlistTrackId: 20 },
+          { id: 8, playlistId: 1, playlistTrackId: 11 },
+        ],
+      }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: 3 });
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(1, [10, 11]);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(2, [20]);
+  });
+
+  it("rejects a removal without its playlist", async () => {
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "all-playlists" },
+        removals: [{ id: 7, playlistTrackId: 10 }],
+      }),
+      deps(),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("POST /api/deduplicate/apply", () => {
   it("removes the given playlist-track ids from a playlist", async () => {
     const svc = service();

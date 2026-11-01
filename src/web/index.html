@@ -873,6 +873,10 @@
                 <input type="radio" name="dedup-source" value="playlist" />
                 A playlist
               </label>
+              <label class="radio">
+                <input type="radio" name="dedup-source" value="all-playlists" />
+                All my playlists
+              </label>
               <div id="dedup-playlist-fields" class="target-fields" hidden>
                 <label class="field">
                   <span>Playlist</span>
@@ -881,6 +885,11 @@
                   </select>
                 </label>
               </div>
+              <p id="dedup-across-hint" class="hint" hidden>
+                Across playlists, nothing is removed by default: you get a list of
+                songs saved in more than one playlist, and choose where each
+                stays. Duplicates within each playlist are handled as usual.
+              </p>
             </div>
 
             <label class="field field-inline">
@@ -894,6 +903,16 @@
               </select>
               <span>copy of each duplicate</span>
             </label>
+            <label class="field field-inline">
+              <span>then, if equal, the</span>
+              <select id="dedup-keep-then">
+                <option value="">(no tie-break: the first added)</option>
+                <option value="last-added">last added</option>
+                <option value="highest-quality">highest quality</option>
+                <option value="oldest">oldest release</option>
+                <option value="newest">newest release</option>
+              </select>
+            </label>
 
             <div class="actions">
               <button id="dedup-scan" type="button">Scan for duplicates</button>
@@ -906,7 +925,7 @@
             <p id="dedup-summary" class="hint"></p>
             <div id="dedup-groups"></div>
             <div id="dedup-bar" class="commit-bar" hidden>
-              <p class="commit-note">Unticked copies are removed.</p>
+              <p id="dedup-bar-note" class="commit-note">Unticked copies are removed.</p>
               <button id="dedup-apply" type="button" hidden>Remove tracks</button>
               <p id="dedup-apply-error" class="error" hidden></p>
               <p id="dedup-apply-result" class="result" hidden></p>

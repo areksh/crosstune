@@ -73,6 +73,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version labels by default, can accept close forms ("jumped" for "Jump"),
   avoids repeating an artist, and honours the exclude filters. Each song can be
   swapped for another match before saving.
+- The deduplicator can scan all your playlists (`deduplicate --all-playlists`,
+  or *All my playlists* in the web UI). Each playlist's own duplicates are
+  handled as before, and songs saved in more than one playlist are listed with
+  the playlists they are in. Nothing is removed across playlists by default:
+  in the web UI every playlist starts ticked, and unticking one removes the
+  song from it; the CLI only reports them.
+- Keep strategies can be chained to break ties: `--keep highest-quality,oldest`
+  keeps the oldest of the highest-quality copies (web UI: *then, if equal,
+  the*). A single strategy behaves as before.
 - Upgrade & repair, a new tool (CLI `upgrade`, and *Upgrade & repair* under
   *Tidy up* in the web UI). For your favourites, one playlist or all your
   playlists, it finds tracks with a better-quality release of the same
