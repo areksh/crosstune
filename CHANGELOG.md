@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The deduplicator now removes a track that was added to a playlist twice.
+  Both entries carry the same track id, and the plan marked "the track to
+  keep" by id, so every entry of the kept track was kept and nothing was
+  removed; in the web UI, unticking the second entry would have removed the
+  first. The first entry is now the one kept, and the web UI tracks each
+  entry by its position.
 - Playlist from artists no longer counts covers of an artist's songs by other
   performers towards that artist's top tracks. Qobuz's artist page mixes in
   covers (e.g. Johnny Cash's take on a Bob Dylan song surfaces on Dylan's page),

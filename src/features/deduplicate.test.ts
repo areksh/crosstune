@@ -249,6 +249,19 @@ describe("resolveDuplicateGroups / removedTracks", () => {
     expect(removedTracks(resolved!).map((t) => t.id)).toEqual([200, 300]);
   });
 
+  it("removes a second entry of the very same track in a playlist", () => {
+    // The same track added twice: one entry is kept, the other removed.
+    const group: DedupTrack[] = [
+      { id: 100, title: "A", artist: "X", playlistTrackId: 1 },
+      { id: 200, title: "A", artist: "X", playlistTrackId: 2 },
+      { id: 100, title: "A", artist: "X", playlistTrackId: 3 },
+    ];
+    const [resolved] = resolveDuplicateGroups([group], "first-added");
+    expect(resolved?.keepId).toBe(100);
+    expect(removedTracks(resolved!).map((t) => t.playlistTrackId)).toEqual([2, 3]);
+    expect(formatResolutionReport([resolved!]).match(/drop/g)).toHaveLength(2);
+  });
+
   it("respects a user-overridden keepId when computing removals", () => {
     const resolved = {
       keepId: 200,

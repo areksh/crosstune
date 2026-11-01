@@ -354,9 +354,19 @@ export function resolveDuplicateGroups(
   }));
 }
 
-/** The tracks in a resolved group that would be removed (all but the kept one). */
+/**
+ * The index of the kept entry in a resolved group: the first one carrying
+ * `keepId`. A playlist can hold the very same track more than once, so later
+ * entries with that id are duplicates to remove, not further keepers.
+ */
+export function keptIndex(group: ResolvedGroup): number {
+  return group.tracks.findIndex((track) => track.id === group.keepId);
+}
+
+/** The tracks in a resolved group that would be removed (all but the kept entry). */
 export function removedTracks(group: ResolvedGroup): DedupTrack[] {
-  return group.tracks.filter((track) => track.id !== group.keepId);
+  const kept = keptIndex(group);
+  return group.tracks.filter((_, index) => index !== kept);
 }
 
 /** All tracks across a plan that would be removed. */
@@ -382,11 +392,12 @@ export function formatResolutionReport(
     "",
   ];
   resolved.forEach((group, index) => {
-    const kept = group.tracks.find((t) => t.id === group.keepId);
+    const keep = keptIndex(group);
+    const kept = group.tracks[keep];
     const heading = kept === undefined ? "" : `${kept.artist} - ${kept.title}`;
     lines.push(`${index + 1}. ${heading}`);
-    for (const track of group.tracks) {
-      const marker = track.id === group.keepId ? "keep" : "drop";
+    for (const [position, track] of group.tracks.entries()) {
+      const marker = position === keep ? "keep" : "drop";
       const album = track.album === undefined ? "" : `  [${track.album}]`;
       lines.push(`   ${marker}  id ${track.id}: ${track.title}${album}`);
     }

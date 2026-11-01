@@ -319,23 +319,27 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
   keepAllLabel.appendChild(keepAll);
   keepAllLabel.appendChild(document.createTextNode(" Keep all"));
 
-  for (const track of group.tracks) {
-    wrapper.appendChild(renderGroupTrack(track, group.keepId));
-  }
+  // The same track can sit in a playlist twice: only the first entry with
+  // the kept id is the keeper (as the server's plan counts it).
+  const keep = group.tracks.findIndex((track) => track.id === group.keepId);
+  group.tracks.forEach((track, position) => {
+    wrapper.appendChild(renderGroupTrack(track, position, position === keep));
+  });
   wrapper.appendChild(keepAllLabel);
   updateGroupStyling(wrapper);
   return wrapper;
 }
 
-function renderGroupTrack(track: DedupTrack, keepId: number): HTMLElement {
+function renderGroupTrack(track: DedupTrack, position: number, keep: boolean): HTMLElement {
   const row = document.createElement("label");
   row.className = "track dedup-track";
   row.dataset["trackId"] = String(track.id);
+  row.dataset["position"] = String(position);
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.className = "dedup-keep-box";
-  checkbox.checked = track.id === keepId;
+  checkbox.checked = keep;
   checkbox.addEventListener("change", () => {
     updateGroupStyling(row.closest(".dedup-group") as HTMLElement);
     updateApplyButton();
@@ -407,7 +411,8 @@ function collectRemovals(): Removal[] {
         continue;
       }
       const id = Number(row.dataset["trackId"]);
-      const track = scanned.group.tracks.find((t) => t.id === id);
+      // By position, not id: two entries of the same track share an id.
+      const track = scanned.group.tracks[Number(row.dataset["position"])];
       removals.push({
         id,
         ...(track?.playlistTrackId !== undefined && {
