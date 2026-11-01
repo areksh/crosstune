@@ -296,9 +296,19 @@ function selectedTrackIds(): number[] {
 }
 
 function updateCount(): void {
-  const count = selectedTrackIds().length;
-  el("combine-count").textContent = `${tracks(count)} selected`;
-  el<HTMLButtonElement>("combine-commit").disabled = count === 0;
+  const ids = selectedTrackIds();
+  const durations = new Map(plan?.tracks.map(({ track }) => [track.id, track.duration ?? 0]));
+  const seconds = ids.reduce((sum, id) => sum + (durations.get(id) ?? 0), 0);
+  el("combine-count").textContent =
+    seconds > 0 ? `${tracks(ids.length)}, ${runningTime(seconds)}` : tracks(ids.length);
+  el<HTMLButtonElement>("combine-commit").disabled = ids.length === 0;
+}
+
+/** "3 h 41 min", or "41 min" under an hour. */
+function runningTime(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
 }
 
 function onTargetChange(): void {

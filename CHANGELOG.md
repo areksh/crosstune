@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Library stats (`stats` on the CLI, and in the web UI under a new *Explore*
+  group): for your favourites, a playlist, or everything (favourites and all
+  playlists, each track once), the track and artist counts and hours of music,
+  the hi-res / CD-quality split, tracks by release decade, and the most-saved
+  artists (with the share of the library they make up) and albums. A decade --
+  or, in the web UI, a top artist -- can be saved as a new playlist such as
+  "Favourites: 1990s" (`--decade-playlist 1990s --apply`). `--json` prints the
+  stats as JSON. Track lengths are now read from Qobuz, so the combine view's
+  save bar also shows the selection's running time.
 - Combine playlists (`combine` on the CLI, and in the web UI under *Tidy up*):
   merge two or more playlists, optionally with your favourites, into one with
   each song once; or keep only the songs of the first that the others lack, or

@@ -1149,3 +1149,63 @@ describe("POST /api/combine/resolve", () => {
     expect((res.body as { error: string }).error).toMatch(error);
   });
 });
+
+describe("POST /api/stats", () => {
+  const tracks = [
+    { id: 1, title: "Roads", artist: "Portishead", releaseDate: "1994-08-22", duration: 300 },
+    { id: 2, title: "Angel", artist: "Massive Attack", releaseDate: "1998-04-20", bitDepth: 24, samplingRate: 96 },
+  ];
+
+  it("returns the stats of favourites, with each bucket's track ids", async () => {
+    const res = await handleApi(
+      request("POST", "/api/stats", { source: { type: "favourites" } }),
+      deps({ service: service({ getFavoriteTracks: vi.fn(async () => tracks) }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      label: "Favourites",
+      trackCount: 2,
+      artistCount: 2,
+      quality: { hires: 1, cd: 0, unknown: 1 },
+      decades: [{ key: "1990s", count: 2, trackIds: [1, 2], suggestedName: "Favourites: 1990s" }],
+      headline: "2 favourite tracks by 2 artists. 5 minutes of music.",
+    });
+  });
+
+  it("reads a playlist under its name", async () => {
+    const getPlaylistTracks = vi.fn(async () => tracks);
+    const res = await handleApi(
+      request("POST", "/api/stats", { source: { type: "playlist", playlistId: 7 } }),
+      deps({
+        service: service({
+          getPlaylistTracks,
+          getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
+        }),
+      }),
+    );
+    expect(getPlaylistTracks).toHaveBeenCalledWith(7);
+    expect(res.body).toMatchObject({ label: "Road Trip", trackCount: 2 });
+  });
+
+  it("reads everything, each track once", async () => {
+    const res = await handleApi(
+      request("POST", "/api/stats", { source: { type: "everything" } }),
+      deps({
+        service: service({
+          getFavoriteTracks: vi.fn(async () => tracks),
+          getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
+          getPlaylistTracks: vi.fn(async () => [tracks[0]!, { id: 3, title: "New" }]),
+        }),
+      }),
+    );
+    expect(res.body).toMatchObject({ label: "Library", trackCount: 3 });
+  });
+
+  it.each([undefined, {}, { source: { type: "albums" } }, { source: { type: "playlist" } }])(
+    "rejects an invalid source %#",
+    async (body) => {
+      const res = await handleApi(request("POST", "/api/stats", body), deps());
+      expect(res.status).toBe(400);
+    },
+  );
+});

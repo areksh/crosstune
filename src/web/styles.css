@@ -1067,7 +1067,7 @@ button:disabled {
 
 .combine-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 28px;
   margin-bottom: 12px;
 }
@@ -1209,6 +1209,160 @@ button.remove-row {
 
 .combine-options .field {
   margin: 0 0 16px;
+}
+
+/* Library stats: CSS bars, the hi-res share lit like the quality badges. */
+
+.stats-headline {
+  color: var(--text-2);
+  font-size: 18px;
+}
+
+.stats-source {
+  margin: 0;
+}
+
+.stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.stats-body[aria-busy="true"] {
+  opacity: 0.5;
+}
+
+.stats-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.stats-section h2 {
+  font-size: 26px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 40px;
+}
+
+.quality-bar {
+  display: flex;
+  gap: 2px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.quality-segment {
+  flex-basis: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  background: #2c3134;
+  color: var(--text-2);
+}
+
+.quality-segment.hires {
+  background: var(--hires-bg);
+  border: 1px solid var(--notice-line);
+  border-radius: 6px 0 0 6px;
+  color: var(--hires-text);
+  font-weight: 650;
+  text-shadow: 0 0 8px rgba(243, 168, 59, 0.55);
+}
+
+.quality-segment.unknown {
+  background: var(--inset);
+  color: var(--muted);
+}
+
+.decade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.decade-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 44px auto;
+  gap: 12px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.decade-label {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-track {
+  display: block;
+  height: 14px;
+  border-radius: 3px;
+  background: #24282b;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: #8c8576;
+}
+
+.bar-fill.largest {
+  background: var(--accent);
+}
+
+.decade-count,
+.artist-count,
+.rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.decade-count {
+  text-align: right;
+}
+
+button.small {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.artist-ranking {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.artist-rank {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #24282b;
+  font-size: 15px;
+}
+
+.artist-name {
+  overflow-wrap: anywhere;
+}
+
+#stats-artist-share {
+  margin: 8px 0 0;
 }
 
 /* Motion and small screens */

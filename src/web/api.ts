@@ -26,6 +26,8 @@ export interface Track {
   releaseDate?: string;
   /** Album cover URL on Qobuz's image server; loaded only if artwork is on. */
   image?: string;
+  /** Length in seconds, when known. */
+  duration?: number;
 }
 
 /** Why the server's filter excluded a track (see src/features/track-filter.ts). */

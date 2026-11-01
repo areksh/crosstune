@@ -16,6 +16,7 @@ import { initDeduplicateView } from "./views/deduplicate.js";
 import { initImportExportView } from "./views/import-export.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
+import { initStatsView } from "./views/stats.js";
 
 const VIEWS = [
   "home",
@@ -24,6 +25,7 @@ const VIEWS = [
   "similar",
   "deduplicate",
   "combine",
+  "stats",
   "import-export",
 ] as const;
 type View = (typeof VIEWS)[number];
@@ -68,6 +70,7 @@ initAlbumsView();
 initSimilarView();
 initDeduplicateView();
 initCombineView();
+initStatsView();
 initImportExportView();
 window.addEventListener("hashchange", route);
 route();

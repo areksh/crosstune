@@ -35,6 +35,10 @@
             <a class="nav-link" data-view="combine" href="#/combine">Combine playlists</a>
           </div>
           <div class="nav-group">
+            <span class="nav-label">Explore</span>
+            <a class="nav-link" data-view="stats" href="#/stats">Library stats</a>
+          </div>
+          <div class="nav-group">
             <span class="nav-label">Your data</span>
             <a class="nav-link" data-view="import-export" href="#/import-export">Import &amp; export</a>
           </div>
@@ -103,6 +107,16 @@
                 <span class="tool-desc">
                   Merge playlists into one, each song once, or see what they
                   share and what only one has.
+                </span>
+              </a>
+            </section>
+            <section class="tool-group">
+              <h2>Explore</h2>
+              <a class="tool-link" href="#/stats">
+                <span class="tool-name">Library stats</span>
+                <span class="tool-desc">
+                  Your favourites or a playlist by quality, decade and artist,
+                  with a playlist of any decade a click away.
                 </span>
               </a>
             </section>
@@ -739,6 +753,68 @@
               <button id="combine-commit" type="button">Create playlist</button>
               <p id="combine-commit-error" class="error" hidden></p>
               <p id="combine-commit-result" class="result" hidden></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- Library stats -->
+        <section id="view-stats" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Library stats</h1>
+              <p id="stats-headline" class="lede stats-headline" aria-live="polite">
+                What your favourites or a playlist are made of.
+              </p>
+            </div>
+            <label class="field stats-source">
+              <span>Showing</span>
+              <select id="stats-source">
+                <option value="favourites">Favourites</option>
+                <option value="everything">Everything (favourites and all playlists)</option>
+              </select>
+            </label>
+          </header>
+
+          <p id="stats-error" class="error" hidden></p>
+
+          <div id="stats-body" class="stats-body" hidden>
+            <section class="stats-section">
+              <h2>Quality</h2>
+              <div id="stats-quality-bar" class="quality-bar" role="img"></div>
+            </section>
+
+            <div class="stats-grid">
+              <section class="stats-section">
+                <h2>By decade</h2>
+                <div id="stats-decades" class="decade-list"></div>
+              </section>
+
+              <section class="stats-section">
+                <h2>Most-saved artists</h2>
+                <ol id="stats-artists" class="artist-ranking"></ol>
+                <p id="stats-artist-share" class="hint"></p>
+              </section>
+            </div>
+          </div>
+
+          <section id="stats-save" class="review" hidden>
+            <div class="commit-bar">
+              <p id="stats-save-count" class="commit-count" aria-live="polite"></p>
+              <div class="destination">
+                <div class="target-fields">
+                  <label class="field field-inline">
+                    <span>Name</span>
+                    <input id="stats-playlist-name" type="text" />
+                  </label>
+                  <label class="checkbox">
+                    <input id="stats-playlist-public" type="checkbox" />
+                    Public
+                  </label>
+                </div>
+              </div>
+              <button id="stats-commit" type="button">Create playlist</button>
+              <p id="stats-commit-error" class="error" hidden></p>
+              <p id="stats-commit-result" class="result" hidden></p>
             </div>
           </section>
         </section>

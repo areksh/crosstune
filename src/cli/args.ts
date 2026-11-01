@@ -20,6 +20,7 @@ import {
   type AlbumPreference,
 } from "../features/playlist-from-albums.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
+import type { StatsSource } from "../features/stats.js";
 import {
   compileArtistTerm,
   compileTerm,
@@ -880,6 +881,116 @@ export function parseCombineArgs(argv: readonly string[]): CombineArgs {
     isPublic,
     apply,
     ...(playlistName !== undefined && { playlistName }),
+  };
+}
+
+/** Arguments for the `stats` command. */
+export interface StatsArgs {
+  source: StatsSource;
+  /** Print the stats as JSON instead of a report. */
+  json: boolean;
+  /** Make a playlist of this decade ("1990s" or "unknown"), when given. */
+  decadePlaylist?: {
+    decade: string;
+    /** Undefined uses the suggested name, e.g. "Favourites: 1990s". */
+    name?: string;
+    isPublic: boolean;
+    /** Whether to create it (otherwise report only). */
+    apply: boolean;
+  };
+}
+
+/** Flags of `stats` that only make sense with `--decade-playlist`. */
+const DECADE_PLAYLIST_FLAGS = ["--name", "--public", "--apply"] as const;
+
+/**
+ * Parse the arguments for the `stats` command.
+ *
+ * Exactly one source: `--favourites`, `--playlist <id>` or `--everything`.
+ * `--json` prints JSON. `--decade-playlist <decade>` (e.g. `1990s`, or
+ * `unknown`) makes a playlist of that decade's tracks, named by `--name` or
+ * after the source and decade, public with `--public`, and only created with
+ * `--apply`.
+ *
+ * @throws {Error} on a missing or doubled source, a malformed decade, a
+ *   playlist flag without `--decade-playlist`, or an unknown argument.
+ */
+export function parseStatsArgs(argv: readonly string[]): StatsArgs {
+  const sources: StatsSource[] = [];
+  let json = false;
+  let decade: string | undefined;
+  let name: string | undefined;
+  let isPublic = false;
+  let apply = false;
+  const used = new Set<string>();
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    const value = argv[i + 1];
+    used.add(arg);
+    switch (arg) {
+      case "--favourites":
+      case "--favorites":
+        sources.push({ type: "favourites" });
+        break;
+      case "--everything":
+        sources.push({ type: "everything" });
+        break;
+      case "--playlist": {
+        const id = Number(value);
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id, got "${value}"`);
+        }
+        sources.push({ type: "playlist", playlistId: id });
+        i += 1;
+        break;
+      }
+      case "--json":
+        json = true;
+        break;
+      case "--decade-playlist":
+        if (value === undefined || !/^(\d{3}0s|unknown)$/i.test(value)) {
+          throw new Error(`--decade-playlist must be a decade such as 1990s, or unknown (got "${value}")`);
+        }
+        decade = value.toLowerCase();
+        i += 1;
+        break;
+      case "--name":
+        if (value === undefined || value.trim().length === 0) {
+          throw new Error("--name requires a playlist name");
+        }
+        name = value;
+        i += 1;
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (sources.length === 0) {
+    throw new Error("A source is required: --favourites, --playlist <id> or --everything");
+  }
+  if (sources.length > 1) {
+    throw new Error("Give only one of --favourites, --playlist or --everything");
+  }
+  if (decade === undefined) {
+    const wrong = DECADE_PLAYLIST_FLAGS.find((flag) => used.has(flag));
+    if (wrong !== undefined) {
+      throw new Error(`${wrong} only applies with --decade-playlist`);
+    }
+  }
+  return {
+    source: sources[0]!,
+    json,
+    ...(decade !== undefined && {
+      decadePlaylist: { decade, isPublic, apply, ...(name !== undefined && { name }) },
+    }),
   };
 }
 

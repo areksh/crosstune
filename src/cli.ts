@@ -87,6 +87,12 @@
  *       others lack, or only the songs all of them share. Remasters count as
  *       the same song unless --exact-ids-only. Without --apply it only reports.
  *
+ *   qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json]
+ *       [--decade-playlist <decade> [--name <name>] [--public] [--apply]]
+ *       Report track and artist counts, total length, quality split, tracks
+ *       by decade and the most-saved artists and albums. --decade-playlist
+ *       (e.g. 1990s) makes a playlist of one decade's tracks (with --apply).
+ *
  * With no command, `check` runs. The session is stored at
  * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
  *
@@ -105,6 +111,7 @@ import {
   parseImportArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
+  parseStatsArgs,
   type DedupeSource,
   type ExportArgs,
   type ImportArgs,
@@ -166,6 +173,12 @@ import {
   formatCombineReport,
   resolveCombine,
 } from "./features/combine.js";
+import {
+  collectLibrary,
+  computeStats,
+  findDecade,
+  formatStatsReport,
+} from "./features/stats.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -245,6 +258,11 @@ async function main(): Promise<void> {
     }
     case "combine": {
       const plan = planCombine(args.slice(1));
+      run = (client) => plan(client);
+      break;
+    }
+    case "stats": {
+      const plan = planStats(args.slice(1));
       run = (client) => plan(client);
       break;
     }
@@ -882,6 +900,50 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
   };
 }
 
+/**
+ * Validate the stats command's arguments up front, returning an executor that
+ * prints the stats (a report, or JSON on stdout) and, with --decade-playlist,
+ * makes a playlist of one decade's tracks (only with --apply).
+ */
+function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
+  const args = parseStatsArgs(argv);
+  return async (client: QobuzClient): Promise<void> => {
+    const stats = computeStats(await collectLibrary(client, args.source));
+    if (args.json) {
+      // The buckets' track ids are for making playlists; leave them out.
+      const json = JSON.stringify(stats, (key, value: unknown) =>
+        key === "trackIds" ? undefined : value,
+      2);
+      process.stdout.write(`${json}\n`);
+    } else {
+      logger.info(formatStatsReport(stats));
+    }
+
+    const request = args.decadePlaylist;
+    if (request === undefined) {
+      return;
+    }
+    const bucket = findDecade(stats, request.decade);
+    if (bucket === undefined || bucket.count === 0) {
+      logger.warn(`No tracks from the ${request.decade}.`);
+      return;
+    }
+    const name = request.name ?? bucket.suggestedName;
+    if (!request.apply) {
+      logger.info(
+        `\n(dry run -- pass --apply to create "${name}" with ${bucket.count} track${bucket.count === 1 ? "" : "s"})`,
+      );
+      return;
+    }
+    const playlist = await createPlaylistWithTracks(client, {
+      name,
+      trackIds: bucket.trackIds,
+      isPublic: request.isPublic,
+    });
+    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${bucket.count} tracks.`);
+  };
+}
+
 /** Read lines from piped stdin (one per line, trimmed); empty when stdin is a TTY. */
 function readLinesFromStdin(): string[] {
   if (process.stdin.isTTY) {
@@ -913,6 +975,7 @@ function printUsage(): void {
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
+      "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",
@@ -929,6 +992,7 @@ function printUsage(): void {
       "export writes to stdout unless --out is given; --account writes a full JSON backup.",
       "import resolves and reports only unless --apply is given; --account restores a backup.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',
+      'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
     ].join("\n"),
   );
 }

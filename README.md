@@ -33,6 +33,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   favourites) into one, each song once; or keep only what the first has and
   the others lack, or only what they all share. Shows how they overlap before
   saving. Available on the CLI and in the web UI.
+- **Library stats** -- what your favourites, a playlist or your whole library
+  is made of: tracks, artists and hours of music, the hi-res / CD-quality
+  split, tracks by decade, and your most-saved artists and albums. Any decade
+  (or top artist, in the web UI) becomes a playlist in one step. Available on
+  the CLI and in the web UI.
 - **Import & export** -- export favourites or a playlist as JSON, CSV, plain
   text or M3U; back up your whole account (favourites and playlists) to a
   lossless JSON file; and import a list back in, matching each entry to Qobuz by
@@ -269,6 +274,28 @@ original in another count once; live, acoustic and remixed versions stay
 separate.
 
 ```sh
+# Stats for your favourites, a playlist, or everything (favourites + playlists)
+npm run dev -- stats --favourites
+npm run dev -- stats --playlist 12345678
+npm run dev -- --loglevel warn stats --everything --json > stats.json
+
+# Make a playlist of your favourites from the 1990s (dry run, then --apply)
+npm run dev -- stats --favourites --decade-playlist 1990s
+npm run dev -- stats --favourites --decade-playlist 1990s --name "Nineties" --apply
+```
+
+`stats` takes one source: `--favourites`, `--playlist <id>`, or `--everything`
+(your favourites and all of your playlists, each track counted once). It
+prints a headline ("1,240 favourite tracks by 312 artists. 86 hours of
+music."), the quality split (hi-res above 16 bits or 48 kHz, CD quality, or
+unknown), tracks by release decade, and the ten artists and albums with the most
+tracks; `--json` prints the same as JSON instead. `--decade-playlist <decade>`
+(e.g. `1990s`, or `unknown` for tracks without a release date) makes a playlist
+of that decade's tracks, named like "Favourites: 1990s" unless `--name` is
+given; as elsewhere, it is only created with `--apply` (`--public` makes it
+public).
+
+```sh
 # Export favourite tracks as CSV to a file
 npm run dev -- export --favourites --out favourites.csv
 
@@ -343,7 +370,7 @@ npm run ui            # build the frontend, then serve it and open the browser
 
 `qobuz-helper ui` starts a small web server on `127.0.0.1`, opens your browser
 at it, and runs until you stop it with Ctrl-C. A sidebar switches between the
-tools, grouped as *Build*, *Tidy up* and *Your data*; a home page introduces
+tools, grouped as *Build*, *Tidy up*, *Explore* and *Your data*; a home page introduces
 each. Multi-step tools show the step you are on at the top, and while you review
 a selection the destination and save button stay docked at the bottom of the
 window. Track rows show a quality badge such as "24/96" (bit depth / sampling
@@ -434,7 +461,18 @@ browser.
    whether to keep its highest-quality or its first copy. Untick any track you
    do not want.
 3. Save to a new playlist (named "A + B" until you change it) or add to an
-   existing one (tracks already in it are skipped).
+   existing one (tracks already in it are skipped). The save bar shows the
+   selection's track count and running time.
+
+**Library stats:**
+
+1. Choose what to show: your favourites (the default, loaded when you first
+   open the tool), everything, or one playlist.
+2. Read the headline, the quality bar (the hi-res share lit up), tracks by
+   decade (the largest decade highlighted) and your most-saved artists, with
+   the share of the tracks they make up.
+3. Press *Playlist* next to a decade or an artist, check the suggested name
+   (e.g. "Favourites: 1990s"), and create the playlist.
 
 **Import & export:**
 

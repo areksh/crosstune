@@ -57,8 +57,22 @@ describe("parseTracks", () => {
     };
     expect(parseTracks(json)).toEqual([
       { id: 10, title: "So What" },
-      { id: 11, title: "Blue in Green" },
+      { id: 11, title: "Blue in Green", duration: 327 },
     ]);
+  });
+
+  it("reads the duration in seconds, ignoring a malformed one", () => {
+    const json = {
+      tracks: {
+        items: [
+          { id: 1, title: "A", duration: 0 },
+          { id: 2, title: "B", duration: "327" },
+          { id: 3, title: "C", duration: -5 },
+          { id: 4, title: "D", duration: null },
+        ],
+      },
+    };
+    expect(parseTracks(json).map((t) => t.duration)).toEqual([0, undefined, undefined, undefined]);
   });
 
   it("skips malformed track entries", () => {
@@ -241,6 +255,11 @@ describe("parseArtistPageTracks", () => {
       },
       { id: 627451, title: "Sour Times" },
     ]);
+  });
+
+  it("reads a top track's duration", () => {
+    const json = { top_tracks: [{ id: 1, title: "Roads", duration: 305 }] };
+    expect(parseArtistPageTracks(json)).toEqual([{ id: 1, title: "Roads", duration: 305 }]);
   });
 
   it("skips malformed entries and tolerates an unexpected shape", () => {

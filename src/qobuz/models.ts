@@ -46,6 +46,8 @@ export interface Track {
   releaseDate?: string;
   /** Album cover URL (https, about 230px), when known. See {@link imageOf}. */
   image?: string;
+  /** Length in seconds, when present. */
+  duration?: number;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -253,6 +255,7 @@ function parseArtistPageTrack(item: unknown): Track | undefined {
   }
   const track: Track = { id: item["id"], title: item["title"] };
   readVersion(item, track);
+  readDuration(item, track);
 
   const artist = item["artist"];
   if (isRecord(artist)) {
@@ -320,6 +323,7 @@ function parseTrack(item: unknown): Track | undefined {
   }
   const track: Track = { id: item["id"], title: item["title"] };
   readVersion(item, track);
+  readDuration(item, track);
   if (typeof item["media_number"] === "number") {
     track.discNumber = item["media_number"];
   }
@@ -372,6 +376,14 @@ function parseTrack(item: unknown): Track | undefined {
 function readVersion(item: Record<string, unknown>, track: Track): void {
   if (typeof item["version"] === "string" && item["version"].length > 0) {
     track.version = item["version"];
+  }
+}
+
+/** Copy a track's `duration` (seconds) when it is a non-negative number. */
+function readDuration(item: Record<string, unknown>, track: Track): void {
+  const duration = item["duration"];
+  if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) {
+    track.duration = duration;
   }
 }
 

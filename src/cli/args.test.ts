@@ -9,6 +9,7 @@ import {
   parseImportArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
+  parseStatsArgs,
 } from "./args.js";
 
 describe("extractLogLevel", () => {
@@ -546,5 +547,66 @@ describe("parseCombineArgs", () => {
     expect(() => parseCombineArgs(["--playlist", "1", "--favourites", "--dry"])).toThrow(
       /Unknown argument/,
     );
+  });
+});
+
+describe("parseStatsArgs", () => {
+  it("takes one source", () => {
+    expect(parseStatsArgs(["--favourites"])).toEqual({ source: { type: "favourites" }, json: false });
+    expect(parseStatsArgs(["--favorites", "--json"])).toEqual({
+      source: { type: "favourites" },
+      json: true,
+    });
+    expect(parseStatsArgs(["--playlist", "12"])).toEqual({
+      source: { type: "playlist", playlistId: 12 },
+      json: false,
+    });
+    expect(parseStatsArgs(["--everything"])).toEqual({ source: { type: "everything" }, json: false });
+  });
+
+  it("needs exactly one source", () => {
+    expect(() => parseStatsArgs([])).toThrow(/source is required/);
+    expect(() => parseStatsArgs(["--favourites", "--everything"])).toThrow(/only one/);
+    expect(() => parseStatsArgs(["--playlist", "x"])).toThrow(/numeric id/);
+  });
+
+  it("parses a decade playlist with its name, visibility and --apply", () => {
+    expect(
+      parseStatsArgs([
+        "--favourites",
+        "--decade-playlist",
+        "1990s",
+        "--name",
+        "Nineties",
+        "--public",
+        "--apply",
+      ]),
+    ).toEqual({
+      source: { type: "favourites" },
+      json: false,
+      decadePlaylist: { decade: "1990s", name: "Nineties", isPublic: true, apply: true },
+    });
+    expect(parseStatsArgs(["--everything", "--decade-playlist", "Unknown"]).decadePlaylist).toEqual({
+      decade: "unknown",
+      isPublic: false,
+      apply: false,
+    });
+  });
+
+  it.each(["1995", "90s", "1990", "nineties"])("rejects the decade %s", (decade) => {
+    expect(() => parseStatsArgs(["--favourites", "--decade-playlist", decade])).toThrow(
+      /--decade-playlist must be a decade/,
+    );
+  });
+
+  it("allows --name, --public and --apply only with --decade-playlist", () => {
+    expect(() => parseStatsArgs(["--favourites", "--apply"])).toThrow(
+      /--apply only applies with --decade-playlist/,
+    );
+    expect(() => parseStatsArgs(["--favourites", "--name", "x"])).toThrow(/--name only applies/);
+  });
+
+  it("rejects unknown arguments", () => {
+    expect(() => parseStatsArgs(["--favourites", "--top", "5"])).toThrow(/Unknown argument/);
   });
 });

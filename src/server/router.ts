@@ -84,6 +84,7 @@ import {
   type CombineOrder,
   type CombineSource,
 } from "../features/combine.js";
+import { collectLibrary, computeStats, type StatsSource } from "../features/stats.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -222,6 +223,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   }
   if (req.method === "POST" && req.path === "/api/combine/resolve") {
     return combineResolve(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/stats") {
+    return libraryStats(req.body, deps);
   }
   return { status: 404, body: { error: "not found" } };
 }
@@ -1254,6 +1258,33 @@ function parseCombineInput(body: unknown): Parsed<CombineInput> {
       seed: seed as number,
     },
   };
+}
+
+/**
+ * Library stats for a source (`{ source: { type: "favourites" | "everything" }
+ * | { type: "playlist", playlistId } }`). Each decade and top-artist bucket
+ * carries its track ids, which the view saves through `/api/commit`.
+ */
+async function libraryStats(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  const source = isRecord(body) ? body["source"] : undefined;
+  let parsed: StatsSource;
+  if (isRecord(source) && (source["type"] === "favourites" || source["type"] === "everything")) {
+    parsed = { type: source["type"] };
+  } else if (
+    isRecord(source) &&
+    source["type"] === "playlist" &&
+    Number.isSafeInteger(source["playlistId"]) &&
+    (source["playlistId"] as number) > 0
+  ) {
+    parsed = { type: "playlist", playlistId: source["playlistId"] as number };
+  } else {
+    return {
+      status: 400,
+      body: { error: "source must be favourites, everything, or a playlist with a playlistId" },
+    };
+  }
+  const library = await collectLibrary(deps.service, parsed);
+  return { status: 200, body: computeStats(library) };
 }
 
 function isKeepStrategy(value: unknown): value is KeepStrategy {
