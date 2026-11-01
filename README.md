@@ -764,7 +764,8 @@ browser.
 1. *Export:* choose a source (favourite tracks, albums or artists, a playlist,
    every playlist, or your whole account) and a format, then download the file.
    A whole-account backup is always JSON; every playlist downloads as one .zip
-   with a file per playlist.
+   with a file per playlist, built by the local server (see
+   [ADR-0005](docs/adr/0005-file-download-responses.md)).
 2. *Import:* choose a destination (favourites or a playlist, or restore a
    backup), paste or upload the content (a Spotify CSV from Exportify too), and
    preview: the matched entries are counted, with how they were matched (by
