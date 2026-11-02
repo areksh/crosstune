@@ -18,6 +18,7 @@ import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from 
 import { el, setStep, showError } from "../dom.js";
 import { playlistIdOf } from "../../features/qobuz-links.js";
 import { PlanControls } from "../plan.js";
+import { keepUpdated } from "./managed.js";
 import {
   groupHead,
   inRankOrder,
@@ -123,7 +124,29 @@ let playlistsLoaded = false;
 let controls: PlanControls;
 
 /** Wire up the similar-artists view. Call once on load. */
+/** Open the Managed view with a new-releases feed of these artists and their similar artists. */
+function onKeepUpdated(): void {
+  const fromPlaylist =
+    document.querySelector<HTMLInputElement>('input[name="similar-source"]:checked')?.value === "playlist";
+  const fields: Record<string, string> = {
+    "managed-name": "New from similar artists",
+    "managed-similar": el<HTMLInputElement>("similar-per-artist").value,
+    "managed-exclude-artists": el<HTMLTextAreaElement>("similar-exclude-artists").value,
+    "managed-exclude-albums": el<HTMLTextAreaElement>("similar-exclude-albums").value,
+    "managed-exclude-tracks": el<HTMLTextAreaElement>("similar-exclude-tracks").value,
+  };
+  if (fromPlaylist) {
+    fields["managed-source"] = "playlist";
+    fields["managed-playlist"] = el<HTMLSelectElement>("similar-source-playlist").value;
+  } else {
+    fields["managed-source"] = "list";
+    fields["managed-artists"] = el<HTMLTextAreaElement>("similar-artists").value;
+  }
+  keepUpdated(fields);
+}
+
 export function initSimilarView(): void {
+  el("similar-keep-updated").addEventListener("click", onKeepUpdated);
   controls = new PlanControls({
     prefix: "similar",
     countId: "similar-selected-count",

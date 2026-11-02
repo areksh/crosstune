@@ -2224,3 +2224,92 @@ button.history-undo {
     flex-basis: 100%;
   }
 }
+
+/* Managed playlists */
+
+.managed-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.managed-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.managed-job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.managed-job.disabled {
+  opacity: 0.6;
+}
+
+.managed-job h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.managed-meta {
+  color: var(--text-2);
+  font-size: 14px;
+  margin: 0;
+}
+
+.managed-status {
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.managed-status.attention {
+  color: var(--notice-text);
+}
+
+.managed-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.managed-actions button {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.managed-runs {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.managed-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.managed-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+@media (max-width: 640px) {
+  .managed-actions button {
+    flex: 1 1 auto;
+  }
+}

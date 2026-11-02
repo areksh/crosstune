@@ -12,6 +12,7 @@ import { api, type Album, type FilterInput, type Playlist } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, showError } from "../dom.js";
 import { qualityPill, readTerms } from "../tracks.js";
+import { keepUpdated } from "./managed.js";
 
 interface Release extends Album {
   releaseType: "album" | "ep-single" | "live" | "compilation" | "other";
@@ -48,6 +49,27 @@ export function initNewReleasesView(): void {
   el("releases-target").addEventListener("change", onTargetChange);
   el("find-releases").addEventListener("click", () => void onFind());
   el("commit-releases").addEventListener("click", () => void onCommit());
+  el("releases-keep-updated").addEventListener("click", onKeepUpdated);
+}
+
+/** Open the Managed view with a feed of these artists, since this date, of these kinds. */
+function onKeepUpdated(): void {
+  const include = new Set(
+    [...document.querySelectorAll<HTMLInputElement>('input[name="releases-include"]:checked')].map((box) => box.value),
+  );
+  const fields: Record<string, string> = {
+    "managed-source": fromPlaylist() ? "playlist" : "favourites",
+    "managed-window-type": "since",
+    "managed-window-date": el<HTMLInputElement>("releases-since").value,
+    "managed-exclude-artists": el<HTMLTextAreaElement>("releases-exclude-artists").value,
+    "managed-exclude-albums": el<HTMLTextAreaElement>("releases-exclude-albums").value,
+    "managed-exclude-tracks": el<HTMLTextAreaElement>("releases-exclude-tracks").value,
+    "managed-name": fromPlaylist() ? "New from a playlist's artists" : "New from my artists",
+  };
+  if (fromPlaylist()) {
+    fields["managed-playlist"] = el<HTMLSelectElement>("releases-playlist").value;
+  }
+  keepUpdated(fields, [...include]);
 }
 
 /** Today minus `days`, as YYYY-MM-DD (UTC, like the server). */

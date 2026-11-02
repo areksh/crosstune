@@ -40,6 +40,7 @@
             <span class="nav-label">Explore</span>
             <a class="nav-link" data-view="stats" href="#/stats">Library stats</a>
             <a class="nav-link" data-view="new-releases" href="#/new-releases">New releases</a>
+            <a class="nav-link" data-view="managed" href="#/managed">Managed playlists</a>
           </div>
           <div class="nav-group">
             <span class="nav-label">Your data</span>
@@ -715,6 +716,9 @@
             </details>
             <div class="actions">
               <button id="resolve-similar" type="button">Find similar artists</button>
+              <button id="similar-keep-updated" type="button" class="secondary">
+                Keep their new releases updated...
+              </button>
             </div>
             <p id="resolve-similar-error" class="error" hidden></p>
           </section>
@@ -1459,6 +1463,7 @@
             </p>
             <div class="actions">
               <button id="find-releases" type="button">Find new releases</button>
+              <button id="releases-keep-updated" type="button" class="secondary">Keep this updated...</button>
             </div>
             <p id="find-releases-error" class="error" hidden></p>
           </section>
@@ -1494,6 +1499,184 @@
               <p id="commit-releases-error" class="error" hidden></p>
               <p id="commit-releases-result" class="result" hidden></p>
             </div>
+          </section>
+        </section>
+
+        <!-- Managed playlists -->
+        <section id="view-managed" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Managed playlists</h1>
+              <p class="lede">
+                Playlists qobuz-helper keeps up to date on a schedule: the new
+                releases of artists you choose, and of artists like them.
+              </p>
+            </div>
+          </header>
+
+          <div id="managed-flags" class="warning" hidden></div>
+          <p class="hint">
+            Managed playlists refresh while <code>qobuz-helper serve</code> runs,
+            or whenever <code>qobuz-helper run-due</code> runs from your system's
+            scheduler (<code>qobuz-helper schedule print</code> shows how). A
+            refresh that was missed while the computer was off runs once when it
+            is back.
+          </p>
+
+          <section class="panel">
+            <div class="managed-head">
+              <h2>Your managed playlists</h2>
+              <button id="managed-new" type="button" class="secondary">New managed playlist</button>
+            </div>
+            <p id="managed-status" class="hint" aria-live="polite">Loading...</p>
+            <p id="managed-error" class="error" hidden></p>
+            <div id="managed-list" class="managed-list"></div>
+          </section>
+
+          <section id="managed-form-panel" class="panel" hidden>
+            <h2 id="managed-form-title">New managed playlist</h2>
+            <input id="managed-prefilled" type="hidden" />
+            <input id="managed-prefill-include" type="hidden" />
+            <div class="managed-form">
+              <label class="field">
+                <span>Playlist name</span>
+                <input id="managed-name" type="text" placeholder="New from my artists" />
+              </label>
+              <label class="field">
+                <span>Artists</span>
+                <select id="managed-source">
+                  <option value="list">These artists</option>
+                  <option value="favourites">My favourite artists</option>
+                  <option value="playlist">Artists in a playlist</option>
+                </select>
+              </label>
+              <label id="managed-artists-field" class="field">
+                <span>Artists (names or Qobuz artist links, one per line)</span>
+                <textarea id="managed-artists" rows="5" placeholder="Air&#10;Bonobo"></textarea>
+              </label>
+              <label id="managed-playlist-field" class="field" hidden>
+                <span>Playlist</span>
+                <select id="managed-playlist">
+                  <option value="">Loading...</option>
+                </select>
+              </label>
+              <label class="field field-inline">
+                <span>Also similar artists (per artist, 0 for none)</span>
+                <input id="managed-similar" type="number" min="0" max="20" value="0" />
+              </label>
+              <div class="managed-row">
+                <label class="field">
+                  <span>Which releases</span>
+                  <select id="managed-window-type">
+                    <option value="last-days">Released in the last ... days</option>
+                    <option value="since">Released since a date</option>
+                    <option value="latest-per-artist">Each artist's newest ...</option>
+                  </select>
+                </label>
+                <label id="managed-window-days-field" class="field field-inline">
+                  <span>Days</span>
+                  <input id="managed-window-days" type="number" min="1" max="3650" value="30" />
+                </label>
+                <label id="managed-window-date-field" class="field field-inline" hidden>
+                  <span>Since</span>
+                  <input id="managed-window-date" type="date" />
+                </label>
+                <label id="managed-window-count-field" class="field field-inline" hidden>
+                  <span>Releases</span>
+                  <input id="managed-window-count" type="number" min="1" max="50" value="1" />
+                </label>
+              </div>
+              <fieldset class="choice-group choice-row">
+                <legend>Include</legend>
+                <label class="checkbox"><input type="checkbox" name="managed-include" value="album" checked /> Albums</label>
+                <label class="checkbox"><input type="checkbox" name="managed-include" value="ep-single" checked /> EPs and singles</label>
+                <label class="checkbox"><input type="checkbox" name="managed-include" value="live" /> Live</label>
+                <label class="checkbox"><input type="checkbox" name="managed-include" value="compilation" /> Compilations</label>
+              </fieldset>
+              <fieldset class="choice-group">
+                <legend>When you change the playlist yourself</legend>
+                <label class="radio">
+                  <input type="radio" name="managed-edits" value="respect" checked />
+                  Respect my edits: tracks I remove stay out, tracks I add stay in
+                </label>
+                <label class="radio">
+                  <input type="radio" name="managed-edits" value="mirror" />
+                  Strict mirror: every refresh resets the playlist to exactly the feed
+                </label>
+              </fieldset>
+              <div class="managed-row">
+                <label class="field">
+                  <span>Refresh</span>
+                  <select id="managed-every">
+                    <option value="hour">Every hour</option>
+                    <option value="day" selected>Every day</option>
+                    <option value="week">Every week</option>
+                  </select>
+                </label>
+                <label id="managed-weekday-field" class="field" hidden>
+                  <span>On</span>
+                  <select id="managed-weekday">
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                    <option value="0">Sunday</option>
+                  </select>
+                </label>
+                <label id="managed-at-field" class="field field-inline">
+                  <span>At</span>
+                  <input id="managed-at" type="time" value="06:00" />
+                </label>
+              </div>
+              <details class="filters">
+                <summary>Limits and filters</summary>
+                <div class="managed-row">
+                  <label class="field field-inline">
+                    <span>At most ... releases</span>
+                    <input id="managed-max-releases" type="number" min="1" placeholder="no limit" />
+                  </label>
+                  <label class="field field-inline">
+                    <span>At most ... tracks</span>
+                    <input id="managed-max-tracks" type="number" min="1" placeholder="no limit" />
+                  </label>
+                  <label class="field field-inline">
+                    <span>At most ... minutes</span>
+                    <input id="managed-max-minutes" type="number" min="1" placeholder="no limit" />
+                  </label>
+                </div>
+                <div class="filter-grid">
+                  <label class="field">
+                    <span>Exclude artists (one per line)</span>
+                    <textarea id="managed-exclude-artists" rows="3"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>Exclude releases matching (one per line)</span>
+                    <textarea id="managed-exclude-albums" rows="3"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>Exclude tracks matching (one per line)</span>
+                    <textarea id="managed-exclude-tracks" rows="3"></textarea>
+                  </label>
+                </div>
+                <label class="checkbox">
+                  <input id="managed-hide-favourites" type="checkbox" />
+                  Leave out releases already in my favourite albums
+                </label>
+                <label class="checkbox">
+                  <input id="managed-public" type="checkbox" />
+                  Public playlist
+                </label>
+              </details>
+            </div>
+            <div class="actions">
+              <button id="managed-preview" type="button" class="secondary">Preview</button>
+              <button id="managed-save" type="button">Save and refresh now</button>
+              <button id="managed-cancel" type="button" class="secondary">Cancel</button>
+            </div>
+            <p id="managed-form-error" class="error" hidden></p>
+            <div id="managed-preview-result" class="info" hidden></div>
           </section>
         </section>
 

@@ -17,6 +17,7 @@ import { initDeduplicateView } from "./views/deduplicate.js";
 import { initHistoryView, initLastChange } from "./views/history.js";
 import { initHomeView } from "./views/home.js";
 import { initImportExportView } from "./views/import-export.js";
+import { initManagedView } from "./views/managed.js";
 import { initNewReleasesView } from "./views/new-releases.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
@@ -35,6 +36,7 @@ const VIEWS = [
   "upgrade",
   "stats",
   "new-releases",
+  "managed",
   "import-export",
   "history",
 ] as const;
@@ -88,6 +90,7 @@ initStatsView();
 initUpgradeView();
 initImportExportView();
 initNewReleasesView();
+initManagedView();
 initHistoryView();
 initLastChange();
 window.addEventListener("hashchange", route);
