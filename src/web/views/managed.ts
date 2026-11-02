@@ -35,7 +35,10 @@ interface JobsList {
 let editing: Job | undefined;
 /** The resolved artists of the job being edited, and the text they came from. */
 let editingArtists: { text: string; artists: ArtistRef[] } | undefined;
-let playlistsLoaded = false;
+/** The user's playlists, loaded once (one shared request, however many ask). */
+let playlistsLoad: Promise<void> | undefined;
+/** True while Save runs: the form must not change under it. */
+let saving = false;
 let request = 0;
 
 /** Wire up the managed playlists view. Call once on load. */
@@ -64,6 +67,10 @@ export function initManagedView(): void {
         box.checked = kinds.has(box.value);
       }
     }
+    const playlist = el<HTMLInputElement>("managed-prefill-playlist").value;
+    if (playlist !== "") {
+      void selectPlaylist(Number(playlist));
+    }
     showForm("New managed playlist");
   });
 }
@@ -72,10 +79,20 @@ export function initManagedView(): void {
  * Open the form here, prefilled from another view: the New releases view
  * (source, window, kinds, filters) or the Similar view (artists and similar).
  */
-export function keepUpdated(fields: Record<string, string>, include?: readonly string[]): void {
+export function keepUpdated(
+  fields: Record<string, string>,
+  options: { include?: readonly string[]; playlistId?: number } = {},
+): void {
+  if (saving) {
+    return;
+  }
   openForm(undefined);
-  // Always set (even empty), so kinds from an earlier prefill do not linger.
-  fields = { ...fields, "managed-prefill-include": include?.join(",") ?? "" };
+  // Always set (even empty), so values from an earlier prefill do not linger.
+  fields = {
+    ...fields,
+    "managed-prefill-include": options.include?.join(",") ?? "",
+    "managed-prefill-playlist": options.playlistId === undefined ? "" : String(options.playlistId),
+  };
   storePrefill({ view: "managed", fields: { ...fields, "managed-prefilled": String(Date.now()) } });
   location.hash = "#/managed";
 }
@@ -87,7 +104,6 @@ function isShown(): boolean {
 async function load(): Promise<void> {
   const mine = ++request;
   const status = el("managed-status");
-  showError(el("managed-error"), undefined);
   let list: JobsList;
   try {
     list = await api<JobsList>("GET", "/api/jobs");
@@ -135,7 +151,7 @@ function text(tag: string, className: string, content: string): HTMLElement {
   return node;
 }
 
-function button(label: string, onClick: () => void, secondary = true): HTMLButtonElement {
+function button(label: string, onClick: (event: MouseEvent) => void, secondary = true): HTMLButtonElement {
   const node = document.createElement("button");
   node.type = "button";
   node.textContent = label;
@@ -197,17 +213,15 @@ function renderJob({ job, state, recentRuns }: JobView): HTMLElement {
   const previewButton = button("Preview", () => void run(job, true, previewButton, card));
   actions.appendChild(previewButton);
   actions.appendChild(
-    button(job.enabled ? "Pause" : "Resume", () =>
-      void call(note, () =>
-        state.paused !== undefined && job.enabled
+    button(job.enabled && state.paused === undefined ? "Pause" : "Resume", (event) =>
+      void call(note, event, () =>
+        // Resume also clears a pause (and enables a job paused by the user).
+        state.paused !== undefined || !job.enabled
           ? api("POST", `/api/jobs/${job.id}/resume`, {})
-          : api("POST", `/api/jobs/${job.id}/enabled`, { enabled: !job.enabled }),
+          : api("POST", `/api/jobs/${job.id}/enabled`, { enabled: false }),
       ),
     ),
   );
-  if (state.paused !== undefined && job.enabled) {
-    (actions.lastChild as HTMLButtonElement).textContent = "Resume";
-  }
   actions.appendChild(button("Edit", () => openForm(job)));
   actions.appendChild(button("Delete...", () => confirmDelete(job, state, actions)));
   if (recentRuns.length > 0) {
@@ -238,13 +252,13 @@ function confirmDelete(job: Job, state: JobState, actions: HTMLElement): void {
   actions.appendChild(text("span", "managed-meta", `Delete "${job.name}"?`));
   const note = el("managed-error");
   actions.appendChild(
-    button("Delete the job only", () => void call(note, () => api("DELETE", `/api/jobs/${job.id}`, {}))),
+    button("Delete the job only", (event) => void call(note, event, () => api("DELETE", `/api/jobs/${job.id}`, {}))),
   );
   if (state.playlistId !== undefined) {
     actions.appendChild(
       button(
         "Delete the job and its playlist",
-        () => void call(note, () => api("DELETE", `/api/jobs/${job.id}`, { deletePlaylist: true })),
+        (event) => void call(note, event, () => api("DELETE", `/api/jobs/${job.id}`, { deletePlaylist: true })),
         false,
       ),
     );
@@ -252,15 +266,21 @@ function confirmDelete(job: Job, state: JobState, actions: HTMLElement): void {
   actions.appendChild(button("Cancel", () => void load()));
 }
 
-/** Run an action, then reload the list (or show its error). */
-async function call(errorNode: HTMLElement, action: () => Promise<unknown>): Promise<void> {
+/** Run a card's action (its buttons off meanwhile), reload the list, then show any error. */
+async function call(errorNode: HTMLElement, event: MouseEvent, action: () => Promise<unknown>): Promise<void> {
   showError(errorNode, undefined);
+  const buttons = (event.currentTarget as HTMLElement | null)?.parentElement?.querySelectorAll("button") ?? [];
+  for (const node of buttons) {
+    node.disabled = true;
+  }
+  let failure: string | undefined;
   try {
     await action();
   } catch (error) {
-    showError(errorNode, (error as Error).message);
+    failure = (error as Error).message;
   }
   await load();
+  showError(errorNode, failure);
 }
 
 async function run(job: Job, dryRun: boolean, trigger: HTMLButtonElement, card: HTMLElement): Promise<void> {
@@ -310,6 +330,9 @@ function setValue(id: string, value: string): void {
 }
 
 function openForm(job: Job | undefined): void {
+  if (saving) {
+    return;
+  }
   editing = job;
   editingArtists = undefined;
   const recipe = job?.recipe;
@@ -322,7 +345,7 @@ function openForm(job: Job | undefined): void {
     editingArtists = { text: artistText, artists: recipe.artists.artists };
   }
   if (recipe?.artists.type === "playlist") {
-    void loadPlaylists().then(() => setValue("managed-playlist", String(recipe.artists.type === "playlist" ? recipe.artists.playlistId : "")));
+    void selectPlaylist(recipe.artists.playlistId);
   }
   setValue("managed-similar", String(recipe?.similar?.perArtist ?? 0));
   const window = recipe?.window ?? { type: "last-days", days: 30 };
@@ -369,21 +392,32 @@ function syncForm(): void {
   el("managed-at-field").hidden = every === "hour";
 }
 
-async function loadPlaylists(): Promise<void> {
-  if (playlistsLoaded) {
-    return;
-  }
-  const select = el<HTMLSelectElement>("managed-playlist");
-  try {
-    const { playlists } = await api<{ playlists: Playlist[] }>("GET", "/api/playlists");
-    select.textContent = "";
-    for (const playlist of playlists) {
-      select.appendChild(new Option(playlist.name, String(playlist.id)));
+function loadPlaylists(): Promise<void> {
+  playlistsLoad ??= (async () => {
+    const select = el<HTMLSelectElement>("managed-playlist");
+    try {
+      const { playlists } = await api<{ playlists: Playlist[] }>("GET", "/api/playlists");
+      select.textContent = "";
+      for (const playlist of playlists) {
+        select.appendChild(new Option(playlist.name, String(playlist.id)));
+      }
+    } catch (error) {
+      playlistsLoad = undefined; // try again next time
+      showError(el("managed-form-error"), (error as Error).message);
     }
-    playlistsLoaded = true;
-  } catch (error) {
-    showError(el("managed-form-error"), (error as Error).message);
+  })();
+  return playlistsLoad;
+}
+
+/** Choose a playlist once the list is loaded, adding it when it is not one of yours. */
+async function selectPlaylist(playlistId: number): Promise<void> {
+  await loadPlaylists();
+  const select = el<HTMLSelectElement>("managed-playlist");
+  const value = String(playlistId);
+  if (![...select.options].some((option) => option.value === value)) {
+    select.appendChild(new Option(`Playlist ${value}`, value));
   }
+  select.value = value;
 }
 
 function optionalNumber(id: string): number | undefined {
@@ -397,17 +431,28 @@ async function listedArtists(): Promise<ArtistRef[]> {
   if (editingArtists !== undefined && editingArtists.text === typed) {
     return editingArtists.artists;
   }
-  const queries = readTerms("managed-artists");
-  if (queries.length === 0) {
+  const lines = readTerms("managed-artists");
+  if (lines.length === 0) {
     throw new Error("List at least one artist.");
   }
-  const { artists, problems } = await api<{ artists: ArtistRef[]; problems: string[] }>(
-    "POST",
-    "/api/jobs/artists",
-    { queries },
-  );
-  if (problems.length > 0) {
-    throw new Error(`No Qobuz artist found for: ${problems.join(", ")}`);
+  // Lines naming an artist the job already has keep that artist (it may have
+  // been chosen by link); only new lines are looked up.
+  const known = new Map((editingArtists?.artists ?? []).map((artist) => [artist.name, artist]));
+  const queries = lines.filter((line) => !known.has(line));
+  const looked =
+    queries.length === 0
+      ? { artists: [] as ArtistRef[], problems: [] as string[] }
+      : await api<{ artists: ArtistRef[]; problems: string[] }>("POST", "/api/jobs/artists", { queries });
+  if (looked.problems.length > 0) {
+    throw new Error(`No Qobuz artist found for: ${looked.problems.join(", ")}`);
+  }
+  const found = [...looked.artists];
+  const artists: ArtistRef[] = [];
+  for (const line of lines) {
+    const artist = known.get(line) ?? found.shift();
+    if (artist !== undefined && !artists.some((a) => a.id === artist.id)) {
+      artists.push(artist);
+    }
   }
   editingArtists = { text: typed, artists };
   return artists;
@@ -475,7 +520,9 @@ async function readForm(): Promise<Record<string, unknown>> {
         ...document.querySelectorAll<HTMLInputElement>('input[name="managed-include"]:checked'),
       ].map((box) => box.value),
       hideFavourites: el<HTMLInputElement>("managed-hide-favourites").checked,
-      ...(similar > 0 && { similar: { perArtist: similar, refreshDays: 30 } }),
+      ...(similar > 0 && {
+        similar: { perArtist: similar, refreshDays: editing?.recipe.similar?.refreshDays ?? 30 },
+      }),
       exclude,
     },
     shape: Object.fromEntries(Object.entries(shape).filter(([, value]) => value !== undefined)),
@@ -506,22 +553,35 @@ async function onPreview(): Promise<void> {
 async function onSave(): Promise<void> {
   const trigger = el<HTMLButtonElement>("managed-save");
   const errorNode = el("managed-form-error");
+  if (saving) {
+    return;
+  }
   showError(errorNode, undefined);
+  saving = true;
+  const cancel = el<HTMLButtonElement>("managed-cancel");
   trigger.disabled = true;
+  cancel.disabled = true;
   trigger.textContent = "Saving...";
+  const target = editing;
   try {
     const definition = await readForm();
-    const { job } = await (editing === undefined
+    const { job } = await (target === undefined
       ? api<{ job: Job }>("POST", "/api/jobs", { job: definition })
-      : api<{ job: Job }>("PUT", `/api/jobs/${editing.id}`, { job: definition }));
+      : api<{ job: Job }>("PUT", `/api/jobs/${target.id}`, { job: definition }));
+    // Saved: a retry after a failed refresh updates this job, not a new one.
+    editing = job;
     trigger.textContent = "Refreshing...";
     await api<{ summary: RunSummary }>("POST", `/api/jobs/${job.id}/run`, {});
+    saving = false;
     closeForm();
     await load();
   } catch (error) {
     showError(errorNode, (error as Error).message);
+    void load();
   } finally {
+    saving = false;
     trigger.disabled = false;
+    cancel.disabled = false;
     trigger.textContent = "Save and refresh now";
   }
 }

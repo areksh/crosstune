@@ -2296,6 +2296,11 @@ button.history-undo {
   font-variant-numeric: tabular-nums;
 }
 
+#managed-preview-result,
+.managed-outcome {
+  white-space: pre-line;
+}
+
 .managed-form {
   display: flex;
   flex-direction: column;

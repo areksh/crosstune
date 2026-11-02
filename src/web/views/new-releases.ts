@@ -59,17 +59,29 @@ function onKeepUpdated(): void {
   );
   const fields: Record<string, string> = {
     "managed-source": fromPlaylist() ? "playlist" : "favourites",
-    "managed-window-type": "since",
-    "managed-window-date": el<HTMLInputElement>("releases-since").value,
+    // A managed feed rolls: "since <date>" becomes "the last <days since then> days".
+    "managed-window-type": "last-days",
+    "managed-window-days": String(daysSince(el<HTMLInputElement>("releases-since").value)),
     "managed-exclude-artists": el<HTMLTextAreaElement>("releases-exclude-artists").value,
     "managed-exclude-albums": el<HTMLTextAreaElement>("releases-exclude-albums").value,
     "managed-exclude-tracks": el<HTMLTextAreaElement>("releases-exclude-tracks").value,
     "managed-name": fromPlaylist() ? "New from a playlist's artists" : "New from my artists",
   };
-  if (fromPlaylist()) {
-    fields["managed-playlist"] = el<HTMLSelectElement>("releases-playlist").value;
+  const playlist = el<HTMLSelectElement>("releases-playlist").value;
+  keepUpdated(fields, {
+    include: [...include],
+    ...(fromPlaylist() && playlist !== "" && { playlistId: Number(playlist) }),
+  });
+}
+
+/** Whole days from a YYYY-MM-DD date to today (UTC), at least 1 (30 if unset). */
+function daysSince(date: string): number {
+  const then = Date.parse(`${date}T00:00:00Z`);
+  if (Number.isNaN(then)) {
+    return 30;
   }
-  keepUpdated(fields, [...include]);
+  const today = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  return Math.min(3650, Math.max(1, Math.round((today - then) / 86_400_000)));
 }
 
 /** Today minus `days`, as YYYY-MM-DD (UTC, like the server). */

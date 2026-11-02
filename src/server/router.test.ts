@@ -2278,6 +2278,7 @@ describe("job routes", () => {
     await handleApi(request("POST", "/api/jobs", { job: input }), d);
     const res = await handleApi(request("POST", "/api/jobs/00000001/run", {}), d);
     expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ error: "busy" });
   });
 
   it("previews a definition that is not saved yet", async () => {

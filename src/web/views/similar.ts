@@ -135,14 +135,22 @@ function onKeepUpdated(): void {
     "managed-exclude-albums": el<HTMLTextAreaElement>("similar-exclude-albums").value,
     "managed-exclude-tracks": el<HTMLTextAreaElement>("similar-exclude-tracks").value,
   };
-  if (fromPlaylist) {
-    fields["managed-source"] = "playlist";
-    fields["managed-playlist"] = el<HTMLSelectElement>("similar-source-playlist").value;
-  } else {
+  if (!fromPlaylist) {
     fields["managed-source"] = "list";
     fields["managed-artists"] = el<HTMLTextAreaElement>("similar-artists").value;
+    keepUpdated(fields);
+    return;
   }
-  keepUpdated(fields);
+  // A pasted playlist link wins over the picker, as when finding similar artists.
+  const link = el<HTMLInputElement>("similar-source-link").value.trim();
+  const picked = el<HTMLSelectElement>("similar-source-playlist").value;
+  const playlistId = link !== "" ? playlistIdOf(link) : Number(picked);
+  if (!Number.isInteger(playlistId) || playlistId <= 0) {
+    showError(el("resolve-similar-error"), "Choose a playlist, or paste a playlist link.");
+    return;
+  }
+  fields["managed-source"] = "playlist";
+  keepUpdated(fields, { playlistId });
 }
 
 export function initSimilarView(): void {

@@ -2180,7 +2180,10 @@ async function jobsRoute(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
         throw new UnknownJobError(id);
       }
       const summary = await jobs.runNow(id, body["dryRun"] === true);
-      return { status: summary.status === "busy" ? 409 : 200, body: { summary } };
+      if (summary.status === "busy") {
+        return { status: 409, body: { error: summary.message ?? "Jobs are already running.", summary } };
+      }
+      return { status: 200, body: { summary } };
     }
     if (action === "/runs" && req.method === "GET") {
       const view = jobs.service.get(id);
