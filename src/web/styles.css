@@ -2258,6 +2258,149 @@ button.history-undo {
   margin: 0;
 }
 
+.managed-job-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.managed-badge {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+
+.managed-badge.created {
+  border-color: var(--notice-line);
+  color: var(--accent);
+}
+
+.managed-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.managed-fact {
+  display: contents;
+}
+
+.managed-fact dt {
+  color: var(--muted);
+}
+
+.managed-fact dd {
+  margin: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.managed-suggestions {
+  border: 1px solid var(--notice-line);
+  background: var(--notice-bg);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--notice-text);
+  font-size: 14px;
+}
+
+.managed-suggestions summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.managed-suggestions ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.managed-suggestions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.managed-suggestion-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.managed-suggestion-actions button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.managed-part {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 16px 16px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.managed-part > legend {
+  font-weight: 600;
+  padding: 0 6px;
+  color: var(--text);
+}
+
+.managed-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.managed-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tidy-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 260px) 130px 120px;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+@media (max-width: 900px) {
+  .tidy-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tidy-row > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .tidy-row > :nth-child(2) {
+    grid-column: 1 / -1;
+  }
+}
+
+.tidy-row select:disabled,
+.tidy-row input:disabled + * {
+  opacity: 0.5;
+}
+
 .managed-meta {
   color: var(--text-2);
   font-size: 14px;

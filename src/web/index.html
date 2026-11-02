@@ -1226,6 +1226,7 @@
                 </div>
               </div>
               <button id="combine-commit" type="button">Create playlist</button>
+              <button id="combine-keep-updated" type="button" class="secondary">Keep this updated...</button>
               <p id="combine-commit-error" class="error" hidden></p>
               <p id="combine-commit-result" class="result" hidden></p>
             </div>
@@ -1508,25 +1509,26 @@
             <div class="view-title">
               <h1>Managed playlists</h1>
               <p class="lede">
-                Playlists qobuz-helper keeps up to date on a schedule: the new
-                releases of artists you choose, and of artists like them.
+                Playlists qobuz-helper looks after on a schedule: filled from a
+                source (new releases, other playlists, rules over your library, a
+                discovery radio) and kept tidy (duplicates, better copies,
+                tracks that stopped playing).
               </p>
             </div>
           </header>
 
           <div id="managed-flags" class="warning" hidden></div>
           <p class="hint">
-            Managed playlists refresh while <code>qobuz-helper serve</code> runs,
+            Managed playlists run while <code>qobuz-helper serve</code> runs,
             or whenever <code>qobuz-helper run-due</code> runs from your system's
             scheduler (<code>qobuz-helper schedule print</code> shows how). A
-            refresh that was missed while the computer was off runs once when it
-            is back.
+            pass missed while the computer was off runs once when it is back.
           </p>
 
           <section class="panel">
             <div class="managed-head">
               <h2>Your managed playlists</h2>
-              <button id="managed-new" type="button" class="secondary">New managed playlist</button>
+              <button id="managed-new" type="button" class="secondary">Manage a playlist</button>
             </div>
             <p id="managed-status" class="hint" aria-live="polite">Loading...</p>
             <p id="managed-error" class="error" hidden></p>
@@ -1534,80 +1536,348 @@
           </section>
 
           <section id="managed-form-panel" class="panel" hidden>
-            <h2 id="managed-form-title">New managed playlist</h2>
+            <h2 id="managed-form-title">Manage a playlist</h2>
             <input id="managed-prefilled" type="hidden" />
             <input id="managed-prefill-include" type="hidden" />
             <input id="managed-prefill-playlist" type="hidden" />
+            <input id="managed-prefill-inputs" type="hidden" />
             <div class="managed-form">
-              <label class="field">
-                <span>Playlist name</span>
-                <input id="managed-name" type="text" placeholder="New from my artists" />
-              </label>
-              <label class="field">
-                <span>Artists</span>
-                <select id="managed-source">
-                  <option value="list">These artists</option>
-                  <option value="favourites">My favourite artists</option>
-                  <option value="playlist">Artists in a playlist</option>
-                </select>
-              </label>
-              <label id="managed-artists-field" class="field">
-                <span>Artists (names or Qobuz artist links, one per line)</span>
-                <textarea id="managed-artists" rows="5" placeholder="Air&#10;Bonobo"></textarea>
-              </label>
-              <label id="managed-playlist-field" class="field" hidden>
-                <span>Playlist</span>
-                <select id="managed-playlist">
-                  <option value="">Loading...</option>
-                </select>
-              </label>
-              <label class="field field-inline">
-                <span>Also similar artists (per artist, 0 for none)</span>
-                <input id="managed-similar" type="number" min="0" max="20" value="0" />
-              </label>
-              <div class="managed-row">
-                <label class="field">
-                  <span>Which releases</span>
-                  <select id="managed-window-type">
-                    <option value="last-days">Released in the last ... days</option>
-                    <option value="since">Released since a date</option>
-                    <option value="latest-per-artist">Each artist's newest ...</option>
+              <fieldset class="managed-part">
+                <legend>Playlist</legend>
+                <div class="segmented" role="radiogroup" aria-label="Which playlist">
+                  <label><input type="radio" name="managed-target" value="created" checked /> A new playlist</label>
+                  <label><input type="radio" name="managed-target" value="adopted" /> One of mine</label>
+                  <label><input type="radio" name="managed-target" value="favourites" /> My favourites</label>
+                </div>
+                <label id="managed-target-playlist-field" class="field" hidden>
+                  <span>Playlist</span>
+                  <select id="managed-target-playlist">
+                    <option value="">Loading...</option>
                   </select>
                 </label>
-                <label id="managed-window-days-field" class="field field-inline">
-                  <span>Days</span>
-                  <input id="managed-window-days" type="number" min="1" max="3650" value="30" />
+                <label id="managed-name-field" class="field">
+                  <span>Name</span>
+                  <input id="managed-name" type="text" placeholder="New from my artists" />
                 </label>
-                <label id="managed-window-date-field" class="field field-inline" hidden>
-                  <span>Since</span>
-                  <input id="managed-window-date" type="date" />
-                </label>
-                <label id="managed-window-count-field" class="field field-inline" hidden>
-                  <span>Releases</span>
-                  <input id="managed-window-count" type="number" min="1" max="50" value="1" />
-                </label>
-              </div>
-              <fieldset class="choice-group choice-row">
-                <legend>Include</legend>
-                <label class="checkbox"><input type="checkbox" name="managed-include" value="album" checked /> Albums</label>
-                <label class="checkbox"><input type="checkbox" name="managed-include" value="ep-single" checked /> EPs and singles</label>
-                <label class="checkbox"><input type="checkbox" name="managed-include" value="live" /> Live</label>
-                <label class="checkbox"><input type="checkbox" name="managed-include" value="compilation" /> Compilations</label>
-              </fieldset>
-              <fieldset class="choice-group">
-                <legend>When you change the playlist yourself</legend>
-                <label class="radio">
-                  <input type="radio" name="managed-edits" value="respect" checked />
-                  Respect my edits: tracks I remove stay out, tracks I add stay in
-                </label>
-                <label class="radio">
-                  <input type="radio" name="managed-edits" value="mirror" />
-                  Strict mirror: every refresh resets the playlist to exactly the feed
+                <label id="managed-public-field" class="checkbox">
+                  <input id="managed-public" type="checkbox" />
+                  Public playlist
                 </label>
               </fieldset>
+
+              <fieldset class="managed-part" id="managed-source-part">
+                <legend>Source: what fills it</legend>
+                <label class="field">
+                  <span>Kind</span>
+                  <select id="managed-kind">
+                    <option value="none">None: only tidy it</option>
+                    <option value="new-releases" selected>New releases of artists</option>
+                    <option value="combined">Combined: other playlists, kept in sync</option>
+                    <option value="follow">Follow or archive another playlist</option>
+                    <option value="smart">Smart: rules over playlists or favourites</option>
+                    <option value="discovery">Discovery radio: artists like yours</option>
+                  </select>
+                </label>
+                <p id="managed-kind-hint" class="hint"></p>
+
+                <div id="managed-artists-block" class="managed-block">
+                  <label class="field">
+                    <span>Artists</span>
+                    <select id="managed-source">
+                      <option value="list">These artists</option>
+                      <option value="favourites">My favourite artists</option>
+                      <option value="playlist">Artists in a playlist</option>
+                    </select>
+                  </label>
+                  <label id="managed-artists-field" class="field">
+                    <span>Artists (names or Qobuz artist links, one per line)</span>
+                    <textarea id="managed-artists" rows="5" placeholder="Air&#10;Bonobo"></textarea>
+                  </label>
+                  <label id="managed-playlist-field" class="field" hidden>
+                    <span>Playlist</span>
+                    <select id="managed-playlist">
+                      <option value="">Loading...</option>
+                    </select>
+                  </label>
+                  <label class="field field-inline">
+                    <span id="managed-similar-label">Also similar artists (per artist, 0 for none)</span>
+                    <input id="managed-similar" type="number" min="0" max="20" value="0" />
+                  </label>
+                </div>
+
+                <div id="managed-releases-block" class="managed-block">
+                  <div class="managed-row">
+                    <label class="field">
+                      <span>Which releases</span>
+                      <select id="managed-window-type">
+                        <option value="last-days">Released in the last ... days</option>
+                        <option value="since">Released since a date</option>
+                        <option value="latest-per-artist">Each artist's newest ...</option>
+                      </select>
+                    </label>
+                    <label id="managed-window-days-field" class="field field-inline">
+                      <span>Days</span>
+                      <input id="managed-window-days" type="number" min="1" max="3650" value="30" />
+                    </label>
+                    <label id="managed-window-date-field" class="field field-inline" hidden>
+                      <span>Since</span>
+                      <input id="managed-window-date" type="date" />
+                    </label>
+                    <label id="managed-window-count-field" class="field field-inline" hidden>
+                      <span>Releases</span>
+                      <input id="managed-window-count" type="number" min="1" max="50" value="1" />
+                    </label>
+                  </div>
+                  <fieldset class="choice-group choice-row">
+                    <legend>Include</legend>
+                    <label class="checkbox"><input type="checkbox" name="managed-include" value="album" checked /> Albums</label>
+                    <label class="checkbox"><input type="checkbox" name="managed-include" value="ep-single" checked /> EPs and singles</label>
+                    <label class="checkbox"><input type="checkbox" name="managed-include" value="live" /> Live</label>
+                    <label class="checkbox"><input type="checkbox" name="managed-include" value="compilation" /> Compilations</label>
+                  </fieldset>
+                  <label class="checkbox">
+                    <input id="managed-hide-favourites" type="checkbox" />
+                    Leave out releases already in my favourite albums
+                  </label>
+                </div>
+
+                <div id="managed-inputs-block" class="managed-block" hidden>
+                  <span class="field-label" id="managed-inputs-label">From (in this order)</span>
+                  <div id="managed-inputs" class="managed-inputs" role="group" aria-labelledby="managed-inputs-label"></div>
+                </div>
+
+                <div id="managed-combined-block" class="managed-block" hidden>
+                  <div class="managed-row">
+                    <label class="field">
+                      <span>Keep</span>
+                      <select id="managed-combine-mode">
+                        <option value="merge">Every song, once</option>
+                        <option value="only-first">Songs only the first has</option>
+                        <option value="common">Songs all of them have</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Order</span>
+                      <select id="managed-combine-order">
+                        <option value="sequential">One after another</option>
+                        <option value="interleave">Taking turns</option>
+                        <option value="shuffle">Shuffled (stays put as tracks come and go)</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Of several copies keep</span>
+                      <select id="managed-combine-keep">
+                        <option value="highest-quality">The best quality</option>
+                        <option value="first">The first one</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label class="checkbox">
+                    <input id="managed-combine-match" type="checkbox" checked />
+                    Count other releases of a song (same ISRC, or artist and title) as the same song
+                  </label>
+                </div>
+
+                <div id="managed-follow-block" class="managed-block" hidden>
+                  <label class="field">
+                    <span>Playlist to follow (a Qobuz link or id, any playlist you can open)</span>
+                    <input id="managed-follow" type="text" placeholder="https://play.qobuz.com/playlist/..." />
+                  </label>
+                  <label class="checkbox">
+                    <input id="managed-follow-archive" type="checkbox" />
+                    Archive it: keep tracks it drops
+                  </label>
+                </div>
+
+                <div id="managed-smart-block" class="managed-block" hidden>
+                  <div class="managed-row">
+                    <label class="field">
+                      <span>Quality</span>
+                      <select id="managed-smart-quality">
+                        <option value="">Any</option>
+                        <option value="hires">Hi-res only</option>
+                        <option value="cd">CD quality only</option>
+                      </select>
+                    </label>
+                    <label class="field field-inline">
+                      <span>Favourited in the last ... days</span>
+                      <input id="managed-smart-days" type="number" min="1" max="3650" placeholder="any time" />
+                    </label>
+                  </div>
+                  <div class="managed-row">
+                    <label class="field">
+                      <span>Decades (e.g. 1990s, 2000s)</span>
+                      <input id="managed-smart-decades" type="text" placeholder="any" />
+                    </label>
+                    <label class="field">
+                      <span>Genres (e.g. Jazz, Soul)</span>
+                      <input id="managed-smart-genres" type="text" placeholder="any" />
+                    </label>
+                  </div>
+                  <div class="managed-row">
+                    <label class="field field-inline">
+                      <span>At least (M:SS)</span>
+                      <input id="managed-smart-min" type="text" placeholder="0:00" />
+                    </label>
+                    <label class="field field-inline">
+                      <span>At most (M:SS)</span>
+                      <input id="managed-smart-max" type="text" placeholder="no limit" />
+                    </label>
+                    <label class="field">
+                      <span>Order</span>
+                      <select id="managed-smart-order">
+                        <option value="as-listed">As listed</option>
+                        <option value="newest-favourited">Newest favourites first</option>
+                        <option value="newest-release">Newest releases first</option>
+                        <option value="by-artist">By artist</option>
+                        <option value="shuffle">Shuffled</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Leave out artists (one per line)</span>
+                    <textarea id="managed-smart-exclude" rows="2"></textarea>
+                  </label>
+                </div>
+
+                <div id="managed-discovery-block" class="managed-block" hidden>
+                  <div class="managed-row">
+                    <label class="field field-inline">
+                      <span>Artists each time</span>
+                      <input id="managed-discovery-artists" type="number" min="1" max="50" value="10" />
+                    </label>
+                    <label class="field field-inline">
+                      <span>Tracks per artist</span>
+                      <input id="managed-discovery-tracks" type="number" min="1" max="10" value="3" />
+                    </label>
+                    <label class="field">
+                      <span>New picks every</span>
+                      <select id="managed-discovery-rotation">
+                        <option value="week">Week</option>
+                        <option value="day">Day</option>
+                      </select>
+                    </label>
+                    <label class="field field-inline">
+                      <span>Do not repeat for ... rotations</span>
+                      <input id="managed-discovery-avoid" type="number" min="0" max="52" value="8" />
+                    </label>
+                  </div>
+                  <label class="checkbox">
+                    <input id="managed-discovery-skip-favourites" type="checkbox" checked />
+                    Leave out songs already in my favourites
+                  </label>
+                </div>
+
+                <fieldset id="managed-edits-field" class="choice-group">
+                  <legend>When you change the playlist yourself</legend>
+                  <label class="radio">
+                    <input type="radio" name="managed-edits" value="respect" checked />
+                    Respect my edits: tracks I remove stay out, tracks I add stay in
+                  </label>
+                  <label class="radio" id="managed-mirror-option">
+                    <input type="radio" name="managed-edits" value="mirror" />
+                    Strict mirror: every pass resets the playlist to exactly the source
+                  </label>
+                </fieldset>
+
+                <details id="managed-limits" class="filters">
+                  <summary>Limits and filters</summary>
+                  <div class="managed-row">
+                    <label id="managed-max-releases-field" class="field field-inline">
+                      <span>At most ... releases</span>
+                      <input id="managed-max-releases" type="number" min="1" placeholder="no limit" />
+                    </label>
+                    <label class="field field-inline">
+                      <span>At most ... tracks</span>
+                      <input id="managed-max-tracks" type="number" min="1" placeholder="no limit" />
+                    </label>
+                    <label class="field field-inline">
+                      <span>At most ... minutes</span>
+                      <input id="managed-max-minutes" type="number" min="1" placeholder="no limit" />
+                    </label>
+                  </div>
+                  <div id="managed-exclude-grid" class="filter-grid">
+                    <label class="field">
+                      <span>Exclude artists (one per line)</span>
+                      <textarea id="managed-exclude-artists" rows="3"></textarea>
+                    </label>
+                    <label class="field">
+                      <span>Exclude releases matching (one per line)</span>
+                      <textarea id="managed-exclude-albums" rows="3"></textarea>
+                    </label>
+                    <label class="field">
+                      <span>Exclude tracks matching (one per line)</span>
+                      <textarea id="managed-exclude-tracks" rows="3"></textarea>
+                    </label>
+                  </div>
+                </details>
+              </fieldset>
+
+              <fieldset class="managed-part">
+                <legend>Tidy-ups: what keeps it clean</legend>
+                <div class="tidy-row" data-tidy="repair">
+                  <label class="checkbox"><input id="managed-tidy-repair" type="checkbox" /> Repair tracks that stopped playing</label>
+                  <select id="managed-tidy-repair-action" aria-label="Repair">
+                    <option value="replace">Replace; leave if no copy</option>
+                    <option value="remove">Replace; remove if no copy</option>
+                  </select>
+                  <select id="managed-tidy-repair-cadence" aria-label="Repair how often">
+                    <option value="every-pass">Every pass</option>
+                    <option value="weekly" selected>Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  <select id="managed-tidy-repair-mode" aria-label="Repair: apply or suggest">
+                    <option value="apply">Do it</option>
+                    <option value="suggest">Suggest it</option>
+                  </select>
+                </div>
+                <div class="tidy-row" data-tidy="upgrade">
+                  <label class="checkbox"><input id="managed-tidy-upgrade" type="checkbox" /> Upgrade to better-quality copies</label>
+                  <label class="checkbox"><input id="managed-tidy-upgrade-signature" type="checkbox" /> Also other recordings of the song</label>
+                  <select id="managed-tidy-upgrade-cadence" aria-label="Upgrade how often">
+                    <option value="every-pass">Every pass</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                  </select>
+                  <select id="managed-tidy-upgrade-mode" aria-label="Upgrade: apply or suggest">
+                    <option value="apply">Do it</option>
+                    <option value="suggest">Suggest it</option>
+                  </select>
+                </div>
+                <div class="tidy-row" data-tidy="dedupe">
+                  <label class="checkbox"><input id="managed-tidy-dedupe" type="checkbox" /> Remove duplicates</label>
+                  <select id="managed-tidy-dedupe-keep" aria-label="Of duplicates keep">
+                    <option value="highest-quality,first-added">Keep the best quality</option>
+                    <option value="first-added">Keep the first added</option>
+                    <option value="last-added">Keep the last added</option>
+                    <option value="oldest">Keep the oldest release</option>
+                    <option value="newest">Keep the newest release</option>
+                  </select>
+                  <select id="managed-tidy-dedupe-cadence" aria-label="Dedupe how often">
+                    <option value="every-pass" selected>Every pass</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  <select id="managed-tidy-dedupe-mode" aria-label="Dedupe: apply or suggest">
+                    <option value="apply">Do it</option>
+                    <option value="suggest">Suggest it</option>
+                  </select>
+                </div>
+                <p id="managed-tidy-favourites-note" class="hint" hidden>
+                  Qobuz has no way to swap a favourite: an upgraded or repaired
+                  favourite is added anew and the old one removed, so the Qobuz
+                  app lists it as recently added. qobuz-helper keeps the original
+                  date for its own smart playlists and duplicate checks.
+                </p>
+                <p class="hint">
+                  Changes a tidy-up makes are in History and can be undone; one
+                  you put back yourself is left alone from then on.
+                </p>
+              </fieldset>
+
               <div class="managed-row">
                 <label class="field">
-                  <span>Refresh</span>
+                  <span>Run</span>
                   <select id="managed-every">
                     <option value="hour">Every hour</option>
                     <option value="day" selected>Every day</option>
@@ -1631,49 +1901,10 @@
                   <input id="managed-at" type="time" value="06:00" />
                 </label>
               </div>
-              <details class="filters">
-                <summary>Limits and filters</summary>
-                <div class="managed-row">
-                  <label class="field field-inline">
-                    <span>At most ... releases</span>
-                    <input id="managed-max-releases" type="number" min="1" placeholder="no limit" />
-                  </label>
-                  <label class="field field-inline">
-                    <span>At most ... tracks</span>
-                    <input id="managed-max-tracks" type="number" min="1" placeholder="no limit" />
-                  </label>
-                  <label class="field field-inline">
-                    <span>At most ... minutes</span>
-                    <input id="managed-max-minutes" type="number" min="1" placeholder="no limit" />
-                  </label>
-                </div>
-                <div class="filter-grid">
-                  <label class="field">
-                    <span>Exclude artists (one per line)</span>
-                    <textarea id="managed-exclude-artists" rows="3"></textarea>
-                  </label>
-                  <label class="field">
-                    <span>Exclude releases matching (one per line)</span>
-                    <textarea id="managed-exclude-albums" rows="3"></textarea>
-                  </label>
-                  <label class="field">
-                    <span>Exclude tracks matching (one per line)</span>
-                    <textarea id="managed-exclude-tracks" rows="3"></textarea>
-                  </label>
-                </div>
-                <label class="checkbox">
-                  <input id="managed-hide-favourites" type="checkbox" />
-                  Leave out releases already in my favourite albums
-                </label>
-                <label class="checkbox">
-                  <input id="managed-public" type="checkbox" />
-                  Public playlist
-                </label>
-              </details>
             </div>
             <div class="actions">
               <button id="managed-preview" type="button" class="secondary">Preview</button>
-              <button id="managed-save" type="button">Save and refresh now</button>
+              <button id="managed-save" type="button">Save and run now</button>
               <button id="managed-cancel" type="button" class="secondary">Cancel</button>
             </div>
             <p id="managed-form-error" class="error" hidden></p>

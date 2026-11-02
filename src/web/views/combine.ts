@@ -12,6 +12,7 @@
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
+import { keepUpdated } from "./managed.js";
 
 type Source = { type: "favourites" } | { type: "playlist"; playlistId: number };
 
@@ -46,6 +47,7 @@ export function initCombineView(): void {
   el("combine-add").addEventListener("click", () => addSourceRow());
   el("combine-resolve").addEventListener("click", () => void onResolve());
   el("combine-commit").addEventListener("click", () => void onCommit());
+  el("combine-keep-updated").addEventListener("click", onKeepUpdated);
   // Once there is a result, changing how to combine re-combines.
   const recombine = (): void => {
     if (plan !== undefined) {
@@ -162,6 +164,26 @@ function chosenSources(): Source[] | string {
   }
   return values.map((value) =>
     value === FAVOURITES ? { type: "favourites" } : { type: "playlist", playlistId: Number(value) },
+  );
+}
+
+/** Open the Managed view with a combined playlist of these inputs, kept in sync with them. */
+function onKeepUpdated(): void {
+  const sources = chosenSources();
+  if (typeof sources === "string") {
+    showError(el("combine-commit-error"), sources);
+    return;
+  }
+  const name = el<HTMLInputElement>("combine-playlist-name").value.trim();
+  keepUpdated(
+    {
+      "managed-kind": "combined",
+      "managed-name": name === "" ? (plan?.suggestedName ?? "") : name,
+      "managed-combine-mode": radioValue("combine-mode", "merge"),
+      "managed-combine-order": el<HTMLSelectElement>("combine-order").value,
+      "managed-combine-keep": el<HTMLSelectElement>("combine-keep").value,
+    },
+    { inputs: sources },
   );
 }
 
