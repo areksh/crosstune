@@ -1067,7 +1067,8 @@ button:disabled {
   margin: 8px 0;
 }
 
-input[type="date"] {
+input[type="date"],
+input[type="time"] {
   background: var(--inset);
   color: var(--text);
   border: 1px solid var(--line-strong);

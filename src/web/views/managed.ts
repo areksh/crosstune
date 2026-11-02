@@ -74,9 +74,8 @@ export function initManagedView(): void {
  */
 export function keepUpdated(fields: Record<string, string>, include?: readonly string[]): void {
   openForm(undefined);
-  if (include !== undefined) {
-    fields = { ...fields, "managed-prefill-include": include.join(",") };
-  }
+  // Always set (even empty), so kinds from an earlier prefill do not linger.
+  fields = { ...fields, "managed-prefill-include": include?.join(",") ?? "" };
   storePrefill({ view: "managed", fields: { ...fields, "managed-prefilled": String(Date.now()) } });
   location.hash = "#/managed";
 }
