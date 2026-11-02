@@ -47,6 +47,8 @@ export interface StartServerOptions {
   session: SessionInfo;
   /** The change history the API lists and undoes (see ApiDeps). */
   history?: ApiDeps["history"];
+  /** Background jobs the API manages (see ApiDeps). */
+  jobs?: ApiDeps["jobs"];
   /** Port to bind; 0 (default) picks an ephemeral free port. */
   port?: number;
   /** Directory holding the built frontend; defaults to the bundled `dist/web`. */
@@ -148,6 +150,7 @@ async function handle(
         nonce,
         port: address,
         ...(options.history !== undefined && { history: options.history }),
+        ...(options.jobs !== undefined && { jobs: options.jobs }),
       },
     );
     sendResponse(res, response);

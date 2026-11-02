@@ -10,6 +10,10 @@ import {
 } from "../qobuz/index.js";
 import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
 import { Journal, recordingClient } from "../features/journal.js";
+import { emptyJobState, type JobsFile, type JobState } from "../jobs/model.js";
+import type { RefreshPreview } from "../jobs/refresh.js";
+import type { RunSummary } from "../jobs/run-due.js";
+import { jobsService } from "../jobs/service.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
 const NONCE = "test-nonce";
@@ -2168,5 +2172,138 @@ describe("POST /api/history/plan and /api/history/undo", () => {
     expect((await handleApi(request("POST", "/api/history/plan", {}), d)).status).toBe(400);
     expect((await handleApi(request("POST", "/api/history/plan", { id: "nope" }), d)).status).toBe(404);
     expect((await handleApi(request("POST", "/api/history/undo", { id: 7 }), d)).status).toBe(400);
+  });
+});
+
+describe("job routes", () => {
+  const input = {
+    name: "Fresh",
+    kind: "managed-playlist",
+    schedule: { every: "day" },
+    recipe: {
+      type: "new-releases",
+      artists: { type: "list", artists: [{ id: 1, name: "Air" }] },
+      window: { type: "last-days", days: 30 },
+    },
+  };
+  const summary = { status: "ran" as const, reports: [], invalid: [] };
+  const preview = { createsPlaylist: true, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [] };
+
+  function jobDeps(overrides: Partial<NonNullable<ApiDeps["jobs"]>> = {}) {
+    let file: JobsFile = { version: 1, jobs: [] };
+    const states = new Map<string, JobState>();
+    let n = 0;
+    const jobsSvc = jobsService({
+      jobs: { load: () => ({ file, invalid: [] }), save: (f) => void (file = f) },
+      state: {
+        load: (id) => states.get(id) ?? emptyJobState(),
+        save: (id, s) => void states.set(id, s),
+        remove: (id) => void states.delete(id),
+      },
+      runs: { append: () => {}, read: () => [] },
+      global: { load: () => ({}), save: () => {} },
+      newId: () => `0000000${++n}`,
+    });
+    const history = historyDeps();
+    const jobs = {
+      service: jobsSvc,
+      runNow: vi.fn(async () => summary as RunSummary),
+      preview: vi.fn(async () => preview as RefreshPreview),
+      ...overrides,
+    };
+    return { jobs, states, account: history.account, journal: history.journal, d: { ...history.deps, jobs } };
+  }
+
+  it("answers 404 when jobs are not available", async () => {
+    const res = await handleApi(request("GET", "/api/jobs"), deps());
+    expect(res.status).toBe(404);
+  });
+
+  it("creates, lists, edits and deletes a job", async () => {
+    const { d } = jobDeps();
+    const created = await handleApi(request("POST", "/api/jobs", { job: input }), d);
+    expect(created.status).toBe(200);
+    expect(created.body).toMatchObject({ job: { id: "00000001", name: "Fresh" } });
+
+    const listed = await handleApi(request("GET", "/api/jobs"), d);
+    expect(listed.body).toMatchObject({ jobs: [{ job: { id: "00000001" } }], invalid: [], flags: {} });
+
+    const edited = await handleApi(request("PUT", "/api/jobs/00000001", { job: { ...input, name: "Renamed" } }), d);
+    expect(edited.body).toMatchObject({ job: { name: "Renamed" } });
+
+    const deleted = await handleApi(request("DELETE", "/api/jobs/00000001", {}), d);
+    expect(deleted.status).toBe(200);
+    expect((await handleApi(request("GET", "/api/jobs"), d)).body).toMatchObject({ jobs: [] });
+  });
+
+  it("rejects an invalid job with 400", async () => {
+    const { d } = jobDeps();
+    const res = await handleApi(request("POST", "/api/jobs", { job: { ...input, schedule: { every: "never" } } }), d);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: expect.stringMatching(/every/) });
+  });
+
+  it("answers 404 for an unknown job", async () => {
+    const { d } = jobDeps();
+    for (const req of [
+      request("PUT", "/api/jobs/ffffffff", { job: input }),
+      request("DELETE", "/api/jobs/ffffffff", {}),
+      request("POST", "/api/jobs/ffffffff/enabled", { enabled: false }),
+      request("POST", "/api/jobs/ffffffff/resume", {}),
+      request("POST", "/api/jobs/ffffffff/run", {}),
+      request("GET", "/api/jobs/ffffffff/runs"),
+    ]) {
+      const res = await handleApi(req, d);
+      expect([req.method, req.path, res.status]).toEqual([req.method, req.path, 404]);
+    }
+  });
+
+  it("pauses, resumes and runs a job", async () => {
+    const { d, jobs } = jobDeps();
+    await handleApi(request("POST", "/api/jobs", { job: input }), d);
+    const paused = await handleApi(request("POST", "/api/jobs/00000001/enabled", { enabled: false }), d);
+    expect(paused.body).toMatchObject({ job: { enabled: false } });
+    expect((await handleApi(request("POST", "/api/jobs/00000001/enabled", {}), d)).status).toBe(400);
+    const resumed = await handleApi(request("POST", "/api/jobs/00000001/resume", {}), d);
+    expect(resumed.status).toBe(200);
+    const ran = await handleApi(request("POST", "/api/jobs/00000001/run", { dryRun: true }), d);
+    expect(ran.body).toEqual({ summary });
+    expect(jobs.runNow).toHaveBeenCalledWith("00000001", true);
+    const runs = await handleApi(request("GET", "/api/jobs/00000001/runs"), d);
+    expect(runs.body).toEqual({ runs: [] });
+  });
+
+  it("answers 409 while another runner is busy", async () => {
+    const { d } = jobDeps({ runNow: vi.fn(async () => ({ status: "busy" as const, reports: [], invalid: [], message: "busy" })) });
+    await handleApi(request("POST", "/api/jobs", { job: input }), d);
+    const res = await handleApi(request("POST", "/api/jobs/00000001/run", {}), d);
+    expect(res.status).toBe(409);
+  });
+
+  it("previews a definition that is not saved yet", async () => {
+    const { d, jobs } = jobDeps();
+    const res = await handleApi(request("POST", "/api/jobs/preview", { job: input }), d);
+    expect(res.body).toEqual({ preview });
+    expect(jobs.preview).toHaveBeenCalledWith(input);
+    const bad = await handleApi(request("POST", "/api/jobs/preview", {}), d);
+    expect(bad.status).toBe(400);
+  });
+
+  it("looks up artists for a job", async () => {
+    const { d } = jobDeps();
+    d.service.searchArtists = vi.fn(async (q: string) => (q === "Air" ? [{ id: 1, name: "Air" }] : []));
+    const res = await handleApi(request("POST", "/api/jobs/artists", { queries: ["Air", "Nobody"] }), d);
+    expect(res.body).toEqual({ artists: [{ id: 1, name: "Air" }], problems: ["Nobody"] });
+  });
+
+  it("deletes the playlist too when asked, as a history entry", async () => {
+    const { d, states, account, journal } = jobDeps();
+    await handleApi(request("POST", "/api/jobs", { job: input }), d);
+    const playlistId = account.seedPlaylist("Fresh", [1, 2]);
+    states.set("00000001", { ...emptyJobState(), playlistId });
+    const res = await handleApi(request("DELETE", "/api/jobs/00000001", { deletePlaylist: true }), d);
+    expect(res.body).toMatchObject({ playlistId, playlistDeleted: true });
+    expect(account.playlists.has(playlistId)).toBe(false);
+    expect(journal.items()[0]).toMatchObject({ tool: "managed" });
   });
 });

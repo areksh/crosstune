@@ -37,6 +37,7 @@ import {
   addTracksToExistingPlaylist,
   createPlaylistWithTracks,
   resolveArtistTracks,
+  lookUpArtist,
 } from "../features/playlist-from-artists.js";
 import {
   fetchAlbumTracks,
@@ -140,6 +141,9 @@ import {
 import { HISTORY_TOOLS, toSummary } from "../features/history.js";
 import type { Journal } from "../features/journal.js";
 import { applyUndo, describeStep, planUndo } from "../features/undo.js";
+import type { RefreshPreview } from "../jobs/refresh.js";
+import type { RunSummary } from "../jobs/run-due.js";
+import { UnknownJobError, type JobsService } from "../jobs/service.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -206,6 +210,14 @@ export interface ApiDeps {
   port: number;
   /** The change history; without it the history routes answer 404. */
   history?: { journal: Journal };
+  /** Background jobs; without it the job routes answer 404. */
+  jobs?: {
+    service: JobsService;
+    /** Run one job now (see runDue's onlyJobId). */
+    runNow(id: string, dryRun: boolean): Promise<RunSummary>;
+    /** What the first refresh of a not-yet-saved definition would do. */
+    preview(input: unknown): Promise<RefreshPreview>;
+  };
 }
 
 export interface ApiRequest {
@@ -292,6 +304,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
 }
 
 async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  if (req.path === "/api/jobs" || req.path.startsWith("/api/jobs/")) {
+    return jobsRoute(req, deps);
+  }
   if (req.method === "GET" && req.path === "/api/history") {
     return historyList(deps);
   }
@@ -2109,4 +2124,117 @@ function parseNewReleasesTarget(value: unknown): Parsed<NewReleasesTarget> {
     return { ok: true, value: { type: "playlist", name, isPublic } };
   }
   return { ok: false, error: "target.type must be playlist or favourite-albums" };
+}
+
+const JOB_PATH = /^\/api\/jobs\/([0-9a-f]{8})(\/[a-z]+)?$/;
+
+/** The job routes (see ApiDeps.jobs); validation errors are 400, unknown ids 404. */
+async function jobsRoute(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  const jobs = deps.jobs;
+  if (jobs === undefined) {
+    return { status: 404, body: { error: "not found" } };
+  }
+  const body = isRecord(req.body) ? req.body : {};
+  try {
+    if (req.path === "/api/jobs") {
+      if (req.method === "GET") {
+        return { status: 200, body: jobs.service.list() };
+      }
+      if (req.method === "POST") {
+        return { status: 200, body: { job: jobs.service.create(body["job"], new Date()) } };
+      }
+    }
+    if (req.method === "POST" && req.path === "/api/jobs/preview") {
+      if (!isRecord(body["job"])) {
+        return { status: 400, body: { error: "a job is required" } };
+      }
+      return { status: 200, body: { preview: await jobs.preview(body["job"]) } };
+    }
+    if (req.method === "POST" && req.path === "/api/jobs/artists") {
+      return await jobArtists(body, deps);
+    }
+    const match = JOB_PATH.exec(req.path);
+    if (match === null) {
+      return { status: 404, body: { error: "not found" } };
+    }
+    const id = match[1] ?? "";
+    const action = match[2];
+    if (action === undefined && req.method === "PUT") {
+      return { status: 200, body: { job: jobs.service.update(id, body["job"]) } };
+    }
+    if (action === undefined && req.method === "DELETE") {
+      return await deleteJob(id, body["deletePlaylist"] === true, deps, jobs.service);
+    }
+    if (action === "/enabled" && req.method === "POST") {
+      if (typeof body["enabled"] !== "boolean") {
+        return { status: 400, body: { error: "enabled must be true or false" } };
+      }
+      return { status: 200, body: { job: jobs.service.setEnabled(id, body["enabled"]) } };
+    }
+    if (action === "/resume" && req.method === "POST") {
+      jobs.service.setEnabled(id, true);
+      return { status: 200, body: { state: jobs.service.resume(id) } };
+    }
+    if (action === "/run" && req.method === "POST") {
+      if (jobs.service.get(id) === undefined) {
+        throw new UnknownJobError(id);
+      }
+      const summary = await jobs.runNow(id, body["dryRun"] === true);
+      return { status: summary.status === "busy" ? 409 : 200, body: { summary } };
+    }
+    if (action === "/runs" && req.method === "GET") {
+      const view = jobs.service.get(id);
+      if (view === undefined) {
+        throw new UnknownJobError(id);
+      }
+      return { status: 200, body: { runs: view.recentRuns } };
+    }
+    return { status: 404, body: { error: "not found" } };
+  } catch (error) {
+    if (error instanceof UnknownJobError) {
+      return { status: 404, body: { error: error.message } };
+    }
+    if (error instanceof QobuzError) {
+      throw error;
+    }
+    if (error instanceof Error) {
+      return { status: 400, body: { error: error.message } };
+    }
+    throw error;
+  }
+}
+
+/** Look up typed artist names or links for a job's artist list. */
+async function jobArtists(body: Record<string, unknown>, deps: ApiDeps): Promise<ApiResponse> {
+  const queries = body["queries"];
+  if (!Array.isArray(queries) || !queries.every((q) => typeof q === "string") || queries.length > 500) {
+    return { status: 400, body: { error: "queries must be a list of up to 500 artist names or links" } };
+  }
+  const artists: { id: number; name: string }[] = [];
+  const problems: string[] = [];
+  for (const query of (queries as string[]).map((q) => q.trim()).filter((q) => q.length > 0)) {
+    const match = await lookUpArtist(deps.service, query);
+    if ("problem" in match) {
+      problems.push(match.problem);
+    } else if (!artists.some((artist) => artist.id === match.artist.id)) {
+      artists.push({ id: match.artist.id, name: match.artist.name });
+    }
+  }
+  return { status: 200, body: { artists, problems } };
+}
+
+/** Forget a job, deleting its playlist (one history entry) when asked. */
+async function deleteJob(
+  id: string,
+  deletePlaylist: boolean,
+  deps: ApiDeps,
+  service: JobsService,
+): Promise<ApiResponse> {
+  const { job, playlistId } = service.remove(id);
+  if (!deletePlaylist || playlistId === undefined) {
+    return { status: 200, body: { job, playlistDeleted: false } };
+  }
+  const remove = () => deps.service.deletePlaylist(playlistId);
+  await (deps.history === undefined ? remove() : deps.history.journal.run({ tool: "managed" }, remove));
+  return { status: 200, body: { job, playlistId, playlistDeleted: true } };
 }

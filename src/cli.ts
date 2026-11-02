@@ -217,7 +217,7 @@ import {
 } from "./cli/job-store.js";
 import { formatJobList, formatPreview, formatRunSummary, describeResult } from "./jobs/format.js";
 import { emptyJobState, validateJob, type Job } from "./jobs/model.js";
-import { refreshManagedPlaylist } from "./jobs/refresh.js";
+import { refreshManagedPlaylist, type RefreshClient } from "./jobs/refresh.js";
 import { runDue, type ConnectResult, type RunDueDeps } from "./jobs/run-due.js";
 import { scheduleSnippet } from "./jobs/schedule-print.js";
 import { jobsService, type JobsService } from "./jobs/service.js";
@@ -232,6 +232,7 @@ import {
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
 import { createInterface } from "node:readline/promises";
 import { startServer } from "./server/http.js";
+import type { ApiDeps } from "./server/router.js";
 import {
   deduplicateTracks,
   enrichReleaseDates,
@@ -627,9 +628,11 @@ async function runUndo(client: QobuzClient, journal: Journal, args: UndoArgs): P
  */
 async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
   const journal = openJournal("web");
+  const recorded = recordingClient(client, journal);
   const server = await startServer({
-    service: recordingClient(client, journal),
+    service: recorded,
     history: { journal },
+    jobs: jobsApi(journal, recorded),
     session: {
       displayName: session.displayName,
       subscriptionLabel: session.subscriptionLabel,
@@ -862,6 +865,20 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
   logger.info("It refreshes on its schedule whenever run-due or serve runs (see qobuz-helper schedule print).");
 }
 
+/** The web UI's job routes, run with the UI's (recording) client. */
+function jobsApi(journal: Journal, client: RefreshClient): NonNullable<ApiDeps["jobs"]> {
+  const deps = jobRunnerDeps(journal, async () => ({ ok: true, client }));
+  return {
+    service: openJobsService(),
+    runNow: (id, dryRun) => runDue(deps, new Date(), { onlyJobId: id, dryRun }),
+    preview: async (input) => {
+      const now = new Date();
+      const job = validateJob({ ...(input as object), id: "00000000", createdAt: now.toISOString() });
+      return (await refreshManagedPlaylist(client, job, emptyJobState(), { now, dryRun: true })).preview;
+    },
+  };
+}
+
 /**
  * `serve`: the web UI plus a ticker that runs due jobs every minute, until
  * interrupted. Meant to stay up on an always-on machine.
@@ -876,6 +893,7 @@ async function runServe(
   const server = await startServer({
     service: recorded,
     history: { journal },
+    jobs: jobsApi(journal, recorded),
     session: {
       displayName: session.displayName,
       subscriptionLabel: session.subscriptionLabel,
