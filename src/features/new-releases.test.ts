@@ -202,6 +202,71 @@ describe("findNewReleases", () => {
   });
 });
 
+describe("findNewReleases windows and sources", () => {
+  const ids = (plan: { releases: Release[] }) => plan.releases.map((r) => r.id);
+
+  it("treats a last-days window as since that many days before now", async () => {
+    const bySince = await findNewReleases(stubClient(), {
+      source: { type: "favourites" },
+      now: NOW,
+      since: daysBefore(NOW, 20),
+    });
+    const byWindow = await findNewReleases(stubClient(), {
+      source: { type: "favourites" },
+      now: NOW,
+      window: { type: "last-days", days: 20 },
+    });
+    expect(byWindow).toEqual(bySince);
+    expect(byWindow.since).toBe("2026-10-12");
+  });
+
+  it("keeps each artist's newest N releases, skipping reissues of older titles", async () => {
+    const plan = await findNewReleases(stubClient(), {
+      source: { type: "favourites" },
+      now: NOW,
+      window: { type: "latest-per-artist", count: 2 },
+      hideFavourites: false,
+    });
+    // Massive Attack: the new album (best edition) and 1998's Mezzanine; the
+    // remaster is a reissue and the pre-order is not out yet. Tricky: the
+    // favourite and the EP; Maxinquaye (2026) repeats a 1995 title.
+    expect(ids(plan).sort()).toEqual(["ma-new-hr", "ma-old", "ph-single", "tr-ep", "tr-fav"].sort());
+    expect(plan.since).toBe("1998-04-20");
+  });
+
+  it("applies the count before hiding favourites", async () => {
+    const plan = await findNewReleases(stubClient(), {
+      source: { type: "artists", artists: [TRICKY] },
+      now: NOW,
+      window: { type: "latest-per-artist", count: 1 },
+    });
+    expect(ids(plan)).toEqual([]);
+    expect(plan.hidden.favourites).toBe(1);
+  });
+
+  it("keeps favourited releases when hideFavourites is false", async () => {
+    const plan = await findNewReleases(stubClient(), {
+      source: { type: "favourites" },
+      now: NOW,
+      hideFavourites: false,
+    });
+    expect(ids(plan)).toContain("tr-fav");
+    expect(plan.hidden.favourites).toBe(0);
+  });
+
+  it("checks exactly the artists given", async () => {
+    const client = stubClient();
+    const plan = await findNewReleases(client, {
+      source: { type: "artists", artists: [TRICKY, TRICKY] },
+      now: NOW,
+    });
+    expect(client.getFavoriteArtists).not.toHaveBeenCalled();
+    expect(client.getArtistReleases).toHaveBeenCalledTimes(1);
+    expect(plan.checkedArtists).toBe(1);
+    expect(ids(plan)).toEqual(["tr-ep"]);
+  });
+});
+
 describe("commitNewReleases", () => {
   function writer() {
     const tracks: Record<string, Track[]> = {

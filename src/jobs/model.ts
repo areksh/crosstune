@@ -11,7 +11,11 @@
 import { randomUUID } from "node:crypto";
 
 import { RELEASE_TYPES, type ReleaseType } from "../qobuz/index.js";
-import { DEFAULT_NEW_RELEASE_INCLUDE, isIsoDate } from "../features/new-releases.js";
+import {
+  DEFAULT_NEW_RELEASE_INCLUDE,
+  isIsoDate,
+  type ReleaseWindow,
+} from "../features/new-releases.js";
 import type { TrackFilterSpec } from "../features/track-filter.js";
 
 export type Schedule =
@@ -19,10 +23,7 @@ export type Schedule =
   | { every: "day"; at: string }
   | { every: "week"; weekday: number; at: string };
 
-export type ReleaseWindow =
-  | { type: "last-days"; days: number }
-  | { type: "since"; date: string }
-  | { type: "latest-per-artist"; count: number };
+export type { ReleaseWindow };
 
 export interface ArtistRef {
   id: number;

@@ -6,8 +6,9 @@
  *   1. *Find* ({@link findNewReleases}) -- take the artists of a source (your
  *      favourite artists, or a playlist's artists, most frequent first), list
  *      each one's releases, and keep those of the chosen kinds released in the
- *      window (since a date, up to today). Releases already among your
- *      favourite albums are hidden, as are reissues of older albums: a release
+ *      window (since a date, up to today; or each artist's newest N). Releases
+ *      already among your favourite albums are hidden (unless asked not to), as
+ *      are reissues of older albums: a release
  *      whose version or title carries a reissue label ("Remastered",
  *      "Anniversary", "Expanded", ...) or whose edition-free title the artist
  *      already released before the window. Editions of one new album (say the
@@ -53,7 +54,19 @@ export interface NewReleasesClient extends ArtistReleasesClient {
 }
 
 /** Whose releases to look at. */
-export type ArtistSource = { type: "favourites" } | { type: "playlist"; playlistId: number };
+export type ArtistSource =
+  | { type: "favourites" }
+  | { type: "playlist"; playlistId: number }
+  | { type: "artists"; artists: readonly Artist[] };
+
+/**
+ * Which releases count as new: those of the last N days, those since a date,
+ * or each artist's newest N (whenever they came out).
+ */
+export type ReleaseWindow =
+  | { type: "last-days"; days: number }
+  | { type: "since"; date: string }
+  | { type: "latest-per-artist"; count: number };
 
 /** By default: albums, and EPs and singles (live albums and compilations off). */
 export const DEFAULT_NEW_RELEASE_INCLUDE: readonly ReleaseType[] = ["album", "ep-single"];
@@ -92,6 +105,10 @@ export interface FindNewReleasesOptions {
   source: ArtistSource;
   /** First day of the window (YYYY-MM-DD); default 30 days before `now`. */
   since?: string;
+  /** The window; overrides `since` when given. */
+  window?: ReleaseWindow;
+  /** Leave out releases already among the favourite albums (default true). */
+  hideFavourites?: boolean;
   /** The clock; the window ends on its (UTC) date. Default: the real time. */
   now?: Date;
   /** Kinds of release to include (default albums and EPs/singles). */
@@ -131,8 +148,18 @@ export async function findNewReleases(
   options: FindNewReleasesOptions,
 ): Promise<NewReleasesPlan> {
   const now = options.now ?? new Date();
-  const since = options.since ?? daysBefore(now, DEFAULT_WINDOW_DAYS);
+  const window: ReleaseWindow = options.window ?? {
+    type: "since",
+    date: options.since ?? daysBefore(now, DEFAULT_WINDOW_DAYS),
+  };
+  const since =
+    window.type === "since"
+      ? window.date
+      : window.type === "last-days"
+        ? daysBefore(now, window.days)
+        : undefined;
   const until = now.toISOString().slice(0, 10);
+  const hideFavourites = options.hideFavourites ?? true;
   const include = new Set(options.include ?? DEFAULT_NEW_RELEASE_INCLUDE);
   const filter = options.filter ?? NO_FILTER;
 
@@ -148,7 +175,9 @@ export async function findNewReleases(
   }
   const checked = artists.slice(0, options.maxArtists ?? MAX_ARTISTS);
 
-  const favourites = favouriteIndex(await client.getFavoriteAlbums());
+  const favourites = hideFavourites
+    ? favouriteIndex(await client.getFavoriteAlbums())
+    : { has: () => false };
   const outcomes = await mapWithConcurrency(checked, DEFAULT_CONCURRENCY, async (artist) => {
     try {
       const { releases } = await client.getArtistReleases(artist.id, RELEASES_PER_ARTIST);
@@ -167,19 +196,23 @@ export async function findNewReleases(
       continue;
     }
     const own = releases.filter((release) => isByArtist(release, artist.id));
-    // The albums (kind and edition-free title) the artist released before
-    // the window. The kind matters: a lead single released earlier under the
+    // The albums (kind and edition-free title) the artist released before a
+    // date. The kind matters: a lead single released earlier under the
     // album's title does not make the album a reissue.
-    const earlier = new Set(
-      own
-        .filter((release) => release.releaseDate !== undefined && release.releaseDate < since)
-        .map(releaseKey),
-    );
+    const releasedBefore = (date: string): Set<string> =>
+      new Set(
+        own
+          .filter((release) => release.releaseDate !== undefined && release.releaseDate < date)
+          .map(releaseKey),
+      );
+    const windowStart = since;
+    const earlierThanWindow = windowStart === undefined ? undefined : releasedBefore(windowStart);
+    const candidates: Release[] = [];
     for (const release of own) {
       const date = release.releaseDate;
       if (
         date === undefined ||
-        date < since ||
+        (windowStart !== undefined && date < windowStart) ||
         date > until ||
         !include.has(release.releaseType) ||
         albumExclusion(release, filter) !== undefined ||
@@ -187,9 +220,20 @@ export async function findNewReleases(
       ) {
         continue;
       }
-      if (isReissue(release, earlier)) {
+      if (isReissue(release, earlierThanWindow ?? releasedBefore(date))) {
         hidden.reissues += 1;
-      } else if (favourites.has(release)) {
+      } else {
+        candidates.push(release);
+      }
+    }
+    // Each artist's newest N new albums (editions counted once), before
+    // favourites are hidden, so the window does not reach further back.
+    const inWindow =
+      window.type === "latest-per-artist"
+        ? newestFirst(onePerAlbum(candidates)).slice(0, window.count)
+        : candidates;
+    for (const release of inWindow) {
+      if (favourites.has(release)) {
         hidden.favourites += 1;
       } else {
         kept.push(release);
@@ -197,10 +241,17 @@ export async function findNewReleases(
     }
   }
 
+  const releasesKept = newestFirst(onePerAlbum(kept));
   return {
-    since,
+    since:
+      since ??
+      releasesKept.reduce(
+        (oldest, release) =>
+          release.releaseDate !== undefined && release.releaseDate < oldest ? release.releaseDate : oldest,
+        until,
+      ),
     until,
-    releases: newestFirst(onePerAlbum(kept)),
+    releases: releasesKept,
     checkedArtists: checked.length,
     totalArtists: artists.length,
     capped: checked.length < artists.length,
@@ -215,7 +266,9 @@ async function artistsOf(client: NewReleasesClient, source: ArtistSource): Promi
   const artists =
     source.type === "favourites"
       ? await client.getFavoriteArtists()
-      : seedsFromPlaylist(await client.getPlaylistTracks(source.playlistId), Infinity).seeds;
+      : source.type === "artists"
+        ? source.artists
+        : seedsFromPlaylist(await client.getPlaylistTracks(source.playlistId), Infinity).seeds;
   const seen = new Set<number>();
   return artists.filter((artist) => !seen.has(artist.id) && seen.add(artist.id));
 }
