@@ -15,7 +15,7 @@ import {
   type RunResultSummary,
 } from "./model.js";
 import { RefreshWriteError, type RefreshClient, type RefreshOutcome } from "./refresh.js";
-import { runDue, type RunDueDeps } from "./run-due.js";
+import { acceptNow, runDue, type RunDueDeps } from "./run-due.js";
 import { JobsFileError, JobStateError, type GlobalFlags, type RunRecord } from "./stores.js";
 
 const NOW = new Date("2026-11-02T06:00:00.000Z");
@@ -54,7 +54,7 @@ function setup(jobs: Job[], options: { invalid?: InvalidJob[]; states?: Record<s
   const order: string[] = [];
   const deps = {
     jobs: {
-      load: () => ({ file: { version: 1 as const, jobs }, invalid: options.invalid ?? [] }),
+      load: () => ({ file: { version: 2 as const, jobs }, invalid: options.invalid ?? [] }),
       save: () => {},
     },
     state: {
@@ -73,7 +73,7 @@ function setup(jobs: Job[], options: { invalid?: InvalidJob[]; states?: Record<s
       return {
         state: { ...state, lastRunAt: NOW.toISOString(), lastResult: result },
         result,
-        preview: { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [] },
+        preview: { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [], findings: [] },
       };
     }),
   } satisfies RunDueDeps;
@@ -187,7 +187,7 @@ describe("runDue", () => {
       return {
         state: { ...state, paused: { reason: "playlist-deleted", since: NOW.toISOString() } },
         result,
-        preview: { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [] },
+        preview: { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [], findings: [] },
       };
     });
     const summary = await runDue(deps, NOW);
@@ -272,5 +272,46 @@ describe("runDue", () => {
     const summary = await runDue(deps, NOW);
     expect(summary.status).toBe("needs-sign-in");
     expect(states.get("aaaaaaaa")?.playlistId).toBe(42);
+  });
+
+  it("runs a job after the job managing a playlist it reads, passing the favourites' carried dates", async () => {
+    const reader = job("aaaaaaaa", { kind: "playlist", recipe: undefined, target: { type: "created" }, source: { type: "follow", playlistId: 10 } });
+    const feed = job("bbbbbbbb");
+    const favourites = validateJob({
+      id: "cccccccc",
+      name: "Favourites",
+      createdAt: "2026-11-01T00:00:00.000Z",
+      kind: "playlist",
+      schedule: { every: "hour" },
+      target: { type: "favourites" },
+      tidy: { upgrade: {} },
+    });
+    const { deps, order } = setup([reader, feed, favourites], {
+      states: {
+        aaaaaaaa: { nextRunAt: "2026-11-02T04:00:00.000Z", playlistId: 20 },
+        bbbbbbbb: { nextRunAt: "2026-11-02T05:00:00.000Z", playlistId: 10 },
+        cccccccc: { nextRunAt: "2026-11-02T05:30:00.000Z", favouriteDates: [{ trackId: 2, at: "2019-01-01T00:00:00.000Z" }] },
+      },
+    });
+    await runDue(deps, NOW);
+    expect(order).toEqual(["bbbbbbbb", "aaaaaaaa", "cccccccc"]);
+    const options = deps.refresh.mock.calls.map((call) => call[3]);
+    expect(options[0]?.favouriteDates).toEqual(new Map([[2, "2019-01-01T00:00:00.000Z"]]));
+    expect(options[2]?.favouriteDates).toBeUndefined();
+  });
+});
+
+describe("acceptNow", () => {
+  it("is busy while another runner holds the lock", async () => {
+    const { deps, lockPath } = setup([job("aaaaaaaa")]);
+    const held = tryAcquireLock(lockPath, { isAlive: () => true });
+    expect(await acceptNow(deps, "aaaaaaaa", "all", NOW)).toMatchObject({ status: "busy" });
+    held?.release();
+  });
+
+  it("says when the session needs a sign-in", async () => {
+    const { deps } = setup([job("aaaaaaaa")]);
+    deps.connect.mockResolvedValueOnce({ ok: false, reason: "needs-sign-in", message: "expired" } as never);
+    expect(await acceptNow(deps, "aaaaaaaa", "all", NOW)).toEqual({ status: "needs-sign-in", message: "expired" });
   });
 });

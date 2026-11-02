@@ -7,6 +7,7 @@ import {
   isBelowBestQuality,
   planChanges,
   resolveUpgrades,
+  resolveUpgradesOf,
   type UpgradeChange,
   type UpgradeCommitClient,
   type UpgradeItem,
@@ -45,6 +46,23 @@ describe("isBelowBestQuality", () => {
     expect(isBelowBestQuality(cd)).toBe(true);
     expect(isBelowBestQuality(hires96)).toBe(true);
     expect(isBelowBestQuality(hires192)).toBe(false);
+  });
+});
+
+describe("resolveUpgradesOf", () => {
+  const better = { id: 2, title: "Unfinished Sympathy", isrc: "GBAAA9100001", streamable: true, ...hires96 };
+  const gone: Track = { ...sympathy, id: 5, isrc: "GBAAA9100005", streamable: false };
+  const entries = [sympathy, gone].map((track) => ({ track, location: { type: "favourites" as const } }));
+
+  it("checks only the kinds asked for, skips what it is told, and reports what it checked", async () => {
+    const client = resolver({ searchIndex: { GBAAA9100001: [better] } });
+    const upgrades = await resolveUpgradesOf(client, entries, { kinds: ["upgrade"] });
+    expect(upgrades.items.map((item) => item.kind)).toEqual(["upgrade"]);
+    expect(upgrades.checkedTrackIds).toEqual([1]);
+
+    const skipped = await resolveUpgradesOf(client, entries, { skip: (track) => track.id === 1 });
+    expect(skipped.items.map((item) => item.track.id)).toEqual([5]);
+    expect(skipped.checkedTrackIds).toEqual([5]);
   });
 });
 

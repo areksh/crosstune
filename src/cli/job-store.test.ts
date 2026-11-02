@@ -48,20 +48,20 @@ describe("configDir", () => {
 describe("fileJobStore", () => {
   it("round-trips jobs.json, owner-only", () => {
     const store = fileJobStore(dir);
-    store.save({ version: 1, jobs: [job] });
-    expect(store.load()).toEqual({ file: { version: 1, jobs: [job] }, invalid: [] });
+    store.save({ version: 2, jobs: [job] });
+    expect(store.load()).toEqual({ file: { version: 2, jobs: [job] }, invalid: [] });
     expect(statSync(join(dir, "jobs.json")).mode & 0o777).toBe(0o600);
   });
 
   it("loads an empty list when there is no file", () => {
-    expect(fileJobStore(dir).load()).toEqual({ file: { version: 1, jobs: [] }, invalid: [] });
+    expect(fileJobStore(dir).load()).toEqual({ file: { version: 2, jobs: [] }, invalid: [] });
   });
 
   it("throws on an unparsable file and refuses to overwrite it", () => {
     writeFileSync(join(dir, "jobs.json"), "{ not json");
     const store = fileJobStore(dir);
     expect(() => store.load()).toThrow(JobsFileError);
-    expect(() => store.save({ version: 1, jobs: [job] })).toThrow(JobsFileError);
+    expect(() => store.save({ version: 2, jobs: [job] })).toThrow(JobsFileError);
     expect(readFileSync(join(dir, "jobs.json"), "utf8")).toBe("{ not json");
   });
 
@@ -69,7 +69,7 @@ describe("fileJobStore", () => {
     const broken = { ...job, id: "bbbbbbbb", schedule: { every: "never" } };
     writeFileSync(join(dir, "jobs.json"), JSON.stringify({ version: 1, jobs: [job, broken] }));
     const store = fileJobStore(dir);
-    store.save({ version: 1, jobs: [{ ...job, name: "Renamed" }] });
+    store.save({ version: 2, jobs: [{ ...job, name: "Renamed" }] });
     const raw = JSON.parse(readFileSync(join(dir, "jobs.json"), "utf8")) as { jobs: unknown[] };
     expect(raw.jobs).toEqual([{ ...job, name: "Renamed" }, broken]);
     expect(store.load().invalid).toHaveLength(1);

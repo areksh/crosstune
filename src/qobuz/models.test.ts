@@ -119,6 +119,28 @@ describe("parseTracks", () => {
     ]);
   });
 
+  it("reads the album's genre and when a favourite was added", () => {
+    // Favourite tracks carry favorited_at (unix seconds); genre sits on the album.
+    const json = {
+      tracks: {
+        items: [
+          {
+            id: 7,
+            title: "Blue in Green",
+            favorited_at: 1730000000,
+            album: { id: "x", title: "Kind of Blue", genre: { id: 80, name: "Jazz", path: [80] } },
+          },
+          { id: 8, title: "No genre", album: { genre: { id: 1 } }, favorited_at: "soon" },
+        ],
+      },
+    };
+    const [first, second] = parseTracks(json);
+    expect(first?.genre).toBe("Jazz");
+    expect(first?.favouritedAt).toBe(new Date(1730000000 * 1000).toISOString());
+    expect(second?.genre).toBeUndefined();
+    expect(second?.favouritedAt).toBeUndefined();
+  });
+
   it("reads the performer id as the track's artist id", () => {
     // playlist/get tracks carry performer { id, name }.
     const json = {

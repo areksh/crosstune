@@ -9,8 +9,10 @@
  */
 
 import { QobuzError } from "../qobuz/index.js";
+import { runOrder } from "./dependencies.js";
 import type { InvalidJob, Job, JobState, RunResultSummary } from "./model.js";
-import { RefreshWriteError, refreshManagedPlaylist, type RefreshClient } from "./refresh.js";
+import { RefreshWriteError, runPass, type RefreshClient } from "./refresh.js";
+import { acceptSuggestions, type AcceptResult, type SuggestionKeys } from "./suggestions.js";
 import { nextRunAt, retryAt } from "./schedule.js";
 import {
   JobsFileError,
@@ -38,8 +40,8 @@ export interface RunDueDeps {
   connect: Connect;
   /** Run one refresh as one history entry. */
   journalRun: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
-  /** The refresh itself (injectable for tests). */
-  refresh?: typeof refreshManagedPlaylist;
+  /** The pass itself (injectable for tests). */
+  refresh?: typeof runPass;
 }
 
 export interface JobRunReport {
@@ -119,10 +121,12 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     }
     due = withState(job);
   } else {
-    due = file.jobs
-      .flatMap(withState)
-      .filter(({ job, state }) => isDue(job, state, now))
-      .sort((a, b) => (a.state.nextRunAt ?? "").localeCompare(b.state.nextRunAt ?? ""));
+    due = runOrder(
+      file.jobs
+        .flatMap(withState)
+        .filter(({ job, state }) => isDue(job, state, now))
+        .sort((a, b) => (a.state.nextRunAt ?? "").localeCompare(b.state.nextRunAt ?? "")),
+    );
   }
   if (due.length === 0) {
     return { status: "nothing-due", reports: [], invalid };
@@ -144,17 +148,19 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     deps.global.save({});
   }
 
-  const refresh = deps.refresh ?? refreshManagedPlaylist;
+  const refresh = deps.refresh ?? runPass;
   const reports: JobRunReport[] = [];
   for (const { job, state } of due) {
     const started = Date.now();
     let next: JobState;
     let result: RunResultSummary;
     try {
+      const favouriteDates = favouriteDatesOf(deps, file.jobs, job);
       const outcome = await deps.journalRun(`Managed: ${job.name}`, () =>
         refresh(connected.client, job, state, {
           now,
           ...(options.dryRun === true && { dryRun: true }),
+          ...(favouriteDates !== undefined && { favouriteDates }),
         }),
       );
       result = outcome.result;
@@ -210,4 +216,64 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     }
   }
   return { status: "ran", reports, invalid };
+}
+
+/**
+ * The favourites job's carried-over dates (see JobState.favouriteDates), read
+ * fresh before each job so a favourites tidy-up earlier in the same run counts.
+ */
+function favouriteDatesOf(
+  deps: Pick<RunDueDeps, "state">,
+  jobs: readonly Job[],
+  running: Job,
+): ReadonlyMap<number, string> | undefined {
+  const favourites = jobs.find((job) => job.target.type === "favourites");
+  if (favourites === undefined || favourites.id === running.id) {
+    return undefined;
+  }
+  try {
+    const dates = deps.state.load(favourites.id).favouriteDates ?? [];
+    return dates.length === 0 ? undefined : new Map(dates.map((entry) => [entry.trackId, entry.at]));
+  } catch {
+    return undefined;
+  }
+}
+
+export type AcceptOutcome =
+  | ({ status: "accepted" } & Omit<AcceptResult, "state">)
+  | { status: "busy" | "needs-sign-in" | "bundle-broken"; message: string };
+
+/**
+ * Accept suggestions of one job now: under the runner lock (another run may be
+ * writing the same playlist), as one history entry, saving the job's state.
+ */
+export async function acceptNow(
+  deps: RunDueDeps,
+  jobId: string,
+  keys: SuggestionKeys,
+  now: Date,
+): Promise<AcceptOutcome> {
+  const lock = deps.acquireLock();
+  if (lock === undefined) {
+    return { status: "busy", message: "Another qobuz-helper is running jobs." };
+  }
+  try {
+    const job = deps.jobs.load().file.jobs.find((candidate) => candidate.id === jobId);
+    if (job === undefined) {
+      throw new Error(`No job ${jobId}`);
+    }
+    const state = deps.state.load(jobId);
+    const connected = await deps.connect();
+    if (!connected.ok) {
+      return { status: connected.reason, message: connected.message };
+    }
+    const result = await deps.journalRun(`Managed: ${job.name} (accepted)`, () =>
+      acceptSuggestions(connected.client, job, state, keys, now),
+    );
+    deps.state.save(jobId, result.state);
+    const { state: _state, ...rest } = result;
+    return { status: "accepted", ...rest };
+  } finally {
+    lock.release();
+  }
 }

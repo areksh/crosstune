@@ -54,6 +54,10 @@ export interface Track {
    * the upgrade tool repairs; absent means unknown, not unplayable.
    */
   streamable?: boolean;
+  /** The album's genre name ("Jazz"), when the embedded album carries one. */
+  genre?: string;
+  /** When the track was added to the favourites (ISO), on favourite tracks only. */
+  favouritedAt?: string;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -387,6 +391,14 @@ function parseTrack(item: unknown): Track | undefined {
     if (image !== undefined) {
       track.image = image;
     }
+    const genre = album["genre"];
+    if (isRecord(genre) && typeof genre["name"] === "string" && genre["name"].length > 0) {
+      track.genre = genre["name"];
+    }
+  }
+  const favourited = item["favorited_at"];
+  if (typeof favourited === "number" && Number.isFinite(favourited) && favourited > 0) {
+    track.favouritedAt = new Date(favourited * 1000).toISOString();
   }
   if (typeof item["playlist_track_id"] === "number") {
     track.playlistTrackId = item["playlist_track_id"];

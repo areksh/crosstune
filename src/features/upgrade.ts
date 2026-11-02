@@ -81,6 +81,8 @@ export interface UpgradeItem {
 /** The resolved plan, plus what was skipped and why. */
 export interface UpgradePlan {
   items: UpgradeItem[];
+  /** Tracks whose search ran (whatever it found), for incremental re-checks. */
+  checkedTrackIds: number[];
   /** How many tracks (entries) the source held. */
   scanned: number;
   /** Below the best quality but without an ISRC to search by. */
@@ -180,7 +182,7 @@ function signatureOf(track: Track): string | undefined {
 }
 
 /** A track as found in the source, with where it sits. */
-interface SourceEntry {
+export interface UpgradeEntry {
   track: Track;
   location: TrackLocation;
 }
@@ -190,7 +192,7 @@ async function readSource(
   client: UpgradeResolverClient,
   source: UpgradeSource,
   concurrency: number,
-): Promise<SourceEntry[]> {
+): Promise<UpgradeEntry[]> {
   if (source.type === "favourites") {
     const tracks = await client.getFavoriteTracks();
     return tracks.map((track) => ({ track, location: { type: "favourites" } }));
@@ -201,7 +203,7 @@ async function readSource(
       : await client.getUserPlaylists();
   const perPlaylist = await mapWithConcurrency(playlists, concurrency, async (playlist) => {
     const tracks = await client.getPlaylistTracks(playlist.id);
-    const entries: SourceEntry[] = [];
+    const entries: UpgradeEntry[] = [];
     for (const track of tracks) {
       if (track.playlistTrackId === undefined) {
         continue;
@@ -263,17 +265,44 @@ export async function resolveUpgrades(
   options: UpgradeOptions = {},
 ): Promise<UpgradePlan> {
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
-  const allowSignature = options.allowSignatureMatch ?? false;
   const entries = await readSource(client, source, concurrency);
+  return resolveUpgradesOf(client, entries, options);
+}
+
+export interface UpgradeEntriesOptions extends UpgradeOptions {
+  /** Which kinds to look for (default both). */
+  kinds?: readonly UpgradeItem["kind"][];
+  /** Leave a track out (e.g. one checked recently); counts as not scanned for upgrades. */
+  skip?: (track: Track, kind: UpgradeItem["kind"]) => boolean;
+}
+
+/**
+ * Resolve already-read entries into an upgrade & repair plan (the core of
+ * {@link resolveUpgrades}), for callers that hold the tracks -- a scheduled
+ * tidy-up checks its playlist a little at a time.
+ */
+export async function resolveUpgradesOf(
+  client: Pick<UpgradeResolverClient, "searchTracks">,
+  entries: readonly UpgradeEntry[],
+  options: UpgradeEntriesOptions = {},
+): Promise<UpgradePlan> {
+  const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+  const allowSignature = options.allowSignatureMatch ?? false;
+  const kinds = new Set(options.kinds ?? ["upgrade", "unplayable"]);
+  const skip = options.skip ?? (() => false);
 
   let skippedNoIsrc = 0;
   let skippedUnknownQuality = 0;
-  const unplayable: SourceEntry[] = [];
-  const upgradable: SourceEntry[] = [];
+  const unplayable: UpgradeEntry[] = [];
+  const upgradable: UpgradeEntry[] = [];
   for (const entry of entries) {
     const { track } = entry;
     if (track.streamable === false) {
-      unplayable.push(entry);
+      if (kinds.has("unplayable") && !skip(track, "unplayable")) {
+        unplayable.push(entry);
+      }
+    } else if (!kinds.has("upgrade") || skip(track, "upgrade")) {
+      continue;
     } else if (!hasKnownQuality(track)) {
       skippedUnknownQuality += 1;
     } else if (!isBelowBestQuality(track)) {
@@ -303,7 +332,7 @@ export async function resolveUpgrades(
     return pending;
   };
 
-  const check = async (entry: SourceEntry, kind: UpgradeItem["kind"]): Promise<CheckOutcome> => {
+  const check = async (entry: UpgradeEntry, kind: UpgradeItem["kind"]): Promise<CheckOutcome> => {
     const { track } = entry;
     const usable = (candidate: Track): boolean =>
       candidate.id !== track.id &&
@@ -354,7 +383,7 @@ export async function resolveUpgrades(
       : { status: "checked", candidates: rankCandidates(found) };
   };
 
-  const work: Array<{ entry: SourceEntry; kind: UpgradeItem["kind"] }> = [
+  const work: Array<{ entry: UpgradeEntry; kind: UpgradeItem["kind"] }> = [
     ...unplayable.map((entry) => ({ entry, kind: "unplayable" as const })),
     ...upgradable.map((entry) => ({ entry, kind: "upgrade" as const })),
   ];
@@ -363,10 +392,14 @@ export async function resolveUpgrades(
   );
 
   const items: UpgradeItem[] = [];
+  const checkedTrackIds = new Set<number>();
   let unchecked = 0;
   let failed = 0;
   outcomes.forEach((outcome, index) => {
     const { entry, kind } = work[index]!;
+    if (outcome.status === "checked") {
+      checkedTrackIds.add(entry.track.id);
+    }
     if (outcome.status === "unchecked") {
       unchecked += 1;
       return;
@@ -392,6 +425,7 @@ export async function resolveUpgrades(
 
   return {
     items,
+    checkedTrackIds: [...checkedTrackIds],
     scanned: entries.length,
     skippedNoIsrc,
     skippedUnknownQuality,

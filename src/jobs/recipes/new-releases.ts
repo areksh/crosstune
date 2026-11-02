@@ -9,43 +9,28 @@
  * refresh from removing tracks (see ../reconcile.ts).
  */
 
-import type { Artist } from "../../qobuz/index.js";
 import { findNewReleases, type NewReleasesClient } from "../../features/new-releases.js";
 import {
   fetchAlbumTracks,
   type AlbumTracksClient,
 } from "../../features/playlist-from-albums.js";
-import { fitToLength } from "../../features/playlist-shape.js";
-import {
-  seedsFromPlaylist,
-  walkSimilarArtists,
-  type SimilarArtistsClient,
-} from "../../features/similar-artists.js";
+import type { SimilarArtistsClient } from "../../features/similar-artists.js";
 import { compileTrackFilter, NO_FILTER } from "../../features/track-filter.js";
-import type { ArtistRef, JobState, NewReleasesRecipeDef, Shape } from "../model.js";
+import type { NewReleasesRecipeDef, Shape, SourceState } from "../model.js";
 import type { DesiredTrack } from "../reconcile.js";
+import {
+  applyShape,
+  seedArtists,
+  similarSnapshot,
+  type RecipeContext,
+  type RecipeResult,
+} from "./common.js";
 
-export interface RecipeContext<S> {
-  now: Date;
-  jobId: string;
-  state: S;
-}
-
-export interface RecipeResult {
-  /** The desired tracks, in order. */
-  tracks: DesiredTrack[];
-  /** False when something failed to load: the refresh then removes nothing. */
-  complete: boolean;
-  notes: string[];
-  /** The similar-artist snapshot to keep (unchanged unless refreshed). */
-  similar?: JobState["similar"];
-}
+export type { RecipeContext, RecipeResult };
 
 export type FeedClient = NewReleasesClient &
   AlbumTracksClient &
   Pick<SimilarArtistsClient, "getSimilarArtists">;
-
-const DAY_MS = 86_400_000;
 
 /** The most artists (seeds and similar) a feed checks per refresh. */
 export const MAX_FEED_ARTISTS = 1_000;
@@ -54,35 +39,20 @@ export async function resolveNewReleasesFeed(
   client: FeedClient,
   def: NewReleasesRecipeDef,
   shape: Shape | undefined,
-  ctx: RecipeContext<Pick<JobState, "similar">>,
+  ctx: RecipeContext<Pick<SourceState, "similar">>,
 ): Promise<RecipeResult> {
   const notes: string[] = [];
   let complete = true;
   const filter = def.exclude === undefined ? NO_FILTER : compileTrackFilter(def.exclude);
 
-  const seeds = await seedArtists(client, def);
-  let similar = ctx.state.similar;
+  const seeds = await seedArtists(client, def.artists);
+  let similar: SourceState["similar"] = ctx.state.similar;
   if (def.similar !== undefined) {
-    const age =
-      similar === undefined ? Infinity : ctx.now.getTime() - Date.parse(similar.takenAt);
-    if (!(age <= def.similar.refreshDays * DAY_MS)) {
-      try {
-        const walk = await walkSimilarArtists(client, {
-          seeds,
-          similarPerArtist: def.similar.perArtist,
-          depth: 1,
-          filter,
-        });
-        similar = {
-          takenAt: ctx.now.toISOString(),
-          artists: walk.found.map(({ artist }) => ({ id: artist.id, name: artist.name })),
-        };
-      } catch (error) {
-        complete = false;
-        notes.push(
-          `Similar artists could not be refreshed (${message(error)}); kept the previous list.`,
-        );
-      }
+    const snap = await similarSnapshot(client, seeds, def.similar, similar, ctx.now, filter);
+    similar = snap.similar;
+    if (snap.failure !== undefined) {
+      complete = false;
+      notes.push(snap.failure);
     }
   }
   const snapshot = def.similar === undefined ? [] : (similar?.artists ?? []);
@@ -135,30 +105,7 @@ export async function resolveNewReleasesFeed(
       }
     }
   }
-  if (shape?.maxTracks !== undefined) {
-    tracks = tracks.slice(0, shape.maxTracks);
-  }
-  if (shape?.maxMinutes !== undefined && tracks.length > 0) {
-    tracks = fitToLength([tracks], shape.maxMinutes * 60, (t) => t.durationSeconds).kept[0] ?? [];
-  }
+  tracks = applyShape(tracks, shape);
 
   return { tracks, complete, notes, ...(similar !== undefined && { similar }) };
-}
-
-/** The recipe's own artists: as listed, or read live (favourites, a playlist's). */
-async function seedArtists(client: FeedClient, def: NewReleasesRecipeDef): Promise<Artist[]> {
-  const artists: readonly ArtistRef[] =
-    def.artists.type === "list"
-      ? def.artists.artists
-      : def.artists.type === "favourites"
-        ? await client.getFavoriteArtists()
-        : seedsFromPlaylist(await client.getPlaylistTracks(def.artists.playlistId), Infinity).seeds;
-  const seen = new Set<number>();
-  return artists
-    .filter((artist) => !seen.has(artist.id) && seen.add(artist.id))
-    .map(({ id, name }) => ({ id, name }));
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

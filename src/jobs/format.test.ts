@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeResult,
   describeSchedule,
+  describeSource,
   describeWindow,
   formatJobList,
   formatPreview,
@@ -14,9 +15,11 @@ const job = validateJob({
   id: "a1b2c3d4",
   name: "Fresh",
   createdAt: "2026-11-01T00:00:00.000Z",
-  kind: "managed-playlist",
+  kind: "playlist",
   schedule: { every: "week", weekday: 5, at: "07:30" },
-  recipe: {
+  target: { type: "created" },
+  tidy: { dedupe: {}, upgrade: { mode: "suggest" } },
+  source: {
     type: "new-releases",
     artists: { type: "list", artists: [{ id: 1, name: "Air" }, { id: 2, name: "Bonobo" }] },
     similar: { perArtist: 3, refreshDays: 30 },
@@ -45,6 +48,9 @@ describe("describe*", () => {
     );
     expect(describeResult({ at: "", status: "ok", added: 0, removed: 0, dismissed: 0, notes: [] })).toBe(
       "ok: no changes",
+    );
+    expect(describeResult({ at: "", status: "ok", added: 0, removed: 0, dismissed: 0, replaced: 2, suggested: 1, notes: [] })).toBe(
+      "ok: 2 replaced, 1 suggestion",
     );
     expect(
       describeResult({ at: "", status: "failed", added: 0, removed: 0, dismissed: 0, notes: [], error: "HTTP 500" }),
@@ -81,7 +87,8 @@ describe("formatJobList", () => {
     expect(text).toContain("Fridays at 07:30");
     expect(text).toContain("2 artists + 3 similar each");
     expect(text).toContain("released in the last 30 days");
-    expect(text).toContain("playlist 77");
+    expect(text).toContain("playlist (77), created by qobuz-helper");
+    expect(text).toContain("Upgrade monthly (suggest) · Dedupe every pass");
     expect(text).toContain("ok: +3 tracks");
     expect(text).toContain("next 2026-11-06T07:30:00.000Z");
     expect(text).toMatch(/ffffffff.*schedule\.every/);
@@ -142,13 +149,51 @@ describe("formatPreview", () => {
       withheldRemovals: 0,
       complete: true,
       notes: [],
+      findings: [],
     });
     expect(text).toBe('Would create the playlist "Fresh" and add 3 tracks from 2 releases.');
   });
 
   it("says when nothing would change", () => {
     expect(
-      formatPreview("Fresh", { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: ["n"] }),
+      formatPreview("Fresh", { createsPlaylist: false, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: ["n"], findings: [] }),
     ).toBe('"Fresh" is up to date.\n  n');
+  });
+
+  it("lists what the tidy-ups would do", () => {
+    expect(
+      formatPreview("Fresh", {
+        createsPlaylist: false,
+        add: [{ trackId: 1, source: "playlist:4" }],
+        remove: [],
+        newlyDismissed: [],
+        withheldRemovals: 0,
+        complete: true,
+        notes: [],
+        findings: [{ key: "upgrade:1>2", tidy: "upgrade", summary: "Song: better", mode: "suggest" }],
+      }),
+    ).toBe('Would add 1 track in "Fresh".\nWould suggest: Song: better');
+  });
+});
+
+describe("describeSource", () => {
+  it("words each kind of source", () => {
+    const names = new Map([[4, "Road trip"]]);
+    expect(describeSource(undefined)).toBe("No source: only tidied");
+    expect(
+      describeSource(
+        { type: "combined", inputs: [{ type: "playlist", playlistId: 4 }, { type: "favourites" }], mode: "merge", keep: "first", order: "shuffle", matchSongs: true },
+        names,
+      ),
+    ).toBe("Combined: Road trip + Favourites (merged, shuffled)");
+    expect(describeSource({ type: "follow", playlistId: 4, keepRemoved: true }, names)).toBe("Archive of Road trip");
+    expect(
+      describeSource({
+        type: "smart",
+        from: [{ type: "favourites" }],
+        rules: [{ type: "quality", quality: "hires" }, { type: "duration", maxSeconds: 300 }],
+        order: "as-listed",
+      }),
+    ).toBe("Smart: Favourites, hi-res, at most 5:00");
   });
 });

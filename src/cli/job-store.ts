@@ -80,7 +80,7 @@ export function fileJobStore(dir: string = configDir()): JobStore {
     }
   };
   return {
-    load: () => read()?.parsed ?? { file: { version: 1, jobs: [] }, invalid: [] },
+    load: () => read()?.parsed ?? { file: { version: 2, jobs: [] }, invalid: [] },
     save: (file: JobsFile) => {
       // Refuse to overwrite a file we cannot read, and keep the jobs that
       // failed validation as they were (a hand edit to fix, not to lose).
