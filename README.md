@@ -65,11 +65,17 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   what it added is taken out, what it removed is put back in its old place, and
   a playlist it created is deleted. Available on the CLI and in the web UI (see
   [History and undo](#history-and-undo)).
-- **Managed playlists** -- playlists qobuz-helper keeps up to date on a
-  schedule: the new releases of artists you choose (or your favourite artists,
-  or a playlist's), optionally with their similar artists. Artists with nothing
-  new add nothing; tracks you take out stay out. Runs from your system's
-  scheduler or an always-on `serve` (see [Managed playlists](#managed-playlists)).
+- **Managed playlists** -- playlists qobuz-helper looks after on a schedule.
+  A *source* keeps one filled: the new releases of artists you choose (with
+  their similar artists if you like), a live **combination** of other
+  playlists, a copy that **follows or archives** another playlist, a **smart**
+  playlist of tracks meeting rules (hi-res, decades, genres, recently
+  favourited...), or a weekly **discovery radio**. **Tidy-ups** keep it clean:
+  remove duplicates, upgrade to better-quality copies, repair tracks that stopped
+  playing -- on managed playlists, on your own playlists and on your favourites,
+  either applied or left as suggestions. Tracks you take out stay out. Runs from
+  your system's scheduler or an always-on `serve` (see
+  [Managed playlists](#managed-playlists)).
 
 The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
@@ -746,10 +752,80 @@ file cannot be read is skipped rather than started over. A refresh that fails
 part-way picks up where it stopped on the next run. Feeds check at most 1,000
 artists (with similar ones); past that, nothing is removed.
 
-In the web UI, *Managed playlists* lists the jobs with their last and next run
-(Run now, Preview, Pause, Edit, Delete -- optionally with the playlist) and
-creates them with a preview; *New releases* and *Similar artists* have a
-*Keep this updated...* button that opens the form filled in.
+**Other sources.** Besides new releases, a managed playlist can be filled by:
+
+```sh
+# Combined: kept in sync with two playlists and your favourites
+npm run dev -- jobs create combined 1234 5678 favourites --name "Road trip mix" --order shuffle --apply
+# Follow a playlist (any you can open, e.g. a Qobuz editorial one) -- or archive it, keeping what it drops
+npm run dev -- jobs create follow https://play.qobuz.com/playlist/9876 --archive --name "Editors' picks, kept" --apply
+# Smart: hi-res favourites added in the last 30 days, newest first
+npm run dev -- jobs create smart favourites --hires --favourited-within 30 --order newest-favourited --name "New in hi-res" --apply
+# Discovery radio: each week 10 artists like these you do not follow, 3 tracks each
+npm run dev -- jobs create discovery "Air" "Bonobo" --artists-per-rotation 10 --tracks-per-artist 3 --name "Radio" --apply
+```
+
+Combined takes `--mode merge|only-first|common`, `--order
+sequential|interleave|shuffle` (a shuffle that stays put as tracks come and
+go), `--keep highest-quality|first` and `--exact-ids-only`, like
+[Combine](#commands); with `only-first` or `common`, a pass that cannot read
+every input fails and retries rather than guessing. Smart rules (all must hold):
+`--hires`/`--cd`, `--decades 1990s,2000s`, `--genres jazz,soul`,
+`--favourited-within DAYS`, `--min-length`/`--max-length M:SS`. Discovery
+keeps the same picks all week (or day, `--rotation day`), skips songs in your
+favourites (`--keep-favourite-tracks` to include them) and does not repeat a
+track for 8 rotations (`--avoid-repeats N`). A source may read other managed
+playlists (a combination of two feeds, say): they run first. A source cannot,
+through others, read back its own playlist.
+
+**Your own playlists.** `--into <playlist>` gives a source to one of your
+playlists instead of making a new one. Tracks already in it count as yours, so
+nothing you put there is ever removed; strict mirror is only for playlists
+qobuz-helper made. Removing such a job never deletes the playlist.
+
+**Tidy-ups.** Any managed playlist -- and any of your playlists, and your
+favourites -- can be tidied on a schedule:
+
+```sh
+npm run dev -- jobs create tidy 1234 --dedupe --repair --apply           # one of your playlists
+npm run dev -- jobs create tidy favourites --upgrade=weekly --suggest --apply
+npm run dev -- jobs create combined 1234 5678 --name "Mix" --dedupe --upgrade --apply
+```
+
+| Tidy-up | Does | Default cadence |
+| ------- | ---- | --------------- |
+| `--repair` | replaces tracks that stopped playing with another copy (`--repair-remove`: removes them when there is none) | weekly |
+| `--upgrade` | swaps tracks for a better-quality copy of the same recording, a few hundred searches a pass, each track re-checked after 90 days | monthly |
+| `--dedupe` | removes extra copies of a song (`--dedupe-keep`, as in [Deduplicate](#commands); default best quality, then first added) | every pass |
+
+Give a cadence as `--upgrade=weekly` (`every-pass`, `weekly`, `monthly`). Each
+pass refreshes the source first, then runs the tidy-ups that are due. A tidy-up
+and the source never undo each other: the source treats an upgraded or
+de-duplicated track as the one it wanted. Tidy-up changes are in the
+[history](#history-and-undo) with the rest of the pass; one you put back by
+hand (or by undo) is left alone from then on.
+
+**Suggestions.** With `--suggest` a tidy-up changes nothing; what it finds waits
+for you:
+
+```sh
+npm run dev -- jobs suggestions <id>             # list them, with their keys
+npm run dev -- jobs accept <id> upgrade:123>456  # or --all
+npm run dev -- jobs ignore <id> --all            # never suggested again
+```
+
+Qobuz cannot swap a favourite in place: an upgraded or repaired favourite is
+added anew and the old one removed, so the Qobuz app lists it as recently
+added. qobuz-helper keeps the original date, and its smart playlists and
+first/last-added duplicate checks use that one.
+
+In the web UI, *Managed playlists* shows a card per playlist -- made by
+qobuz-helper, yours, or your favourites -- then what manages it: its source,
+its tidy-ups, its schedule, its last and next pass, and any suggestions to
+accept or ignore (Run now, Preview, Pause, Edit, Delete -- optionally with a
+playlist qobuz-helper made). *Manage a playlist* sets one up with a preview;
+*New releases*, *Similar artists* and *Combine playlists* have a *Keep this
+updated...* button that opens the form filled in.
 
 #### Logging
 

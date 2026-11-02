@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Managed playlists can now be filled by more sources: a live **combined**
+  playlist kept in sync with the playlists it combines, a copy that **follows**
+  (or **archives**) another playlist, a **smart** playlist of tracks meeting
+  rules (quality, decades, genres, recently favourited, length), and a
+  **discovery radio** of artists like yours, new each week. A source can also
+  be given to one of your existing playlists (`--into`), respecting your edits.
+- Scheduled **tidy-ups** -- remove duplicates, upgrade to better-quality
+  copies, repair tracks that stopped playing -- on managed playlists, on your
+  own playlists and on your favourites, each on its own cadence, applied or
+  left as suggestions to accept or ignore (`jobs suggestions/accept/ignore`,
+  and on the playlist's card in the web UI).
+- The web UI's *Managed playlists* is organised by playlist: each card is a
+  playlist, then its source, tidy-ups and schedule. *Combine playlists* gains
+  *Keep this updated...*.
+
 ### Fixed
 
 - A change could vanish from the history when two qobuz-helper processes

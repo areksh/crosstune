@@ -114,7 +114,8 @@ to `source.similar`; new lists empty). Reading never rewrites a file.
 
 ## 3. One pass
 
-`runPass(client, job, state, { now, dryRun })` replaces `refreshManagedPlaylist`.
+`runPass(client, job, state, { now, dryRun, favouriteDates })` replaces
+`refreshManagedPlaylist` (kept as an alias, in `refresh.ts`).
 It runs inside one history entry (`Managed: <name>`), as v1.
 
 1. **Locate.** Paused --> nothing. The playlist id is `target.playlistId ??
@@ -252,7 +253,7 @@ is evaluated at `now`.
 interface DiscoverySource {
   type: "discovery";
   seeds: FeedArtists;                 // list | favourites | a playlist's artists (as new-releases)
-  similarPerArtist: number;           // snapshot size per seed (default 10), refreshed every 30 days
+  similar: { perArtist: number; refreshDays: number };  // default 10 per seed, refreshed every 30 days
   artistsPerRotation: number;         // default 10
   tracksPerArtist: number;            // default 3
   rotation: "day" | "week";           // default week
@@ -353,8 +354,8 @@ jobs ignore <id> <key...>|--all
 New and changed routes (all under the v1 checks; validation 400, unknown 404,
 lock busy 409, Qobuz 502):
 
-- `GET /api/jobs` -- the views now include `targetName` (the playlist's name,
-  from the user's playlists; "Favourites") when known.
+- `GET /api/jobs` -- unchanged; the page names the playlists from the user's
+  playlist list it already loads.
 - `POST /api/jobs/:id/suggestions` `{ accept?: string[] | "all", ignore?: string[] | "all" }`.
 - The v1 job routes take v2 definitions.
 
@@ -386,7 +387,7 @@ The Managed view becomes a list of **playlist cards**:
 
 ```
 src/jobs/model.ts              v2 types, validation, v1 migration
-src/jobs/pass.ts               runPass (was refresh.ts): locate, reverts, source, tidy, book-keeping
+src/jobs/refresh.ts            runPass: locate, reverts, source, tidy, book-keeping
 src/jobs/substitutions.ts      mapping, reverts, caps (pure)
 src/jobs/tidy.ts               findings per tidy-up, cadence, apply/suggest (pure planning + writes)
 src/jobs/suggestions.ts        accept / ignore
@@ -405,7 +406,19 @@ ignored/applied filtering; multi-pass scenarios on the fake account
 suggest then accept); dependency order and cycle rejection; service
 one-job-per-playlist; args parsers; router suggestions route.
 
-## 12. Out of scope
+## 12. Added while building
+
+- **Favourite dates.** Qobuz has no "replace a favourite": an upgrade or repair
+  on the favourites adds the new copy (dated today) and removes the old one.
+  The favourites job keeps `favouriteDates` (new track id -> the original
+  date, carried forward through chains); `runDue` passes them to every other
+  pass, so a smart source's `favourited-within` / `newest-favourited` and the
+  favourites' own dedupe first/last-added use the original dates.
+- **Suggestions survive the upgrade re-check window.** An upgrade suggestion
+  whose track was not searched again this pass (checked in the last 90 days)
+  is kept while it still applies, rather than dropped.
+
+## 13. Out of scope
 
 - Notifications and scheduled backup (still phase 2 of the jobs roadmap).
 - More than one source per playlist (use a combined source over managed
