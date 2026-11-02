@@ -171,7 +171,7 @@
  * stderr instead (see src/cli/output.ts).
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -182,6 +182,11 @@ import {
   parseExportArgs,
   parseHistoryArgs,
   parseImportArgs,
+  parseJobsArgs,
+  parseLoginArgs,
+  parseRunDueArgs,
+  parseScheduleArgs,
+  parseServeArgs,
   parseNewReleasesArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
@@ -194,13 +199,28 @@ import {
   type ImportArgs,
   type ImportTargetArg,
   type UndoArgs,
+  type JobsArgs,
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileHistoryStore } from "./cli/history-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
-import { authenticateViaBrowser } from "./cli/oauth-login.js";
+import { authenticateByPaste, authenticateViaBrowser } from "./cli/oauth-login.js";
+import { configDir } from "./cli/config-dir.js";
+import { tryAcquireLock } from "./cli/file-lock.js";
+import {
+  fileGlobalStore,
+  fileJobStateStore,
+  fileJobStore,
+  fileRunLog,
+} from "./cli/job-store.js";
+import { formatJobList, formatPreview, formatRunSummary, describeResult } from "./jobs/format.js";
+import { emptyJobState, validateJob, type Job } from "./jobs/model.js";
+import { refreshManagedPlaylist } from "./jobs/refresh.js";
+import { runDue, type ConnectResult, type RunDueDeps } from "./jobs/run-due.js";
+import { scheduleSnippet } from "./jobs/schedule-print.js";
+import { jobsService, type JobsService } from "./jobs/service.js";
 import { openInBrowser } from "./cli/open-browser.js";
 import {
   createOutput,
@@ -210,6 +230,7 @@ import {
   type CommandOutput,
 } from "./cli/output.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
+import { createInterface } from "node:readline/promises";
 import { startServer } from "./server/http.js";
 import {
   deduplicateTracks,
@@ -229,6 +250,7 @@ import {
   addTracksToExistingPlaylist,
   buildPlaylistFromArtists,
   createPlaylistWithTracks,
+  lookUpArtist,
   shapeArtistGroups,
 } from "./features/playlist-from-artists.js";
 import { formatDuration } from "./features/playlist-shape.js";
@@ -372,14 +394,66 @@ async function main(): Promise<void> {
     return;
   }
 
+  // `schedule print` only prints a snippet for the OS scheduler.
+  if (command === "schedule") {
+    const { target } = parseScheduleArgs(args.slice(1));
+    const text = scheduleSnippet(target, {
+      node: process.execPath,
+      script: realpathSync(process.argv[1] ?? "."),
+      logFile: join(configDir(), "run-due.log"),
+    });
+    output.set("snippet", text);
+    logger.info(text);
+    if (/\.[cm]?ts$/.test(process.argv[1] ?? "")) {
+      logger.warn(
+        "\nThis points at the TypeScript source; run schedule print from a built install (npm run build, then node dist/cli.js) so the scheduler can run it.",
+      );
+    }
+    output.flush();
+    return;
+  }
+
+  // `run-due` signs in (without a browser) only when a job is due.
+  if (command === "run-due") {
+    const { dryRun } = parseRunDueArgs(args.slice(1));
+    await runDueCommand(journal, dryRun);
+    output.flush();
+    return;
+  }
+
+  // Most `jobs` actions only touch the local job files.
+  let jobsArgs: JobsArgs | undefined;
+  if (command === "jobs") {
+    jobsArgs = parseJobsArgs(args.slice(1));
+    if (runJobsOffline(jobsArgs)) {
+      output.flush();
+      return;
+    }
+  }
+
   // Resolve the command and validate its arguments *before* any network or
   // sign-in, so bad input fails fast without opening a browser. `login` just
   // establishes (and persists) a session, so its action is a no-op.
   let run: (client: QobuzClient, session: UserSession) => Promise<void>;
+  let printLoginUrl = false;
   switch (command) {
     case "login":
-      run = async () => {};
+      printLoginUrl = parseLoginArgs(args.slice(1)).printUrl;
+      run = async () => clearSignInFlag();
       break;
+    case "serve": {
+      const serveArgs = parseServeArgs(args.slice(1));
+      run = (client, session) => runServe(client, session, serveArgs);
+      break;
+    }
+    case "jobs": {
+      const parsed = jobsArgs;
+      if (parsed === undefined) {
+        throw new Error("unreachable: jobs arguments not parsed");
+      }
+      run = (client) => runJobsOnline(client, journal, parsed);
+      break;
+    }
     case "check":
       run = runCheck;
       break;
@@ -465,14 +539,16 @@ async function main(): Promise<void> {
   const { session, restored } = await restoreOrLogin(
     client,
     fileTokenStore(),
-    () => authenticateViaBrowser(client, { log: (message) => logger.info(message) }),
+    printLoginUrl
+      ? () => authenticateByPaste(client, consoleIO())
+      : () => authenticateViaBrowser(client, { log: (message) => logger.info(message) }),
     (message) => logger.info(message),
   );
   logger.info(
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
-  if (command === "ui") {
+  if (command === "ui" || command === "serve") {
     // The server records each web commit into a journal of its own.
     await run(client, session);
   } else {
@@ -574,6 +650,267 @@ function waitForInterrupt(): Promise<void> {
     process.once("SIGINT", () => resolve());
     process.once("SIGTERM", () => resolve());
   });
+}
+
+/** Read a line from the terminal (for the pasted sign-in). */
+function consoleIO(): { print(text: string): void; readLine(prompt: string): Promise<string> } {
+  return {
+    print: (text) => logger.info(text),
+    readLine: async (prompt) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await rl.question(prompt);
+      } finally {
+        rl.close();
+      }
+    },
+  };
+}
+
+/** A successful sign-in lets stopped jobs run again. */
+function clearSignInFlag(): void {
+  const global = fileGlobalStore();
+  const { needsSignIn: _cleared, ...rest } = global.load();
+  if (_cleared !== undefined) {
+    global.save(rest);
+    logger.info("Jobs stopped by the expired session will run again.");
+  }
+}
+
+function openJobsService(): JobsService {
+  const dir = configDir();
+  return jobsService({
+    jobs: fileJobStore(dir),
+    state: fileJobStateStore(dir),
+    runs: fileRunLog(dir),
+    global: fileGlobalStore(dir),
+  });
+}
+
+/** The job runner's files and lock, with each refresh one history entry. */
+function jobRunnerDeps(journal: Journal, connect: RunDueDeps["connect"]): RunDueDeps {
+  const dir = configDir();
+  return {
+    jobs: fileJobStore(dir),
+    state: fileJobStateStore(dir),
+    runs: fileRunLog(dir),
+    global: fileGlobalStore(dir),
+    acquireLock: () => tryAcquireLock(join(dir, "jobs.lock")),
+    connect,
+    journalRun: (label, fn) => journal.run({ tool: "managed", label }, fn),
+  };
+}
+
+/**
+ * Connect for unattended runs: cached bundle credentials (else a fresh
+ * extraction) and the saved session -- never a browser sign-in.
+ */
+async function connectUnattended(journal: Journal): Promise<ConnectResult> {
+  const client = new QobuzClient({ logger });
+  try {
+    await initClientWithCache(client, fileCredentialStore());
+  } catch (error) {
+    clearCredentials();
+    return { ok: false, reason: "bundle-broken", message: errorMessage(error) };
+  }
+  try {
+    await restoreOrLogin(client, fileTokenStore(), async () => {
+      throw new QobuzError("authentication", "not signed in; run qobuz-helper login");
+    });
+  } catch (error) {
+    if (error instanceof QobuzError && error.kind === "authentication") {
+      return { ok: false, reason: "needs-sign-in", message: error.message };
+    }
+    throw error;
+  }
+  return { ok: true, client: recordingClient(client, journal) };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Executor for `run-due`: run the jobs that are due, then exit. */
+async function runDueCommand(journal: Journal, dryRun: boolean): Promise<void> {
+  const summary = await runDue(
+    jobRunnerDeps(journal, () => connectUnattended(journal)),
+    new Date(),
+    { dryRun },
+  );
+  output.set("summary", summary);
+  logger.info(`${new Date().toISOString()} ${formatRunSummary(summary)}`);
+  for (const bad of summary.invalid) {
+    logger.warn(`job ${bad.id ?? `#${bad.index + 1}`} in jobs.json is invalid and skipped: ${bad.error}`);
+  }
+  if (summary.status === "jobs-file-error") {
+    process.exitCode = 1;
+  }
+}
+
+/** `jobs` actions that need no Qobuz session; true when handled. */
+function runJobsOffline(args: JobsArgs): boolean {
+  const service = openJobsService();
+  switch (args.action) {
+    case "list": {
+      const list = service.list();
+      output.assign(list);
+      logger.info(formatJobList(list));
+      return true;
+    }
+    case "show": {
+      const view = service.get(args.id);
+      if (view === undefined) {
+        throw new Error(`No job ${args.id} (see qobuz-helper jobs list)`);
+      }
+      output.assign({ ...view });
+      logger.info(formatJobList({ jobs: [view], invalid: [], flags: {} }));
+      logger.info(JSON.stringify(view.job, null, 2));
+      for (const run of view.recentRuns) {
+        logger.info(`  ${run.at}  ${describeResult(run.result)}`);
+      }
+      return true;
+    }
+    case "pause":
+      output.set("job", service.setEnabled(args.id, false));
+      logger.info(`Paused ${args.id}; it will not run until resumed.`);
+      return true;
+    case "resume": {
+      service.setEnabled(args.id, true);
+      const state = service.resume(args.id);
+      output.set("state", state);
+      logger.info(`Resumed ${args.id}; it runs on the next run-due or serve tick.`);
+      return true;
+    }
+    case "remove":
+      if (args.deletePlaylist) {
+        return false;
+      }
+      output.assign(service.remove(args.id));
+      logger.info(`Removed ${args.id}; its playlist is left as it is.`);
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** `jobs` actions that talk to Qobuz: create (with a preview), run, remove a playlist. */
+async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsArgs): Promise<void> {
+  const service = openJobsService();
+  if (args.action === "remove") {
+    const { job, playlistId } = service.remove(args.id);
+    if (playlistId !== undefined) {
+      await client.deletePlaylist(playlistId);
+    }
+    output.assign({ job, playlistId, playlistDeleted: playlistId !== undefined });
+    logger.info(
+      playlistId === undefined
+        ? `Removed ${args.id}; it had not made a playlist yet.`
+        : `Removed ${args.id} and deleted its playlist "${job.name}".`,
+    );
+    return;
+  }
+  if (args.action === "run") {
+    const summary = await runDue(
+      jobRunnerDeps(journal, async () => ({ ok: true, client })),
+      new Date(),
+      { onlyJobId: args.id, dryRun: args.dryRun },
+    );
+    output.set("summary", summary);
+    logger.info(formatRunSummary(summary));
+    return;
+  }
+  if (args.action !== "create") {
+    return;
+  }
+
+  const definition = { ...args.definition };
+  if (args.artistQueries.length > 0) {
+    const found: { id: number; name: string }[] = [];
+    const problems: string[] = [];
+    for (const query of args.artistQueries) {
+      const match = await lookUpArtist(client, query);
+      if ("problem" in match) {
+        problems.push(match.problem);
+      } else {
+        found.push({ id: match.artist.id, name: match.artist.name });
+        logger.info(`  ${query} -> ${match.artist.name}`);
+      }
+    }
+    if (problems.length > 0) {
+      throw new Error(`No Qobuz artist found for: ${problems.join(", ")}`);
+    }
+    definition.recipe = { ...definition.recipe, artists: { type: "list", artists: found } };
+  }
+  const now = new Date();
+  // Validate and preview the first refresh before saving anything.
+  const draft: Job = validateJob({ ...definition, id: "00000000", createdAt: now.toISOString() });
+  const { preview } = await refreshManagedPlaylist(client, draft, emptyJobState(), { now, dryRun: true });
+  output.assign({ definition: draft, preview });
+  logger.info(formatPreview(draft.name, preview));
+  if (!args.apply) {
+    logger.info("\n(dry run -- pass --apply to save the job and make the playlist)");
+    return;
+  }
+  const job = service.create(definition, now);
+  const summary = await runDue(
+    jobRunnerDeps(journal, async () => ({ ok: true, client })),
+    now,
+    { onlyJobId: job.id },
+  );
+  output.assign({ job, summary });
+  logger.info(`\nSaved job ${job.id}. ${formatRunSummary(summary)}`);
+  logger.info("It refreshes on its schedule whenever run-due or serve runs (see qobuz-helper schedule print).");
+}
+
+/**
+ * `serve`: the web UI plus a ticker that runs due jobs every minute, until
+ * interrupted. Meant to stay up on an always-on machine.
+ */
+async function runServe(
+  client: QobuzClient,
+  session: UserSession,
+  options: { open: boolean; port?: number },
+): Promise<void> {
+  const journal = openJournal("web");
+  const recorded = recordingClient(client, journal);
+  const server = await startServer({
+    service: recorded,
+    history: { journal },
+    session: {
+      displayName: session.displayName,
+      subscriptionLabel: session.subscriptionLabel,
+    },
+    ...(options.port !== undefined && { port: options.port }),
+  });
+  logger.info(`\nWeb UI running at ${server.url}`);
+  logger.info("Running due jobs every minute. Press Ctrl-C to stop.");
+  if (options.open) {
+    openInBrowser(server.url);
+  }
+  const deps = jobRunnerDeps(journal, async () => ({ ok: true, client: recorded }));
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) {
+      return;
+    }
+    running = true;
+    try {
+      const summary = await runDue(deps, new Date());
+      if (summary.status !== "nothing-due") {
+        logger.info(`${new Date().toISOString()} ${formatRunSummary(summary)}`);
+      }
+    } catch (error) {
+      logger.warn(`job run failed: ${errorMessage(error)}`);
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), 60_000);
+  await waitForInterrupt();
+  clearInterval(timer);
+  logger.info("\nStopping...");
+  await server.close();
 }
 
 async function runCheck(client: QobuzClient): Promise<void> {
@@ -1689,6 +2026,12 @@ function printUsage(): void {
       "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
       "  qobuz-helper history [--limit N]",
       "  qobuz-helper undo [<id>] [--apply]",
+      "  qobuz-helper jobs [list | show <id> | pause <id> | resume <id> | run <id> [--dry-run] | remove <id> [--delete-playlist]]",
+      '  qobuz-helper jobs create new-releases (\"Artist\" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--window last-days:N|since:YYYY-MM-DD|latest:N] [--include albums,eps,live,compilations] [--edits respect|mirror] [--every hour|day|week] [--at HH:MM] [--weekday mon..sun] [--max-releases N] [--max-tracks N] [--fit <minutes>] [--public] [--hide-favourites] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
+      "  qobuz-helper run-due [--dry-run]",
+      "  qobuz-helper serve [--no-open] [--port N]",
+      "  qobuz-helper schedule print (--cron | --systemd | --launchd | --windows)",
+      "  qobuz-helper login --print-url",
       '  qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
       "",
       "Global options:",
@@ -1715,6 +2058,9 @@ function printUsage(): void {
       'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
       "Every change is recorded in history.jsonl beside the session (the last 200, up to 90 days); history lists them (--limit, default 20).",
       "undo shows how the latest change not yet undone (or the entry <id>) would be reversed, and reverses it only with --apply.",
+      "jobs create previews the first refresh and saves (and runs) the job only with --apply; defaults: --window last-days:30, albums and eps, --edits respect (tracks you remove stay out, tracks you add stay), --every day --at 06:00.",
+      "Jobs run whenever run-due (from your OS scheduler: see schedule print) or serve (web UI + a ticker, for an always-on machine) runs; missed runs catch up once.",
+      "login --print-url signs in on a machine without a browser: open the printed link anywhere and paste back the address you end up on.",
       "word-play reports only unless --apply is given; --split defaults to fewest, --max-span to 6 (1-8), --count to 25 (1-100); the playlist is named after the text unless --name is given.",
     ].join("\n"),
   );

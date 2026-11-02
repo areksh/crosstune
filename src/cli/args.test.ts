@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseJobsArgs,
+  parseLoginArgs,
+  parseRunDueArgs,
+  parseScheduleArgs,
+  parseServeArgs,
+  parseWindow,
   extractLogLevel,
   parseAlbumArgs,
   parseCombineArgs,
@@ -1050,5 +1056,128 @@ describe("parseUndoArgs", () => {
     expect(() => parseUndoArgs(["a1", "b2"])).toThrow(/only one entry id/);
     expect(() => parseUndoArgs(["../x"])).toThrow(/not an entry id/);
     expect(() => parseUndoArgs(["--yes"])).toThrow(/Unknown argument: --yes/);
+  });
+});
+
+describe("parseJobsArgs", () => {
+  it("parses the id actions", () => {
+    expect(parseJobsArgs(["list"])).toEqual({ action: "list" });
+    expect(parseJobsArgs([])).toEqual({ action: "list" });
+    expect(parseJobsArgs(["show", "a1b2c3d4"])).toEqual({ action: "show", id: "a1b2c3d4" });
+    expect(parseJobsArgs(["pause", "a1b2c3d4"])).toEqual({ action: "pause", id: "a1b2c3d4" });
+    expect(parseJobsArgs(["resume", "a1b2c3d4"])).toEqual({ action: "resume", id: "a1b2c3d4" });
+    expect(parseJobsArgs(["run", "a1b2c3d4", "--dry-run"])).toEqual({ action: "run", id: "a1b2c3d4", dryRun: true });
+    expect(parseJobsArgs(["remove", "a1b2c3d4", "--delete-playlist"])).toEqual({
+      action: "remove",
+      id: "a1b2c3d4",
+      deletePlaylist: true,
+    });
+  });
+
+  it("rejects a malformed id, a missing id and an unknown action", () => {
+    expect(() => parseJobsArgs(["show", "nope"])).toThrow(/job id/);
+    expect(() => parseJobsArgs(["pause"])).toThrow(/job id/);
+    expect(() => parseJobsArgs(["frobnicate"])).toThrow(/Unknown jobs action/);
+  });
+
+  it("creates a new-releases feed with the defaults", () => {
+    expect(parseJobsArgs(["create", "new-releases", "Air", "Bonobo", "--name", "Fresh"])).toEqual({
+      action: "create",
+      apply: false,
+      definition: {
+        name: "Fresh",
+        kind: "managed-playlist",
+        enabled: true,
+        isPublic: false,
+        edits: "respect",
+        schedule: { every: "day", at: "06:00" },
+        recipe: {
+          type: "new-releases",
+          artists: { type: "list", artists: [] },
+          window: { type: "last-days", days: 30 },
+          include: ["album", "ep-single"],
+          hideFavourites: false,
+        },
+      },
+      artistQueries: ["Air", "Bonobo"],
+    });
+  });
+
+  it("takes every create option", () => {
+    const parsed = parseJobsArgs([
+      "create", "new-releases", "--favourites", "--name", "Fresh", "--similar", "3",
+      "--window", "since:2026-01-01", "--include", "albums", "--edits", "mirror",
+      "--every", "week", "--weekday", "fri", "--at", "07:30", "--max-releases", "10",
+      "--max-tracks", "100", "--fit", "90", "--public", "--hide-favourites",
+      "--exclude-track", "live", "--apply",
+    ]);
+    expect(parsed).toMatchObject({
+      action: "create",
+      apply: true,
+      artistQueries: [],
+      definition: {
+        isPublic: true,
+        edits: "mirror",
+        schedule: { every: "week", weekday: 5, at: "07:30" },
+        shape: { maxReleases: 10, maxTracks: 100, maxMinutes: 90 },
+        recipe: {
+          artists: { type: "favourites" },
+          similar: { perArtist: 3, refreshDays: 30 },
+          window: { type: "since", date: "2026-01-01" },
+          include: ["album"],
+          hideFavourites: true,
+          exclude: { excludeTracks: ["live"] },
+        },
+      },
+    });
+  });
+
+  it("takes a playlist's artists", () => {
+    expect(parseJobsArgs(["create", "new-releases", "--playlist", "42", "--name", "x"])).toMatchObject({
+      definition: { recipe: { artists: { type: "playlist", playlistId: 42 } } },
+    });
+  });
+
+  it("rejects bad create input", () => {
+    expect(() => parseJobsArgs(["create", "new-releases", "Air"])).toThrow(/--name/);
+    expect(() => parseJobsArgs(["create", "new-releases", "--name", "x"])).toThrow(/artists/);
+    expect(() => parseJobsArgs(["create", "new-releases", "Air", "--favourites", "--name", "x"])).toThrow(/one source/);
+    expect(() => parseJobsArgs(["create", "discovery", "--name", "x"])).toThrow(/new-releases/);
+    expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--similar", "0"])).toThrow(/--similar/);
+    expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--at", "6"])).toThrow(/--at/);
+    expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--weekday", "someday"])).toThrow(/--weekday/);
+    expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--every", "month"])).toThrow(/--every/);
+  });
+});
+
+describe("parseWindow", () => {
+  it("reads the three kinds of window", () => {
+    expect(parseWindow("last-days:14")).toEqual({ type: "last-days", days: 14 });
+    expect(parseWindow("since:2026-01-31")).toEqual({ type: "since", date: "2026-01-31" });
+    expect(parseWindow("latest:2")).toEqual({ type: "latest-per-artist", count: 2 });
+  });
+
+  it.each(["last-days:0", "since:2026-02-30", "latest:x", "forever", ""])("rejects %j", (raw) => {
+    expect(() => parseWindow(raw)).toThrow(/--window/);
+  });
+});
+
+describe("driver commands' arguments", () => {
+  it("parses run-due, serve, schedule and login", () => {
+    expect(parseRunDueArgs([])).toEqual({ dryRun: false });
+    expect(parseRunDueArgs(["--dry-run"])).toEqual({ dryRun: true });
+    expect(parseServeArgs([])).toEqual({ open: true });
+    expect(parseServeArgs(["--no-open", "--port", "8123"])).toEqual({ open: false, port: 8123 });
+    expect(parseScheduleArgs(["print", "--systemd"])).toEqual({ target: "systemd" });
+    expect(parseLoginArgs(["--print-url"])).toEqual({ printUrl: true });
+    expect(parseLoginArgs([])).toEqual({ printUrl: false });
+  });
+
+  it("rejects bad driver arguments", () => {
+    expect(() => parseRunDueArgs(["--now"])).toThrow(/Unknown argument/);
+    expect(() => parseServeArgs(["--port", "0"])).toThrow(/--port/);
+    expect(() => parseScheduleArgs(["print"])).toThrow(/one of/);
+    expect(() => parseScheduleArgs(["print", "--cron", "--systemd"])).toThrow(/one of/);
+    expect(() => parseScheduleArgs(["install", "--cron"])).toThrow(/schedule print/);
   });
 });

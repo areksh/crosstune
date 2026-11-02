@@ -98,3 +98,37 @@ function captureAuthorizationCode(
     });
   });
 }
+
+/** Where Qobuz sends the browser after a pasted sign-in (nothing listens there). */
+const PASTE_REDIRECT_URL = "http://localhost:53682/";
+
+/**
+ * Sign in without a browser on this machine (e.g. a headless server): print
+ * the sign-in link to open on any device, then read back the address the
+ * browser ended on -- a localhost page that does not load, whose address
+ * carries the authorization code.
+ *
+ * @throws {Error} if the pasted address carries no code.
+ * @throws {QobuzError} if the code exchange is rejected.
+ */
+export async function authenticateByPaste(
+  client: QobuzClient,
+  io: { print(text: string): void; readLine(prompt: string): Promise<string> },
+): Promise<UserSession> {
+  io.print(
+    [
+      "Open this link in a browser on any device and sign in to Qobuz:",
+      "",
+      `  ${buildOAuthUrl(client.appId, PASTE_REDIRECT_URL)}`,
+      "",
+      "The browser then goes to a localhost page that will not load.",
+      "Copy that page's whole address from the address bar and paste it here.",
+    ].join("\n"),
+  );
+  const pasted = (await io.readLine("Address: ")).trim();
+  const code = parseRedirectCode(pasted);
+  if (code === undefined) {
+    throw new Error("That address has no sign-in code in it; run qobuz-helper login --print-url again.");
+  }
+  return client.loginWithOAuthCode(code);
+}

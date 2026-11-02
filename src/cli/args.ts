@@ -25,6 +25,7 @@ import {
   isIsoDate,
   type ArtistSource,
   type NewReleasesTarget,
+  type ReleaseWindow,
 } from "../features/new-releases.js";
 import {
   ALBUM_PREFERENCES,
@@ -59,6 +60,8 @@ import {
   type WordPlaySource,
 } from "../features/word-play.js";
 import type { ReleaseType } from "../qobuz/index.js";
+import type { FeedArtists, NewReleasesRecipeDef, Schedule, Shape } from "../jobs/model.js";
+import type { ScheduleTarget } from "../jobs/schedule-print.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
 export interface ExtractedLogLevel {
@@ -1704,4 +1707,374 @@ export function parseUndoArgs(argv: readonly string[]): UndoArgs {
     }
   }
   return id === undefined ? { apply } : { id, apply };
+}
+
+/** A job id as `jobs list` shows it. */
+const JOB_ID = /^[0-9a-f]{8}$/;
+
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+/**
+ * A new job, as `jobs create` builds it: the definition (without id and
+ * creation time; validated by the jobs service) and the artist names or links
+ * still to be looked up into its artist list.
+ */
+export interface JobCreateArgs {
+  action: "create";
+  apply: boolean;
+  definition: {
+    name: string;
+    kind: "managed-playlist";
+    enabled: boolean;
+    isPublic: boolean;
+    edits: "respect" | "mirror";
+    schedule: Schedule;
+    recipe: Omit<NewReleasesRecipeDef, "artists"> & { artists: FeedArtists };
+    shape?: Shape;
+  };
+  artistQueries: string[];
+}
+
+export type JobsArgs =
+  | { action: "list" }
+  | { action: "show" | "pause" | "resume"; id: string }
+  | { action: "run"; id: string; dryRun: boolean }
+  | { action: "remove"; id: string; deletePlaylist: boolean }
+  | JobCreateArgs;
+
+/**
+ * Parse a `--window`: `last-days:<n>`, `since:<YYYY-MM-DD>` or `latest:<n>`
+ * (each artist's newest n releases).
+ */
+export function parseWindow(raw: string): ReleaseWindow {
+  const [kind, value = ""] = raw.split(":", 2);
+  const n = Number(value);
+  if (kind === "last-days" && Number.isInteger(n) && n >= 1 && n <= 3650) {
+    return { type: "last-days", days: n };
+  }
+  if (kind === "since" && isIsoDate(value)) {
+    return { type: "since", date: value };
+  }
+  if (kind === "latest" && Number.isInteger(n) && n >= 1 && n <= 50) {
+    return { type: "latest-per-artist", count: n };
+  }
+  throw new Error(
+    `--window must be last-days:<1-3650>, since:<YYYY-MM-DD> or latest:<1-50>, got "${raw}"`,
+  );
+}
+
+function positiveInteger(flag: string, raw: string | undefined, max = 100_000): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > max) {
+    throw new Error(`${flag} must be a whole number from 1 to ${max}, got "${raw}"`);
+  }
+  return value;
+}
+
+function jobId(raw: string | undefined): string {
+  if (raw === undefined || !JOB_ID.test(raw)) {
+    throw new Error(`Give a job id (8 characters, as jobs list shows it), got "${raw ?? ""}"`);
+  }
+  return raw;
+}
+
+/**
+ * Parse the arguments for `jobs`: `list` (default), `show <id>`,
+ * `pause <id>`, `resume <id>`, `run <id> [--dry-run]`,
+ * `remove <id> [--delete-playlist]`, and
+ * `create new-releases [artists...] --name <name> [options] [--apply]`.
+ *
+ * `create` takes artists (names or links) as positional arguments, or
+ * `--favourites`, or `--playlist <id|link>`; `--similar <n>`, `--window`
+ * (see {@link parseWindow}; default last-days:30), `--include <kinds>`,
+ * `--edits respect|mirror`, `--every hour|day|week`, `--at HH:MM`,
+ * `--weekday mon..sun`, `--max-releases`, `--max-tracks`, `--fit <minutes>`,
+ * `--public`, `--hide-favourites` and the exclude flags.
+ *
+ * @throws {Error} on an unknown action or flag, or invalid input.
+ */
+export function parseJobsArgs(argv: readonly string[]): JobsArgs {
+  const [action = "list", ...rest] = argv;
+  switch (action) {
+    case "list":
+      if (rest.length > 0) {
+        throw new Error(`Unknown argument: ${rest[0]}`);
+      }
+      return { action: "list" };
+    case "show":
+    case "pause":
+    case "resume": {
+      const id = jobId(rest[0]);
+      if (rest.length > 1) {
+        throw new Error(`Unknown argument: ${rest[1]}`);
+      }
+      return { action, id };
+    }
+    case "run": {
+      const id = jobId(rest[0]);
+      let dryRun = false;
+      for (const arg of rest.slice(1)) {
+        if (arg !== "--dry-run") {
+          throw new Error(`Unknown argument: ${arg}`);
+        }
+        dryRun = true;
+      }
+      return { action, id, dryRun };
+    }
+    case "remove": {
+      const id = jobId(rest[0]);
+      let deletePlaylist = false;
+      for (const arg of rest.slice(1)) {
+        if (arg !== "--delete-playlist") {
+          throw new Error(`Unknown argument: ${arg}`);
+        }
+        deletePlaylist = true;
+      }
+      return { action, id, deletePlaylist };
+    }
+    case "create":
+      return parseJobCreate(rest);
+    default:
+      throw new Error(`Unknown jobs action: ${action} (list, show, create, pause, resume, run, remove)`);
+  }
+}
+
+function parseJobCreate(argv: readonly string[]): JobCreateArgs {
+  const [kind, ...rest] = argv;
+  if (kind !== "new-releases") {
+    throw new Error("jobs create takes a kind of job: new-releases");
+  }
+  const artistQueries: string[] = [];
+  let favourites = false;
+  let playlistId: number | undefined;
+  let name: string | undefined;
+  let similar: number | undefined;
+  let window: ReleaseWindow = { type: "last-days", days: 30 };
+  let include: ReleaseType[] = [...DEFAULT_NEW_RELEASE_INCLUDE];
+  let edits: "respect" | "mirror" = "respect";
+  let every: Schedule["every"] = "day";
+  let at = "06:00";
+  let weekday = 1;
+  const shape: Shape = {};
+  let isPublic = false;
+  let hideFavourites = false;
+  let apply = false;
+  const filter = new FilterFlags(false);
+
+  for (let i = 0; i < rest.length; i += 1) {
+    const used = filter.take(rest, i);
+    if (used > 0) {
+      i += used - 1;
+      continue;
+    }
+    const arg = rest[i] ?? "";
+    const value = rest[i + 1];
+    const takesValue = (): string => {
+      i += 1;
+      if (value === undefined) {
+        throw new Error(`${arg} requires a value`);
+      }
+      return value;
+    };
+    switch (arg) {
+      case "--name": {
+        const given = takesValue().trim();
+        if (given.length === 0) {
+          throw new Error("--name requires a playlist name");
+        }
+        name = given;
+        break;
+      }
+      case "--favourites":
+      case "--favorites":
+        favourites = true;
+        break;
+      case "--playlist": {
+        const id = playlistIdOf(takesValue());
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
+        }
+        playlistId = id;
+        break;
+      }
+      case "--similar":
+        similar = positiveInteger("--similar", takesValue(), 20);
+        break;
+      case "--window":
+        window = parseWindow(takesValue());
+        break;
+      case "--include":
+        include = parseIncludeList(takesValue());
+        break;
+      case "--edits": {
+        const mode = takesValue();
+        if (mode !== "respect" && mode !== "mirror") {
+          throw new Error(`--edits must be respect or mirror, got "${mode}"`);
+        }
+        edits = mode;
+        break;
+      }
+      case "--every": {
+        const given = takesValue();
+        if (given !== "hour" && given !== "day" && given !== "week") {
+          throw new Error(`--every must be hour, day or week, got "${given}"`);
+        }
+        every = given;
+        break;
+      }
+      case "--at": {
+        const given = takesValue();
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given)) {
+          throw new Error(`--at must be a time written HH:MM, got "${given}"`);
+        }
+        at = given;
+        break;
+      }
+      case "--weekday": {
+        const given = takesValue().toLowerCase().slice(0, 3);
+        const index = WEEKDAYS.indexOf(given as (typeof WEEKDAYS)[number]);
+        if (index < 0) {
+          throw new Error(`--weekday must be a day of the week (mon..sun), got "${value}"`);
+        }
+        weekday = index;
+        break;
+      }
+      case "--max-releases":
+        shape.maxReleases = positiveInteger(arg, takesValue());
+        break;
+      case "--max-tracks":
+        shape.maxTracks = positiveInteger(arg, takesValue());
+        break;
+      case "--fit":
+        shape.maxMinutes = parseFitMinutes(takesValue());
+        break;
+      case "--public":
+        isPublic = true;
+        break;
+      case "--hide-favourites":
+      case "--hide-favorites":
+        hideFavourites = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        if (arg.startsWith("--")) {
+          throw new Error(`Unknown argument: ${arg}`);
+        }
+        artistQueries.push(arg);
+    }
+  }
+
+  if (name === undefined) {
+    throw new Error("--name <playlist name> is required");
+  }
+  const sources = [artistQueries.length > 0, favourites, playlistId !== undefined].filter(Boolean).length;
+  if (sources === 0) {
+    throw new Error("Give the artists (names or links), --favourites or --playlist <id>");
+  }
+  if (sources > 1) {
+    throw new Error("Give only one source of artists: names, --favourites or --playlist");
+  }
+  const artists: FeedArtists = favourites
+    ? { type: "favourites" }
+    : playlistId !== undefined
+      ? { type: "playlist", playlistId }
+      : { type: "list", artists: [] };
+  const schedule: Schedule =
+    every === "hour" ? { every } : every === "day" ? { every, at } : { every, weekday, at };
+  const spec = filter.spec();
+  const exclude =
+    spec === undefined
+      ? undefined
+      : {
+          ...(spec.excludeTracks?.length && { excludeTracks: [...spec.excludeTracks] }),
+          ...(spec.excludeAlbums?.length && { excludeAlbums: [...spec.excludeAlbums] }),
+          ...(spec.excludeArtists?.length && { excludeArtists: [...spec.excludeArtists] }),
+        };
+  return {
+    action: "create",
+    apply,
+    definition: {
+      name,
+      kind: "managed-playlist",
+      enabled: true,
+      isPublic,
+      edits,
+      schedule,
+      recipe: {
+        type: "new-releases",
+        artists,
+        window,
+        include,
+        hideFavourites,
+        ...(similar !== undefined && { similar: { perArtist: similar, refreshDays: 30 } }),
+        ...(exclude !== undefined && { exclude }),
+      },
+      ...(Object.keys(shape).length > 0 && { shape }),
+    },
+    artistQueries,
+  };
+}
+
+/** `run-due [--dry-run]`. */
+export function parseRunDueArgs(argv: readonly string[]): { dryRun: boolean } {
+  let dryRun = false;
+  for (const arg of argv) {
+    if (arg !== "--dry-run") {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+    dryRun = true;
+  }
+  return { dryRun };
+}
+
+/** `serve [--no-open] [--port <n>]`. */
+export function parseServeArgs(argv: readonly string[]): { open: boolean; port?: number } {
+  let open = true;
+  let port: number | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--no-open") {
+      open = false;
+    } else if (arg === "--port") {
+      i += 1;
+      port = positiveInteger("--port", argv[i], 65_535);
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return port === undefined ? { open } : { open, port };
+}
+
+/** `schedule print --cron|--systemd|--launchd|--windows`. */
+export function parseScheduleArgs(argv: readonly string[]): { target: ScheduleTarget } {
+  const [action, ...flags] = argv;
+  if (action !== "print") {
+    throw new Error("Use: qobuz-helper schedule print --cron|--systemd|--launchd|--windows");
+  }
+  const targets = flags.map((flag) => {
+    const target = flag.replace(/^--/, "");
+    if (target !== "cron" && target !== "systemd" && target !== "launchd" && target !== "windows") {
+      throw new Error(`Unknown argument: ${flag}`);
+    }
+    return target;
+  });
+  const [target] = targets;
+  if (target === undefined || targets.length > 1) {
+    throw new Error("Give one of --cron, --systemd, --launchd or --windows");
+  }
+  return { target };
+}
+
+/** `login [--print-url]`. */
+export function parseLoginArgs(argv: readonly string[]): { printUrl: boolean } {
+  let printUrl = false;
+  for (const arg of argv) {
+    if (arg !== "--print-url") {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+    printUrl = true;
+  }
+  return { printUrl };
 }
