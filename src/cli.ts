@@ -184,6 +184,7 @@ import {
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
+import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
 import { authenticateViaBrowser } from "./cli/oauth-login.js";
 import { openInBrowser } from "./cli/open-browser.js";
@@ -488,7 +489,7 @@ function planPlaylistFromArtists(
 
   return async (client: QobuzClient): Promise<void> => {
     logger.info(
-      `Building playlist "${parsed.playlistName}" from ${artists.length} artists...`,
+      `Building playlist "${parsed.playlistName}" from ${count(artists.length, "artist")}...`,
     );
     const result = await buildPlaylistFromArtists(client, {
       artists,
@@ -503,11 +504,11 @@ function planPlaylistFromArtists(
     output.assign({ applied: true, order: parsed.plan?.order ?? "by-artist", result });
 
     logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks (${formatDuration(result.durationSeconds)}):`,
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
     );
     for (const resolved of result.resolvedArtists) {
       logger.info(
-        `  ${resolved.artist.name}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
+        `  ${resolved.artist.name}: ${count(resolved.trackCount, "track")}${excludedNote(resolved.excludedCount)}`,
       );
     }
     logFitNote(result.droppedToFit, parsed.plan?.fitMinutes);
@@ -612,13 +613,13 @@ function planPlaylistFromAlbums(
 function reportAlbumPlaylist(result: BuildAlbumPlaylistResult, fitMinutes?: number): void {
   output.assign({ applied: true, result });
   logger.info(
-    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks (${formatDuration(result.durationSeconds)}):`,
+    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
   );
   for (const resolved of result.resolvedAlbums) {
     const version =
       resolved.album.version === undefined ? "" : ` [${resolved.album.version}]`;
     logger.info(
-      `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${resolved.trackCount} tracks${excludedNote(resolved.excludedCount)}`,
+      `  ${resolved.album.artist} - ${resolved.album.title}${version}: ${count(resolved.trackCount, "track")}${excludedNote(resolved.excludedCount)}`,
     );
   }
   logFitNote(result.droppedToFit, fitMinutes);
@@ -735,13 +736,13 @@ function planSimilarArtists(
       });
       output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
       logger.info(
-        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks (${formatDuration(shaped.seconds)}).`,
+        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(trackIds.length, "track")} (${formatDuration(shaped.seconds)}).`,
       );
       return;
     }
     if (!source.apply) {
       logger.info(
-        `\n(dry run -- pass --apply to add up to ${trackIds.length} tracks, ${formatDuration(shaped.seconds)}, to the playlist)`,
+        `\n(dry run -- pass --apply to add up to ${count(trackIds.length, "track")}, ${formatDuration(shaped.seconds)}, to the playlist)`,
       );
       return;
     }
@@ -751,7 +752,7 @@ function planSimilarArtists(
     });
     output.assign({ applied: true, result: { playlistId: source.playlistId, added, skipped } });
     logger.info(
-      `\nAdded ${added.length} tracks to the playlist${skipped.length > 0 ? ` (${skipped.length} already present, skipped)` : ""}.`,
+      `\nAdded ${count(added.length, "track")} to the playlist${skipped.length > 0 ? ` (${skipped.length} already present, skipped)` : ""}.`,
     );
   };
 }
@@ -767,7 +768,7 @@ function reportSimilarPlan(
   for (const seed of plan.seeds) {
     logger.info(
       showSeedTracks
-        ? `  ${seed.artist.name}: ${seed.tracks.length} tracks${excludedNote(seed.excluded.length)}`
+        ? `  ${seed.artist.name}: ${count(seed.tracks.length, "track")}${excludedNote(seed.excluded.length)}`
         : `  ${seed.artist.name}`,
     );
     const listed = new Set<number>();
@@ -781,7 +782,7 @@ function reportSimilarPlan(
       logger.info(
         repeat
           ? `    = ${entry.artist.name} (similar to ${appearance.via.name}; already listed, added once)`
-          : `    + ${entry.artist.name} (similar to ${entry.similarTo.map((a) => a.name).join(", ")}): ${entry.tracks.length} tracks${excludedNote(entry.excluded.length)}`,
+          : `    + ${entry.artist.name} (similar to ${entry.similarTo.map((a) => a.name).join(", ")}): ${count(entry.tracks.length, "track")}${excludedNote(entry.excluded.length)}`,
       );
     }
     for (const id of listed) {
@@ -847,7 +848,7 @@ function planDeduplicate(
       source.type === "playlist"
         ? await client.getPlaylistTracks(source.playlistId)
         : await client.getFavoriteTracks();
-    logger.info(`  ${tracks.length} tracks fetched`);
+    logger.info(`  ${count(tracks.length, "track")} fetched`);
 
     let groups = deduplicateTracks(tracks);
     if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
@@ -1057,7 +1058,7 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
       note(
         `  ${backup.favourites.tracks.length} favourite tracks, ` +
           `${backup.favourites.albums.length} albums, ` +
-          `${backup.favourites.artists.length} artists, ` +
+          `${count(backup.favourites.artists.length, "artist")}, ` +
           `${backup.playlists.length} playlists`,
       );
     } else {
@@ -1092,7 +1093,7 @@ function planExportAllPlaylists(
     mkdirSync(outDir, { recursive: true });
     for (const file of files) {
       writeFileSync(join(outDir, file.filename), file.content);
-      logger.info(`  ${file.filename} (${file.trackCount} tracks)`);
+      logger.info(`  ${file.filename} (${count(file.trackCount, "track")})`);
     }
     output.assign({
       format,
@@ -1174,7 +1175,7 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
     output.assign({ applied: true, result });
     if (result.playlist !== undefined) {
       logger.info(
-        `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.written} tracks.`,
+        `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.written, "track")}.`,
       );
     } else {
       logger.info(`\nImported ${result.written} ${kind}.`);
@@ -1192,7 +1193,7 @@ function planRestore(
     const counts =
       `${backup.favourites.tracks.length} favourite tracks, ` +
       `${backup.favourites.albums.length} albums, ` +
-      `${backup.favourites.artists.length} artists, ` +
+      `${count(backup.favourites.artists.length, "artist")}, ` +
       `${backup.playlists.length} playlists`;
     output.assign({
       backup: {
@@ -1214,7 +1215,7 @@ function planRestore(
     output.assign({ applied: true, result });
     logger.info(
       `\nRestored ${result.favouriteTracks} favourite tracks, ` +
-        `${result.favouriteAlbums} albums, ${result.favouriteArtists} artists, ` +
+        `${result.favouriteAlbums} albums, ${count(result.favouriteArtists, "artist")}, ` +
         `and recreated ${result.playlists.length} playlists.`,
     );
   };
@@ -1294,7 +1295,7 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
       isPublic: args.isPublic,
     });
     output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
-    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${trackIds.length} tracks.`);
+    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(trackIds.length, "track")}.`);
   };
 }
 
@@ -1340,7 +1341,7 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
       isPublic: request.isPublic,
     });
     output.set("decadePlaylist", { ...decadePlaylist, applied: true, playlist });
-    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${bucket.count} tracks.`);
+    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(bucket.count, "track")}.`);
   };
 }
 
@@ -1367,15 +1368,23 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
     });
 
     output.assign({ plan, applied: false });
+    if (plan.totalArtists === 0) {
+      logger.warn(
+        parsed.source.type === "favourites"
+          ? "You have no favourite artists yet. Use --playlist <id> to check a playlist's artists instead."
+          : "That playlist has no artists to check.",
+      );
+      return;
+    }
     const artists = new Set(plan.releases.map((release) => release.artist)).size;
     logger.info(
-      `\n${plan.releases.length} release${plan.releases.length === 1 ? "" : "s"} from ${artists} artist${artists === 1 ? "" : "s"} since ${plan.since}:`,
+      `\n${count(plan.releases.length, "release")} from ${count(artists, "artist")} since ${plan.since} (${count(plan.totalArtists, "artist")} checked):`,
     );
     for (const release of plan.releases) {
       const version = release.version === undefined ? "" : ` [${release.version}]`;
       const details = [
         release.releaseType,
-        release.trackCount === undefined ? undefined : `${release.trackCount} tracks`,
+        release.trackCount === undefined ? undefined : `${count(release.trackCount, "track")}`,
         release.bitDepth === undefined || release.samplingRate === undefined
           ? undefined
           : `${release.bitDepth}/${release.samplingRate}`,
@@ -1392,7 +1401,7 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
     }
     if (plan.capped) {
       logger.warn(
-        `checked only the first ${plan.checkedArtists} of ${plan.totalArtists} artists`,
+        `checked only the first ${plan.checkedArtists} of ${count(plan.totalArtists, "artist")}`,
       );
     }
     if (plan.excludedArtists.length > 0) {
@@ -1419,11 +1428,11 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
     });
     output.assign({ applied: true, result });
     if (result.type === "favourite-albums") {
-      logger.info(`\nAdded ${result.added} releases to your favourite albums.`);
+      logger.info(`\nAdded ${count(result.added, "release")} to your favourite albums.`);
       return;
     }
     logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.trackCount} tracks${excludedNote(result.excludedCount)}.`,
+      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")}${excludedNote(result.excludedCount)}.`,
     );
     if (result.failedAlbumIds.length > 0) {
       logger.warn(`could not fetch tracks for releases: ${result.failedAlbumIds.join(", ")}`);
@@ -1474,8 +1483,8 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
     if (!parsed.apply) {
       logger.info(
         parsed.addTo === undefined
-          ? `\n(dry run -- pass --apply to create "${name}" with ${trackIds.length} songs)`
-          : `\n(dry run -- pass --apply to add ${trackIds.length} songs to playlist ${parsed.addTo})`,
+          ? `\n(dry run -- pass --apply to create "${name}" with ${count(trackIds.length, "song")})`
+          : `\n(dry run -- pass --apply to add ${count(trackIds.length, "song")} to playlist ${parsed.addTo})`,
       );
       return;
     }
@@ -1489,8 +1498,8 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
     output.assign({ applied: true, result });
     logger.info(
       result.playlist === undefined
-        ? `\nAdded ${result.added.length} songs to the playlist${result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : ""}.`
-        : `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${result.added.length} songs.`,
+        ? `\nAdded ${count(result.added.length, "song")} to the playlist${result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : ""}.`
+        : `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.added.length, "song")}.`,
     );
   };
 }
@@ -1504,7 +1513,7 @@ function reportWordPlay(plan: WordPlayPlan, split: WordPlaySplit): void {
     logger.info(`  ${label}  ->  ${describeSlot(slot)}`);
   });
   if (plan.requested !== undefined && split.songCount < plan.requested) {
-    logger.warn(`only ${split.songCount} of ${plan.requested} songs found`);
+    logger.warn(`only ${split.songCount} of ${count(plan.requested, "song")} found`);
   }
   if (split.unmatched.length > 0) {
     logger.warn(`nothing found for: ${split.unmatched.join(", ")}`);
@@ -1515,7 +1524,7 @@ function reportWordPlay(plan: WordPlayPlan, split: WordPlaySplit): void {
       const gaps =
         other.unmatched.length > 0 ? `; nothing for: ${other.unmatched.join(", ")}` : "";
       logger.info(
-        `  ${other.slots.map((slot) => slot.label).join(" / ")}  (${other.songCount} songs${gaps})`,
+        `  ${other.slots.map((slot) => slot.label).join(" / ")}  (${count(other.songCount, "song")}${gaps})`,
       );
     }
   }
