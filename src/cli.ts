@@ -905,7 +905,23 @@ async function runServe(
   if (options.open) {
     openInBrowser(server.url);
   }
-  const deps = jobRunnerDeps(journal, async () => ({ ok: true, client: recorded }));
+  // After the session expired, pick up a sign-in made elsewhere (qobuz-helper
+  // login in another terminal) before running again.
+  const deps = jobRunnerDeps(journal, async () => {
+    if (fileGlobalStore().load().needsSignIn !== undefined) {
+      try {
+        await restoreOrLogin(client, fileTokenStore(), async () => {
+          throw new QobuzError("authentication", "not signed in; run qobuz-helper login");
+        });
+      } catch (error) {
+        if (error instanceof QobuzError && error.kind === "authentication") {
+          return { ok: false, reason: "needs-sign-in", message: error.message };
+        }
+        throw error;
+      }
+    }
+    return { ok: true, client: recorded };
+  });
   let running = false;
   const tick = async (): Promise<void> => {
     if (running) {
