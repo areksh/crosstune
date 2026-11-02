@@ -279,7 +279,7 @@ async function onCommit(): Promise<void> {
       playlist?: Playlist;
       added: number[];
       skipped: number[];
-    }>("POST", "/api/commit", { target, trackIds });
+    }>("POST", "/api/commit", { tool: "playlist-from-artists", target, trackIds });
     showResult(resultNode, target, result);
     setStep("playlist-steps", 3);
   } catch (error) {

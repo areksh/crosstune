@@ -51,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- History & undo. Every change qobuz-helper makes to your account -- from the
+  CLI or the web UI -- is recorded in `history.jsonl` beside the session
+  (owner-only; the last 200 entries, up to 90 days), one entry per action:
+  playlists created, tracks added, removed or moved, favourites added or
+  removed. `qobuz-helper history [--limit N]` lists them; `qobuz-helper undo
+  [<id>] [--apply]` shows how one would be reversed and, with `--apply`,
+  reverses it: added tracks are taken out, removed tracks go back in their old
+  places, a playlist the change created is deleted (if it holds nothing else),
+  and favourites are re-added or removed. Undos are recorded too, and can be
+  undone to redo. The web UI gains a History view (under *Your data*) with a
+  confirm step before each undo, and a "Last change" strip on the home page.
+  The Qobuz client gains `deletePlaylist`, `getPlaylist`,
+  `removeFavoriteAlbums` and `removeFavoriteArtists`. See ADR-0006.
 - Qobuz links wherever a list is typed. Artist links resolve by id (no name
   search) in playlist from artists, similar artists and a discography, and are
   marked "from a link"; album links resolve to that exact release in playlist

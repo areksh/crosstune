@@ -150,8 +150,18 @@
  *       albums. With --apply, put them in a new playlist (--name) or add them
  *       to your favourite albums; otherwise it only reports.
  *
+ *   qobuz-helper history [--limit N]
+ *       List the changes qobuz-helper made to your account (newest first):
+ *       each entry's id, time, what it did, and how much it added/removed.
+ *
+ *   qobuz-helper undo [<id>] [--apply]
+ *       Show how an entry (by default the latest change not yet undone) would
+ *       be reversed; with --apply, reverse it. The undo is recorded too.
+ *
  * With no command, `check` runs. The session is stored at
- * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only).
+ * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only), and every change a
+ * command makes is recorded in history.jsonl beside it (see
+ * src/features/journal.ts).
  *
  * A global `--loglevel <silent|error|warn|info|debug>` option (default `info`)
  * controls how much is logged; it may appear anywhere in the arguments.
@@ -170,19 +180,23 @@ import {
   parseCombineArgs,
   parseDedupeArgs,
   parseExportArgs,
+  parseHistoryArgs,
   parseImportArgs,
   parseNewReleasesArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
+  parseUndoArgs,
   parseWordPlayArgs,
   parseUpgradeArgs,
   type DedupeSource,
   type ExportArgs,
   type ImportArgs,
   type ImportTargetArg,
+  type UndoArgs,
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
+import { fileHistoryStore } from "./cli/history-store.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
@@ -289,6 +303,15 @@ import {
   DEFAULT_WINDOW_DAYS,
   findNewReleases,
 } from "./features/new-releases.js";
+import { formatHistoryList, selectEntry, toSummary, type HistorySource } from "./features/history.js";
+import { Journal, recordingClient } from "./features/journal.js";
+import {
+  applyUndo,
+  describeStep,
+  formatUndoPlan,
+  formatUndoResult,
+  planUndo,
+} from "./features/undo.js";
 import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
 
 /**
@@ -329,6 +352,22 @@ async function main(): Promise<void> {
     store.clear();
     logger.info(hadSession ? "Signed out." : "No saved session to clear.");
     output.set("cleared", hadSession);
+    output.flush();
+    return;
+  }
+
+  // Every change a command makes is recorded here (see recordingClient below).
+  const journal = openJournal("cli");
+
+  // `history` only reads the local history file.
+  if (command === "history") {
+    const { limit } = parseHistoryArgs(args.slice(1));
+    const items = journal.items().slice(0, limit);
+    output.set("entries", items.map(toSummary));
+    logger.info(formatHistoryList(items));
+    if (items.length > 0) {
+      logger.info("\nSee how one would be undone with: qobuz-helper undo <id>");
+    }
     output.flush();
     return;
   }
@@ -402,6 +441,11 @@ async function main(): Promise<void> {
       run = (client) => plan(client);
       break;
     }
+    case "undo": {
+      const parsed = parseUndoArgs(args.slice(1));
+      run = (client) => runUndo(client, journal, parsed);
+      break;
+    }
     default:
       logger.error(`Unknown command: ${command}`);
       printUsage();
@@ -428,17 +472,88 @@ async function main(): Promise<void> {
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
-  await run(client, session);
+  if (command === "ui") {
+    // The server records each web commit into a journal of its own.
+    await run(client, session);
+  } else {
+    // The command sees a client that records every change it makes, all of it
+    // one history entry (an undo records its own "Undid: ..." entry).
+    const recorded = recordingClient(client, journal);
+    await (command === "undo"
+      ? run(recorded, session)
+      : journal.run({ tool: command }, () => run(recorded, session)));
+  }
   output.flush();
+}
+
+/** The history journal, writing to the history file beside the session. */
+function openJournal(source: HistorySource): Journal {
+  return new Journal({
+    store: fileHistoryStore(),
+    source,
+    onWriteError: (error) =>
+      logger.warn(
+        `could not write the history file (${error instanceof Error ? error.message : String(error)}); this change cannot be undone with qobuz-helper`,
+      ),
+  });
+}
+
+/**
+ * Executor for `undo`: show how the chosen entry would be reversed, and with
+ * --apply reverse it (recorded as an entry of its own).
+ */
+async function runUndo(client: QobuzClient, journal: Journal, args: UndoArgs): Promise<void> {
+  const items = journal.items();
+  const item = selectEntry(items, args.id);
+  if (item === undefined) {
+    if (args.id !== undefined) {
+      throw new Error(`No history entry ${args.id} (see qobuz-helper history).`);
+    }
+    output.assign({ entry: null, applied: false });
+    logger.info("Nothing to undo.");
+    return;
+  }
+  const plan = await planUndo(client, item, items);
+  output.assign({
+    entry: toSummary(item),
+    plan: {
+      steps: plan.steps.map(describeStep),
+      notes: plan.notes,
+      warnings: plan.warnings,
+      ...(plan.blocked !== undefined && { blocked: plan.blocked }),
+    },
+    applied: false,
+  });
+  logger.info(formatUndoPlan(plan));
+  if (plan.blocked !== undefined) {
+    process.exitCode = 1;
+    return;
+  }
+  if (!args.apply) {
+    logger.info(`\n(dry run -- pass --apply to undo it: qobuz-helper undo ${item.id} --apply)`);
+    return;
+  }
+  const outcome = await applyUndo(journal, client, item, plan);
+  output.assign({ applied: true, result: outcome });
+  logger.info(`\n${formatUndoResult(outcome)}`);
+  if (outcome.undone) {
+    logger.info(`\nUndone; recorded as ${outcome.entryId}.`);
+  } else {
+    logger.warn("nothing could be undone; the entry is left as it was so you can try again");
+    process.exitCode = 1;
+  }
 }
 
 /**
  * Serve the web UI locally and open it in the browser. The client (already
  * signed in) is the API's Qobuz backend; the server runs until interrupted.
+ * Every change the UI commits is recorded in the history, as web entries.
  */
 async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
+  const journal = openJournal("web");
   const server = await startServer({
-    service: client,
+    service: recordingClient(client, journal),
+    history: { journal },
     session: {
       displayName: session.displayName,
       subscriptionLabel: session.subscriptionLabel,
@@ -1572,6 +1687,8 @@ function printUsage(): void {
       "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>",
       "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
       "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
+      "  qobuz-helper history [--limit N]",
+      "  qobuz-helper undo [<id>] [--apply]",
       '  qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
       "",
       "Global options:",
@@ -1596,6 +1713,8 @@ function printUsage(): void {
       "import resolves and reports only unless --apply is given; --account restores a backup; a Spotify playlist exported with Exportify (CSV) is recognised and matched by ISRC first.",
       'combine reports only unless --apply is given; the new playlist is named "A + B" unless --name is given.',
       'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
+      "Every change is recorded in history.jsonl beside the session (the last 200, up to 90 days); history lists them (--limit, default 20).",
+      "undo shows how the latest change not yet undone (or the entry <id>) would be reversed, and reverses it only with --apply.",
       "word-play reports only unless --apply is given; --split defaults to fewest, --max-span to 6 (1-8), --count to 25 (1-100); the playlist is named after the text unless --name is given.",
     ].join("\n"),
   );

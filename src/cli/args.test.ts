@@ -6,11 +6,13 @@ import {
   parseCombineArgs,
   parseDedupeArgs,
   parseExportArgs,
+  parseHistoryArgs,
   parseImportArgs,
   parseNewReleasesArgs,
   parsePlaylistArgs,
   parseSimilarArgs,
   parseStatsArgs,
+  parseUndoArgs,
   parseUpgradeArgs,
   parseWordPlayArgs,
 } from "./args.js";
@@ -1016,5 +1018,37 @@ describe("playlist plan flags", () => {
     expect(parsed.plan).toEqual({ order: "shuffle", skipFavourites: false, oneCopy: true });
     expect(parsed.skipFavouriteArtists).toBe(true);
     expect(parseSimilarArgs(["--name", "x", "A"]).skipFavouriteArtists).toBeUndefined();
+  });
+});
+
+describe("parseHistoryArgs", () => {
+  it("lists the last 20 entries by default", () => {
+    expect(parseHistoryArgs([])).toEqual({ limit: 20 });
+  });
+
+  it("takes --limit", () => {
+    expect(parseHistoryArgs(["--limit", "5"])).toEqual({ limit: 5 });
+  });
+
+  it("rejects a bad limit or an unknown argument", () => {
+    expect(() => parseHistoryArgs(["--limit", "0"])).toThrow(/--limit must be a whole number from 1 to 200/);
+    expect(() => parseHistoryArgs(["--limit"])).toThrow(/--limit/);
+    expect(() => parseHistoryArgs(["--all"])).toThrow(/Unknown argument: --all/);
+  });
+});
+
+describe("parseUndoArgs", () => {
+  it("undoes the latest change, as a report only, by default", () => {
+    expect(parseUndoArgs([])).toEqual({ apply: false });
+  });
+
+  it("takes an entry id and --apply", () => {
+    expect(parseUndoArgs(["a1b2c3d4", "--apply"])).toEqual({ id: "a1b2c3d4", apply: true });
+  });
+
+  it("rejects two ids, an odd id or an unknown flag", () => {
+    expect(() => parseUndoArgs(["a1", "b2"])).toThrow(/only one entry id/);
+    expect(() => parseUndoArgs(["../x"])).toThrow(/not an entry id/);
+    expect(() => parseUndoArgs(["--yes"])).toThrow(/Unknown argument: --yes/);
   });
 });

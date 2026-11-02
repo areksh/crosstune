@@ -10,6 +10,7 @@ export default defineConfig({
       // Excluded: DOM/socket/process I/O glue with no meaningful unit under test.
       exclude: [
         "src/**/*.test.ts",
+        "src/**/*.test-support.ts",
         "src/cli.ts",
         "src/web/**",
         "src/server/http.ts",

@@ -60,6 +60,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   -- including a Spotify playlist exported with Exportify -- matching each entry
   to Qobuz by its id, its ISRC, or by search. Available on the CLI and in the
   web UI.
+- **History & undo** -- every change qobuz-helper makes to your account is
+  recorded on your machine, one entry per action, and any entry can be undone:
+  what it added is taken out, what it removed is put back in its old place, and
+  a playlist it created is deleted. Available on the CLI and in the web UI (see
+  [History and undo](#history-and-undo)).
 
 The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
@@ -590,6 +595,84 @@ an album the artist first released before the window. Editions of one new album
 releases come from `artist/getReleasesList`, the undocumented endpoint the Qobuz
 web player uses.
 
+#### History and undo
+
+```sh
+# The latest changes, newest first (id, time, what, +added/-removed)
+npm run dev -- history
+npm run dev -- history --limit 50
+
+# What undoing the latest change would do (report only), then do it
+npm run dev -- undo
+npm run dev -- undo --apply
+
+# Undo a particular entry, by the id `history` shows
+npm run dev -- undo 9f0dce48 --apply
+```
+
+**What is recorded.** Every change any tool makes to your account, from the
+CLI or the web UI: playlists created (and deleted, by undo), tracks added to
+and removed from playlists, entries moved, and tracks, albums and artists added
+to or removed from your favourites. Recording sits underneath the tools, in the
+Qobuz client itself, so no tool can skip it. Each command, or each save in the
+web UI, is one entry with a label ("Created Road Trip with 15 tracks",
+"Removed 12 duplicates from Favourites", "Upgraded 4 tracks in Late Night"),
+the tool, where it ran and when. An action that fails part-way still records
+what it did change. Dry runs change nothing and record nothing.
+
+To be able to reverse a change, recording reads a little more: a playlist is
+read back after tracks are added to it (to learn the new entries), and read
+before tracks are removed from it (to keep each removed track and its
+position). A removal or deletion whose playlist cannot be read first is not
+made.
+
+**Where, and for how long.** In `$XDG_CONFIG_HOME/qobuz-helper/history.jsonl`
+(usually `~/.config/qobuz-helper/`), beside the session, readable by you only.
+It is a JSON Lines file, one record per line, only ever appended to; undoing
+appends a marker rather than editing the entry. The last 200 entries, up to 90
+days old, are kept; older ones are dropped the next time something is written.
+
+**What undo does.** For each playlist an entry touched, undo removes the
+entries it added (by their entry ids, so copies of the same track you added
+yourself are left alone), puts the tracks it removed back -- appended, then
+moved to their old positions -- and deletes a playlist the entry created if it
+still holds only what the entry put there (otherwise it removes just those
+tracks and keeps the playlist). Favourites it added are removed and favourites
+it removed are added back. `undo` without an id picks the latest change that is
+neither undone nor itself an undo, so running it again walks back through your
+history. The undo is recorded as an entry of its own ("Undid: ..."), which can
+in turn be undone to redo the change; an entry cannot be undone twice. A step
+that fails is reported and the others still run.
+
+Undoing an entry that is not the latest is allowed; you are warned when later
+entries touched the same playlist or favourites, since undo then cannot always
+restore exactly what it found.
+
+**What undo cannot restore.**
+
+- Anything done outside qobuz-helper: edits in the Qobuz apps are not recorded,
+  and a playlist's name or description changed elsewhere stays changed.
+- Tracks already gone: added tracks you have since removed are skipped (and
+  listed), and a playlist deleted since cannot have its changes undone.
+- Tracks Qobuz no longer streams may not go back into a playlist or your
+  favourites.
+- Favourites come back as newly added, so their "date added" order is not the
+  original one.
+- Old positions assume the rest of the playlist is as the entry left it; after
+  other changes, tracks go back at the same index, which may now be a different
+  spot. If a move fails, the tracks stay at the end of the playlist (and undo
+  says so).
+- Reordering of tracks the entry did not add is reported, not reversed.
+- A deleted playlist (undoing an undo) comes back as a new playlist, with a new
+  id and link.
+
+In the web UI, **History** (under *Your data*) lists the entries by day with
+their `+`/`-` counts; **Undo** first shows exactly what will be reversed, with
+any notes and warnings, and only acts on confirmation. Undone entries are
+dimmed. The home page shows the latest change with links to undo it or open
+the history. With `--json`, `history` prints `entries` and `undo` prints
+`entry`, `plan` (`steps`, `notes`, `warnings`), `applied` and `result`.
+
 If the browser does not open automatically, the CLI prints the URL to visit.
 
 #### Logging
@@ -641,6 +724,8 @@ the write's `"result"`.
 | `word-play`, `combine` | `plan`, `name`, `trackIds`, `applied`, `result` |
 | `stats` | the stats themselves (`label`, `trackCount`, `artistCount`, `totalDuration`, `quality`, `decades`, `topArtists`, `topArtistsShare`, `topAlbums`, `headline`), then `decadePlaylist` with `--decade-playlist` |
 | `playlist-from-artists`, `playlist-from-albums` | `applied`, `result` (the created playlist and per-artist or per-album details) |
+| `history` | `entries` (each `id`, `at`, `tool`, `toolName`, `source`, `label`, `added`, `removed`, and `undoes`, `undoneAt`, `error` when set) |
+| `undo` | `entry`, `plan` (`steps`, `notes`, `warnings`, `blocked`), `applied`, `result` (`done`, `failed`, `notes`, `undone`, `entryId`) |
 | `check`, `logout` | `favouriteTracks`; `cleared` |
 
 `stats --json` keeps printing the same fields as before (now with `"command"`

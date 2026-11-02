@@ -261,6 +261,7 @@ async function onCommit(): Promise<void> {
   button.textContent = "Saving...";
   try {
     const result = await api<{ playlist?: Playlist; added: number[] }>("POST", "/api/commit", {
+      tool: "stats",
       target: {
         type: "new",
         name,

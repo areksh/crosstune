@@ -8,6 +8,8 @@ import {
   type Release,
   type Track,
 } from "../qobuz/index.js";
+import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
+import { Journal, recordingClient } from "../features/journal.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
 const NONCE = "test-nonce";
@@ -37,6 +39,9 @@ function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
     addTracksToPlaylist: vi.fn(async () => {}),
     removeTracksFromPlaylist: vi.fn(async () => {}),
     removeFavoriteTracks: vi.fn(async () => {}),
+    removeFavoriteAlbums: vi.fn(async () => {}),
+    removeFavoriteArtists: vi.fn(async () => {}),
+    deletePlaylist: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -2003,5 +2008,165 @@ describe("Qobuz links in lists", () => {
       deps({ service: svc }),
     );
     expect(bad.status).toBe(400);
+  });
+});
+
+/** A web journal over an in-memory account, as `qobuz-helper ui` wires it. */
+function historyDeps() {
+  const store = new MemoryStore();
+  let n = 0;
+  let minute = 0;
+  const journal = new Journal({
+    store,
+    source: "web",
+    now: () => new Date(Date.UTC(2026, 10, 2, 20, minute++)),
+    newId: () => `w${++n}`,
+  });
+  const account = new FakeAccount();
+  const svc = service({
+    createPlaylist: (name, options) => account.createPlaylist(name, options),
+    getPlaylistTracks: (id) => account.getPlaylistTracks(id),
+    addTracksToPlaylist: (id, ids) => account.addTracksToPlaylist(id, ids),
+    removeTracksFromPlaylist: (id, ids) => account.removeTracksFromPlaylist(id, ids),
+    deletePlaylist: (id) => account.deletePlaylist(id),
+    addFavoriteTracks: (ids) => account.addFavoriteTracks(ids),
+    removeFavoriteTracks: (ids) => account.removeFavoriteTracks(ids),
+  });
+  return {
+    journal,
+    account,
+    deps: deps({ service: recordingClient(svc, journal), history: { journal } }),
+  };
+}
+
+describe("history of web commits", () => {
+  it("records each write route as one entry named after its tool", async () => {
+    const { journal, account, deps: d } = historyDeps();
+    account.favourites.tracks = [1, 2];
+    const res = await handleApi(
+      request("POST", "/api/deduplicate/apply", {
+        source: { type: "favourites" },
+        removals: [{ id: 2 }],
+      }),
+      d,
+    );
+    expect(res.status).toBe(200);
+    expect(journal.items()).toEqual([
+      expect.objectContaining({
+        tool: "deduplicate",
+        source: "web",
+        label: "Removed 1 duplicate from Favourites",
+      }),
+    ]);
+  });
+
+  it("names a playlist commit after the tool that sent it", async () => {
+    const { journal, deps: d } = historyDeps();
+    const res = await handleApi(
+      request("POST", "/api/commit", {
+        tool: "combine",
+        target: { type: "new", name: "A + B" },
+        trackIds: [5, 6],
+      }),
+      d,
+    );
+    expect(res.status).toBe(200);
+    expect(journal.items()[0]).toMatchObject({ tool: "combine", label: "Created A + B with 2 tracks" });
+  });
+
+  it("rejects an unknown tool name", async () => {
+    const res = await handleApi(
+      request("POST", "/api/commit", {
+        tool: "rm -rf",
+        target: { type: "new", name: "x" },
+        trackIds: [5],
+      }),
+      historyDeps().deps,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/history", () => {
+  it("is not found without a history", async () => {
+    const res = await handleApi(request("GET", "/api/history"), deps());
+    expect(res.status).toBe(404);
+  });
+
+  it("lists entries newest first, as summaries", async () => {
+    const { journal, deps: d } = historyDeps();
+    journal.record({ kind: "add-favourites", type: "tracks", ids: [1, 2] });
+    journal.record({ kind: "remove-favourites", type: "tracks", ids: [3] });
+    const res = await handleApi(request("GET", "/api/history"), d);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      entries: [
+        {
+          id: "w2",
+          at: "2026-11-02T20:01:00.000Z",
+          tool: "other",
+          toolName: "Other",
+          source: "web",
+          label: "Removed 1 track from Favourites",
+          added: 0,
+          removed: 1,
+        },
+        expect.objectContaining({ id: "w1", added: 2, removed: 0 }),
+      ],
+    });
+  });
+});
+
+describe("POST /api/history/plan and /api/history/undo", () => {
+  async function created() {
+    const h = historyDeps();
+    await handleApi(
+      request("POST", "/api/commit", {
+        tool: "playlist-from-artists",
+        target: { type: "new", name: "Road Trip" },
+        trackIds: [5, 6],
+      }),
+      h.deps,
+    );
+    return { ...h, id: h.journal.items()[0]!.id };
+  }
+
+  it("shows what undoing would reverse, changing nothing", async () => {
+    const { account, deps: d, id } = await created();
+    const res = await handleApi(request("POST", "/api/history/plan", { id }), d);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      entry: expect.objectContaining({ id, label: "Created Road Trip with 2 tracks" }),
+      steps: ["Delete the playlist Road Trip (2 tracks)"],
+      notes: [],
+      warnings: [],
+    });
+    expect(account.playlists.size).toBe(1);
+  });
+
+  it("undoes an entry, records the undo, and refuses to undo it twice", async () => {
+    const { journal, account, deps: d, id } = await created();
+    const res = await handleApi(request("POST", "/api/history/undo", { id }), d);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      entryId: expect.any(String),
+      undone: true,
+      done: ["Delete the playlist Road Trip (2 tracks)"],
+      failed: [],
+      notes: [],
+    });
+    expect(account.playlists.size).toBe(0);
+    expect(journal.items()[0]).toMatchObject({ tool: "undo", source: "web", undoes: id });
+
+    const again = await handleApi(request("POST", "/api/history/undo", { id }), d);
+    expect(again.status).toBe(409);
+    expect(again.body).toEqual({ error: expect.stringMatching(/^Already undone/) });
+  });
+
+  it("validates the id", async () => {
+    const { deps: d } = historyDeps();
+    expect((await handleApi(request("POST", "/api/history/plan", {}), d)).status).toBe(400);
+    expect((await handleApi(request("POST", "/api/history/plan", { id: "nope" }), d)).status).toBe(404);
+    expect((await handleApi(request("POST", "/api/history/undo", { id: 7 }), d)).status).toBe(400);
   });
 });

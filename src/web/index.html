@@ -44,6 +44,7 @@
           <div class="nav-group">
             <span class="nav-label">Your data</span>
             <a class="nav-link" data-view="import-export" href="#/import-export">Import &amp; export</a>
+            <a class="nav-link" data-view="history" href="#/history">History</a>
           </div>
         </nav>
         <div class="sidebar-footer">
@@ -85,6 +86,13 @@
               <p id="home-note" class="hint" hidden></p>
             </div>
           </section>
+          <!-- The latest recorded change, filled in by views/history.ts. -->
+          <div id="home-last-change" class="last-change" hidden>
+            <span class="last-change-label">Last change</span>
+            <span id="home-last-text" class="last-change-text"></span>
+            <a id="home-last-undo" href="#/history">Undo</a>
+            <a href="#/history">History</a>
+          </div>
           <!-- Each tool is one tool-link block in its group. -->
           <div class="tool-groups">
             <section class="tool-group">
@@ -165,6 +173,13 @@
                 <span class="tool-desc">
                   Favourites and playlists in and out as JSON, CSV, text or M3U,
                   and whole-account backups.
+                </span>
+              </a>
+              <a class="tool-link" href="#/history">
+                <span class="tool-name">History</span>
+                <span class="tool-desc">
+                  Every change qobuz-helper made to your account, each one a
+                  click from undone.
                 </span>
               </a>
             </section>
@@ -1646,6 +1661,29 @@
               <p id="ie-commit-result" class="result" hidden></p>
             </section>
           </section>
+        </section>
+
+        <!-- History -->
+        <section id="view-history" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>History</h1>
+              <p class="lede">
+                Every change qobuz-helper made to your account, saved on this
+                computer. Undo takes out what was added and puts back what was
+                removed.
+              </p>
+            </div>
+          </header>
+
+          <p id="history-result" class="result" role="status" hidden></p>
+          <p id="history-status" class="hint" aria-live="polite">Loading...</p>
+          <p id="history-error" class="error" hidden></p>
+          <div id="history-days" class="history-days"></div>
+          <p class="hint history-cli">
+            From the command line: <code>qobuz-helper history</code> and
+            <code>qobuz-helper undo</code>.
+          </p>
         </section>
       </main>
     </div>

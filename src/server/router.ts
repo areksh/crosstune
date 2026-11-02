@@ -137,6 +137,9 @@ import {
   type UpgradeChange,
   type UpgradeSource,
 } from "../features/upgrade.js";
+import { HISTORY_TOOLS, toSummary } from "../features/history.js";
+import type { Journal } from "../features/journal.js";
+import { applyUndo, describeStep, planUndo } from "../features/undo.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -172,6 +175,10 @@ export interface QobuzApiService {
     playlistTrackIds: readonly number[],
   ): Promise<void>;
   removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
+  /** Used by undo. */
+  removeFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
+  removeFavoriteArtists(artistIds: readonly number[]): Promise<void>;
+  deletePlaylist(playlistId: number): Promise<void>;
   /**
    * Move playlist entries into place (upgrade & repair). Optional: its endpoint
    * is unverified, and without it replacements stay at the end of a playlist.
@@ -189,10 +196,16 @@ export interface SessionInfo {
 }
 
 export interface ApiDeps {
+  /**
+   * The Qobuz client. With `history`, it should record into that journal
+   * (see recordingClient), so every change a route makes is in the history.
+   */
   service: QobuzApiService;
   session: SessionInfo;
   nonce: string;
   port: number;
+  /** The change history; without it the history routes answer 404. */
+  history?: { journal: Journal };
 }
 
 export interface ApiRequest {
@@ -247,7 +260,47 @@ export async function handleApi(
   }
 }
 
+/**
+ * The routes that write to the account, and the tool each is recorded as in
+ * the history. `/api/commit` serves several tools, which name themselves in
+ * the body's `tool`.
+ */
+const WRITE_ROUTES: Record<string, string> = {
+  "/api/commit": "playlist",
+  "/api/new-releases/commit": "new-releases",
+  "/api/deduplicate/apply": "deduplicate",
+  "/api/upgrade/commit": "upgrade",
+  "/api/import/commit": "import",
+  "/api/restore": "restore",
+  "/api/word-play/commit": "word-play",
+};
+
+/** Run a write route as one history entry; everything else as is. */
 async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  const defaultTool = req.method === "POST" ? WRITE_ROUTES[req.path] : undefined;
+  if (defaultTool === undefined) {
+    return route(req, deps);
+  }
+  const named = isRecord(req.body) ? req.body["tool"] : undefined;
+  if (named !== undefined && (typeof named !== "string" || !HISTORY_TOOLS.includes(named))) {
+    return { status: 400, body: { error: `unknown tool: ${String(named)}` } };
+  }
+  const tool = typeof named === "string" ? named : defaultTool;
+  return deps.history === undefined
+    ? route(req, deps)
+    : deps.history.journal.run({ tool }, () => route(req, deps));
+}
+
+async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  if (req.method === "GET" && req.path === "/api/history") {
+    return historyList(deps);
+  }
+  if (req.method === "POST" && req.path === "/api/history/plan") {
+    return historyPlan(req.body, deps);
+  }
+  if (req.method === "POST" && req.path === "/api/history/undo") {
+    return historyUndo(req.body, deps);
+  }
   if (req.method === "GET" && req.path === "/api/session") {
     return { status: 200, body: deps.session };
   }
@@ -322,6 +375,79 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     return wordPlayCommit(req.body, deps);
   }
   return { status: 404, body: { error: "not found" } };
+}
+
+const NO_HISTORY: ApiResponse = { status: 404, body: { error: "history is not available" } };
+
+/** Every recorded change, newest first, summarised. */
+function historyList(deps: ApiDeps): ApiResponse {
+  if (deps.history === undefined) {
+    return NO_HISTORY;
+  }
+  return { status: 200, body: { entries: deps.history.journal.items().map(toSummary) } };
+}
+
+/** Find the entry named by `body.id`, or the response saying why not. */
+function findEntry(body: unknown, journal: Journal) {
+  const id = isRecord(body) ? body["id"] : undefined;
+  if (typeof id !== "string" || !/^[A-Za-z0-9]{1,40}$/.test(id)) {
+    return { response: { status: 400, body: { error: "an entry id is required" } } };
+  }
+  const items = journal.items();
+  const item = items.find((entry) => entry.id === id);
+  if (item === undefined) {
+    return { response: { status: 404, body: { error: `no history entry ${id}` } } };
+  }
+  return { item, items };
+}
+
+/** What undoing an entry would reverse (reads the account, changes nothing). */
+async function historyPlan(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (deps.history === undefined) {
+    return NO_HISTORY;
+  }
+  const found = findEntry(body, deps.history.journal);
+  if (found.response !== undefined) {
+    return found.response;
+  }
+  const plan = await planUndo(deps.service, found.item, found.items);
+  return {
+    status: 200,
+    body: {
+      entry: toSummary(found.item),
+      steps: plan.steps.map(describeStep),
+      notes: plan.notes,
+      warnings: plan.warnings,
+      ...(plan.blocked !== undefined && { blocked: plan.blocked }),
+    },
+  };
+}
+
+/** Undo an entry, planned afresh against the account as it is now. */
+async function historyUndo(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
+  if (deps.history === undefined) {
+    return NO_HISTORY;
+  }
+  const { journal } = deps.history;
+  const found = findEntry(body, journal);
+  if (found.response !== undefined) {
+    return found.response;
+  }
+  const plan = await planUndo(deps.service, found.item, found.items);
+  if (plan.blocked !== undefined) {
+    return { status: 409, body: { error: plan.blocked } };
+  }
+  const outcome = await applyUndo(journal, deps.service, found.item, plan);
+  return {
+    status: 200,
+    body: {
+      entryId: outcome.entryId,
+      undone: outcome.undone,
+      done: outcome.done,
+      failed: outcome.failed,
+      notes: outcome.notes,
+    },
+  };
 }
 
 async function resolve(body: unknown, deps: ApiDeps): Promise<ApiResponse> {

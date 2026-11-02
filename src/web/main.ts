@@ -14,6 +14,7 @@ import { applyPrefill } from "./prefill.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
+import { initHistoryView, initLastChange } from "./views/history.js";
 import { initHomeView } from "./views/home.js";
 import { initImportExportView } from "./views/import-export.js";
 import { initNewReleasesView } from "./views/new-releases.js";
@@ -35,6 +36,7 @@ const VIEWS = [
   "stats",
   "new-releases",
   "import-export",
+  "history",
 ] as const;
 type View = (typeof VIEWS)[number];
 
@@ -86,6 +88,8 @@ initStatsView();
 initUpgradeView();
 initImportExportView();
 initNewReleasesView();
+initHistoryView();
+initLastChange();
 window.addEventListener("hashchange", route);
 route();
 void loadSession();

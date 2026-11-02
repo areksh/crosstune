@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   handleApi,
+  type ApiDeps,
   type ApiResponse,
   type QobuzApiService,
   type SessionInfo,
@@ -44,6 +45,8 @@ const STATIC_FILES: Record<string, string> = {
 export interface StartServerOptions {
   service: QobuzApiService;
   session: SessionInfo;
+  /** The change history the API lists and undoes (see ApiDeps). */
+  history?: ApiDeps["history"];
   /** Port to bind; 0 (default) picks an ephemeral free port. */
   port?: number;
   /** Directory holding the built frontend; defaults to the bundled `dist/web`. */
@@ -144,6 +147,7 @@ async function handle(
         session: options.session,
         nonce,
         port: address,
+        ...(options.history !== undefined && { history: options.history }),
       },
     );
     sendResponse(res, response);

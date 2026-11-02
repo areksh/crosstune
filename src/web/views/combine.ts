@@ -359,7 +359,7 @@ async function onCommit(): Promise<void> {
     const result = await api<{ playlist?: Playlist; added: number[]; skipped: number[] }>(
       "POST",
       "/api/commit",
-      { target, trackIds },
+      { tool: "combine", target, trackIds },
     );
     const skipped =
       result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : "";

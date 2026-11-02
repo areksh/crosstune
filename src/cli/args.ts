@@ -1643,3 +1643,65 @@ export function parseUpgradeArgs(argv: readonly string[]): UpgradeArgs {
   }
   return { source: sources[0]!, allowSignatureMatch, removeUnplayable, apply };
 }
+
+export interface HistoryArgs {
+  /** How many entries to list, newest first. */
+  limit: number;
+}
+
+/** Entries `history` lists unless --limit says otherwise. */
+const DEFAULT_HISTORY_LIMIT = 20;
+
+/**
+ * Parse `history` arguments: `--limit N` (1-200, default 20).
+ *
+ * @throws {Error} on a bad limit or an unknown argument.
+ */
+export function parseHistoryArgs(argv: readonly string[]): HistoryArgs {
+  let limit = DEFAULT_HISTORY_LIMIT;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg !== "--limit") {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+    const raw = argv[i + 1];
+    i += 1;
+    const value = raw === undefined ? NaN : Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 200) {
+      throw new Error(`--limit must be a whole number from 1 to 200, got "${raw}"`);
+    }
+    limit = value;
+  }
+  return { limit };
+}
+
+export interface UndoArgs {
+  /** The entry to undo; the latest change when absent. */
+  id?: string;
+  apply: boolean;
+}
+
+/**
+ * Parse `undo` arguments: an optional entry id (as `history` lists it) and
+ * `--apply` (otherwise it only reports what would be reversed).
+ *
+ * @throws {Error} on two ids, a malformed id, or an unknown flag.
+ */
+export function parseUndoArgs(argv: readonly string[]): UndoArgs {
+  let id: string | undefined;
+  let apply = false;
+  for (const arg of argv) {
+    if (arg === "--apply") {
+      apply = true;
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown argument: ${arg}`);
+    } else if (id !== undefined) {
+      throw new Error("Give only one entry id to undo");
+    } else if (!/^[A-Za-z0-9]{1,40}$/.test(arg)) {
+      throw new Error(`"${arg}" is not an entry id (see qobuz-helper history)`);
+    } else {
+      id = arg;
+    }
+  }
+  return id === undefined ? { apply } : { id, apply };
+}
