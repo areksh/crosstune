@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A change could vanish from the history when two qobuz-helper processes
   wrote it at the same moment (say the CLI while the web UI was open): trimming
   the history rewrites the file from what it read, dropping a record the other
-  process appended in between. Trimming now holds a lock file, and appends
-  instead while another process holds it.
+  process appended in between. Every history write now holds a lock file
+  (waiting briefly while another process has it).
 
 - The deduplicator now removes a track that was added to a playlist twice.
   Both entries carry the same track id, and the plan marked "the track to

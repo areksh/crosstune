@@ -88,6 +88,15 @@ describe("formatJobList", () => {
     expect(text).toMatch(/sign in again/i);
   });
 
+  it("says when a job's state cannot be read", () => {
+    const text = formatJobList({
+      jobs: [{ job, state: emptyJobState(), recentRuns: [], stateError: "jobs-state/a1b2c3d4.json cannot be read" }],
+      invalid: [],
+      flags: {},
+    });
+    expect(text).toMatch(/skipped: jobs-state\/a1b2c3d4\.json cannot be read/);
+  });
+
   it("shows paused and disabled jobs", () => {
     const text = formatJobList({
       jobs: [

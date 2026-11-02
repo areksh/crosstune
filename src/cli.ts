@@ -405,6 +405,11 @@ async function main(): Promise<void> {
     });
     output.set("snippet", text);
     logger.info(text);
+    if (/[\\/]_npx[\\/]/.test(realpathSync(process.argv[1] ?? "."))) {
+      logger.warn(
+        "\nThis points into npx's temporary cache, which npm may clear; install qobuz-helper (npm install -g) and run schedule print from there.",
+      );
+    }
     if (/\.[cm]?ts$/.test(process.argv[1] ?? "")) {
       logger.warn(
         "\nThis points at the TypeScript source; run schedule print from a built install (npm run build, then node dist/cli.js) so the scheduler can run it.",

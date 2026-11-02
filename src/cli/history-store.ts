@@ -28,7 +28,16 @@ export function defaultHistoryPath(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /** A history store backed by the local history file. */
-export function fileHistoryStore(filePath: string = defaultHistoryPath()): HistoryStore {
+/** Block the thread for `ms` (the history writes are synchronous). */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function fileHistoryStore(
+  filePath: string = defaultHistoryPath(),
+  options: { lockWaitMs?: number } = {},
+): HistoryStore {
+  const lockWaitMs = options.lockWaitMs ?? 2_000;
   return {
     read: () => {
       try {
@@ -49,7 +58,12 @@ export function fileHistoryStore(filePath: string = defaultHistoryPath()): Histo
     },
     exclusive: <T>(fn: () => T): T | undefined => {
       mkdirSync(dirname(filePath), { recursive: true });
-      const lock = tryAcquireLock(`${filePath}.lock`, { staleMs: HISTORY_LOCK_STALE_MS });
+      // Another process holds the lock for milliseconds: wait a little.
+      let lock = tryAcquireLock(`${filePath}.lock`, { staleMs: HISTORY_LOCK_STALE_MS });
+      for (let waited = 0; lock === undefined && waited < lockWaitMs; waited += 25) {
+        pause(25);
+        lock = tryAcquireLock(`${filePath}.lock`, { staleMs: HISTORY_LOCK_STALE_MS });
+      }
       if (lock === undefined) {
         return undefined;
       }

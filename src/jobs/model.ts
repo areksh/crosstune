@@ -483,7 +483,16 @@ export function parseJobState(raw: unknown): JobState {
     const similar = record(value["similar"], "similar");
     state.similar = {
       takenAt: optionalString(similar["takenAt"], "similar takenAt") ?? "",
-      artists: Array.isArray(similar["artists"]) ? similar["artists"].map(artistRef) : [],
+      // Skip an unusable artist rather than lose the whole state over it.
+      artists: Array.isArray(similar["artists"])
+        ? similar["artists"].flatMap((raw: unknown) => {
+            try {
+              return [artistRef(raw)];
+            } catch {
+              return [];
+            }
+          })
+        : [],
     };
   }
   if (value["lastResult"] !== undefined) {

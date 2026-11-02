@@ -13,6 +13,14 @@ export class JobsFileError extends Error {
   }
 }
 
+/** A job's state file exists but cannot be read; the job must not start over. */
+export class JobStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "JobStateError";
+  }
+}
+
 export interface JobStore {
   /** @throws {JobsFileError} when the file is unreadable or not a jobs file. */
   load(): { file: JobsFile; invalid: InvalidJob[] };
@@ -21,7 +29,12 @@ export interface JobStore {
 }
 
 export interface JobStateStore {
-  /** The job's state; the empty state when there is none or it is unreadable. */
+  /**
+   * The job's state; the empty state when there is none yet.
+   *
+   * @throws {JobStateError} when it exists but cannot be read (starting over
+   *   would make a second playlist and forget what was dismissed).
+   */
   load(id: string): JobState;
   save(id: string, state: JobState): void;
   remove(id: string): void;

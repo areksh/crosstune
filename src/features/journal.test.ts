@@ -160,6 +160,30 @@ describe("Journal", () => {
     expect(replacedInside).toBe(true);
   });
 
+  it("appends inside the store's exclusive section too", () => {
+    let inside = false;
+    let appendedInside = false;
+    const store = new MemoryStore();
+    const original = store.append.bind(store);
+    store.append = (text: string) => {
+      appendedInside = inside;
+      original(text);
+    };
+    const locked = Object.assign(store, {
+      exclusive<T>(fn: () => T): T {
+        inside = true;
+        try {
+          return fn();
+        } finally {
+          inside = false;
+        }
+      },
+    });
+    const journal = new Journal({ store: locked, source: "web" });
+    journal.record(createOp);
+    expect(appendedInside).toBe(true);
+  });
+
   it("appends instead of compacting while the store is busy", () => {
     const store = Object.assign(new MemoryStore(), { exclusive: () => undefined });
     const journal = new Journal({

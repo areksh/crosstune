@@ -27,7 +27,13 @@ function setup() {
   const service = jobsService({
     jobs: { load: () => ({ file, invalid: [] }), save: (f) => void (file = f) },
     state: {
-      load: (id) => states.get(id) ?? emptyJobState(),
+      load: (id) => {
+        const state = states.get(id);
+        if ((state as unknown) === "unreadable") {
+          throw new Error(`jobs-state/${id}.json cannot be read`);
+        }
+        return state ?? emptyJobState();
+      },
       save: (id, s) => void states.set(id, s),
       remove: (id) => void states.delete(id),
     },
@@ -120,6 +126,22 @@ describe("jobsService", () => {
     expect(state.owned).toEqual([]);
     expect(state.nextRunAt).toBeUndefined();
     expect(state.dismissed).toEqual([3]);
+  });
+
+  it("resumes a job the user paused without forgetting its playlist", () => {
+    const { service, states } = setup();
+    const job = service.create(input, NOW);
+    const before = { ...emptyJobState(), playlistId: 5, owned: [{ playlistTrackId: 1, trackId: 2 }], nextRunAt: "x" };
+    states.set(job.id, before);
+    expect(service.resume(job.id)).toEqual(before);
+  });
+
+  it("lists a job whose state cannot be read, saying so", () => {
+    const { service, states } = setup();
+    const job = service.create(input, NOW);
+    states.set(job.id, "unreadable" as never);
+    const listed = service.list();
+    expect(listed.jobs[0]).toMatchObject({ job: { id: job.id }, stateError: expect.stringMatching(/cannot be read/) });
   });
 
   it("removes a job and its state, saying which playlist it managed", () => {

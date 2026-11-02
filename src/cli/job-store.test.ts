@@ -12,6 +12,7 @@ import {
   fileJobStore,
   fileRunLog,
   JobsFileError,
+  JobStateError,
   type RunRecord,
 } from "./job-store.js";
 
@@ -64,6 +65,16 @@ describe("fileJobStore", () => {
     expect(readFileSync(join(dir, "jobs.json"), "utf8")).toBe("{ not json");
   });
 
+  it("keeps invalid jobs, as they were, when saving the valid ones", () => {
+    const broken = { ...job, id: "bbbbbbbb", schedule: { every: "never" } };
+    writeFileSync(join(dir, "jobs.json"), JSON.stringify({ version: 1, jobs: [job, broken] }));
+    const store = fileJobStore(dir);
+    store.save({ version: 1, jobs: [{ ...job, name: "Renamed" }] });
+    const raw = JSON.parse(readFileSync(join(dir, "jobs.json"), "utf8")) as { jobs: unknown[] };
+    expect(raw.jobs).toEqual([{ ...job, name: "Renamed" }, broken]);
+    expect(store.load().invalid).toHaveLength(1);
+  });
+
   it("reports an invalid job and keeps the others", () => {
     writeFileSync(
       join(dir, "jobs.json"),
@@ -87,11 +98,11 @@ describe("fileJobStateStore", () => {
     expect(store.load("a1b2c3d4")).toEqual(emptyJobState());
   });
 
-  it("loads the empty state for a corrupt file", () => {
+  it("refuses a corrupt state file rather than starting over", () => {
     const store = fileJobStateStore(dir);
     store.save("a1b2c3d4", emptyJobState());
     writeFileSync(join(dir, "jobs-state", "a1b2c3d4.json"), "{");
-    expect(store.load("a1b2c3d4")).toEqual(emptyJobState());
+    expect(() => store.load("a1b2c3d4")).toThrow(JobStateError);
   });
 });
 

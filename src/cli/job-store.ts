@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { emptyJobState, parseJobsFile, parseJobState, type JobsFile } from "../jobs/model.js";
 import {
   JobsFileError,
+  JobStateError,
   RUN_LOG_LIMITS,
   type GlobalFlags,
   type GlobalStore,
@@ -35,6 +36,7 @@ import { configDir } from "./config-dir.js";
 
 export {
   JobsFileError,
+  JobStateError,
   type GlobalFlags,
   type GlobalStore,
   type JobStateStore,
@@ -63,13 +65,14 @@ function readText(path: string): string | undefined {
 
 export function fileJobStore(dir: string = configDir()): JobStore {
   const path = join(dir, "jobs.json");
-  const load = (): ReturnType<JobStore["load"]> => {
+  const read = (): { raw: unknown; parsed: ReturnType<JobStore["load"]> } | undefined => {
     const text = readText(path);
     if (text === undefined) {
-      return { file: { version: 1, jobs: [] }, invalid: [] };
+      return undefined;
     }
     try {
-      return parseJobsFile(JSON.parse(text));
+      const raw: unknown = JSON.parse(text);
+      return { raw, parsed: parseJobsFile(raw) };
     } catch (error) {
       throw new JobsFileError(
         `${path} cannot be read (${error instanceof Error ? error.message : String(error)}); fix or remove it`,
@@ -77,10 +80,14 @@ export function fileJobStore(dir: string = configDir()): JobStore {
     }
   };
   return {
-    load,
+    load: () => read()?.parsed ?? { file: { version: 1, jobs: [] }, invalid: [] },
     save: (file: JobsFile) => {
-      load(); // refuse to overwrite a file we cannot read
-      writeAtomically(path, `${JSON.stringify(file, null, 2)}\n`);
+      // Refuse to overwrite a file we cannot read, and keep the jobs that
+      // failed validation as they were (a hand edit to fix, not to lose).
+      const current = read();
+      const entries = (current?.raw as { jobs?: unknown[] } | undefined)?.jobs ?? [];
+      const invalid = (current?.parsed.invalid ?? []).map(({ index }) => entries[index]);
+      writeAtomically(path, `${JSON.stringify({ ...file, jobs: [...file.jobs, ...invalid] }, null, 2)}\n`);
     },
   };
 }
@@ -94,11 +101,14 @@ export function fileJobStateStore(dir: string = configDir()): JobStateStore {
   };
   return {
     load: (id) => {
+      let text: string | undefined;
       try {
-        const text = readText(pathOf(id));
+        text = readText(pathOf(id));
         return text === undefined ? emptyJobState() : parseJobState(JSON.parse(text));
-      } catch {
-        return emptyJobState();
+      } catch (error) {
+        throw new JobStateError(
+          `${pathOf(id)} cannot be read (${error instanceof Error ? error.message : String(error)}); fix or remove it`,
+        );
       }
     },
     save: (id, state) => writeAtomically(pathOf(id), `${JSON.stringify(state, null, 2)}\n`),

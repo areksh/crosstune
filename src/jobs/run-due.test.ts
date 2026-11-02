@@ -16,7 +16,7 @@ import {
 } from "./model.js";
 import { RefreshWriteError, type RefreshClient, type RefreshOutcome } from "./refresh.js";
 import { runDue, type RunDueDeps } from "./run-due.js";
-import { JobsFileError, type GlobalFlags, type RunRecord } from "./stores.js";
+import { JobsFileError, JobStateError, type GlobalFlags, type RunRecord } from "./stores.js";
 
 const NOW = new Date("2026-11-02T06:00:00.000Z");
 
@@ -227,6 +227,22 @@ describe("runDue", () => {
   it("throws for an unknown job id", async () => {
     const { deps } = setup([job("aaaaaaaa")]);
     await expect(runDue(deps, NOW, { onlyJobId: "ffffffff" })).rejects.toThrow(/No job ffffffff/);
+  });
+
+  it("skips a job whose state cannot be read, saving nothing for it", async () => {
+    const { deps, order, states, runs } = setup([job("aaaaaaaa"), job("bbbbbbbb")]);
+    const load = deps.state.load;
+    deps.state.load = (id: string) => {
+      if (id === "aaaaaaaa") {
+        throw new JobStateError("jobs-state/aaaaaaaa.json cannot be read");
+      }
+      return load(id);
+    };
+    const summary = await runDue(deps, NOW);
+    expect(order).toEqual(["bbbbbbbb"]);
+    expect(summary.invalid).toEqual([{ index: 0, id: "aaaaaaaa", error: expect.stringMatching(/cannot be read/) }]);
+    expect(states.has("aaaaaaaa")).toBe(false);
+    expect(runs.map((r) => r.jobId)).toEqual(["bbbbbbbb"]);
   });
 
   it("saves nothing on a dry run", async () => {

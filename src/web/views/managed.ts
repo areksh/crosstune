@@ -190,7 +190,7 @@ function describeStatus(job: Job, state: JobState): { text: string; attention: b
   return { text: `${last}; ${next}.`, attention: failing || state.lastResult?.status === "failed" };
 }
 
-function renderJob({ job, state, recentRuns }: JobView): HTMLElement {
+function renderJob({ job, state, recentRuns, stateError }: JobView): HTMLElement {
   const card = document.createElement("article");
   card.className = `managed-job${job.enabled ? "" : " disabled"}`;
   card.appendChild(text("h3", "", job.name));
@@ -202,7 +202,10 @@ function renderJob({ job, state, recentRuns }: JobView): HTMLElement {
       `${describeSchedule(job.schedule)} · ${describeWindow(job.recipe.window)} · ${job.edits === "respect" ? "respects your edits" : "strict mirror"}`,
     ),
   );
-  const status = describeStatus(job, state);
+  const status =
+    stateError === undefined
+      ? describeStatus(job, state)
+      : { text: `Skipped: ${stateError}.`, attention: true };
   card.appendChild(text("p", `managed-status${status.attention ? " attention" : ""}`, status.text));
   const note = el("managed-error");
 

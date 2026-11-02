@@ -170,6 +170,13 @@ describe("resolveNewReleasesFeed", () => {
     expect(result.tracks.map((t) => t.trackId)).toEqual([11, 13]);
   });
 
+  it("marks the run incomplete when there are more artists than it checks", async () => {
+    const many = Array.from({ length: 1001 }, (_, i) => ({ id: 1000 + i, name: `Artist ${i}` }));
+    const result = await resolveNewReleasesFeed(client(), def({ artists: { type: "list", artists: many } }), undefined, ctx());
+    expect(result.complete).toBe(false);
+    expect(result.notes.join(" ")).toMatch(/1,?000 of 1,?001/);
+  });
+
   it("gives the same tracks for the same inputs and state", async () => {
     const state = { similar: { takenAt: "2026-10-30T00:00:00.000Z", artists: [S] } };
     const recipe = def({ similar: { perArtist: 1, refreshDays: 30 } });

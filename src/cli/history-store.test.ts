@@ -25,7 +25,7 @@ describe("history-store", () => {
   });
 
   it("runs exclusive sections under a lock, refusing while another process holds it", () => {
-    const store = fileHistoryStore(file);
+    const store = fileHistoryStore(file, { lockWaitMs: 50 });
     expect(store.exclusive?.(() => "ran")).toBe("ran");
     const held = tryAcquireLock(`${file}.lock`, { isAlive: () => true });
     expect(held).toBeDefined();

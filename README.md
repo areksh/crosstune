@@ -740,8 +740,11 @@ the refresh adds what it can and removes nothing. If you delete a managed
 playlist in Qobuz, its job pauses; `jobs resume <id>` makes a new playlist.
 Failures retry after 15 minutes, 1 hour, then 6 hours. The jobs live in
 `jobs.json` beside the session (with `jobs-state/` and the run log
-`jobs-runs.jsonl`); an invalid hand edit to one job is reported and the others
-keep running.
+`jobs-runs.jsonl`); an invalid hand edit to one job is reported (and kept as
+written, for you to fix) while the others keep running, and a job whose state
+file cannot be read is skipped rather than started over. A refresh that fails
+part-way picks up where it stopped on the next run. Feeds check at most 1,000
+artists (with similar ones); past that, nothing is removed.
 
 In the web UI, *Managed playlists* lists the jobs with their last and next run
 (Run now, Preview, Pause, Edit, Delete -- optionally with the playlist) and

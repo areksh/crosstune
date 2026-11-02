@@ -5,10 +5,11 @@
  *
  * The lock is a file created exclusively (`wx`) holding who took it. A lock is
  * taken over when it is stale: its process is gone (judged only on the same
- * host), it is older than `staleMs`, or it cannot be read.
+ * host), it is older than `staleMs`, or it cannot be read and is more than a
+ * few seconds old (a fresh one may still be being written).
  */
 
-import { mkdirSync, openSync, readFileSync, rmSync, writeSync, closeSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 
@@ -90,7 +91,7 @@ export function tryAcquireLock(path: string, options: LockOptions = {}): FileLoc
         },
       };
     }
-    if (attempt === 0 && isStale(readLock(path), info.host, now(), options)) {
+    if (attempt === 0 && isStale(path, readLock(path), info.host, now(), options)) {
       rmSync(path, { force: true });
       continue;
     }
@@ -117,14 +118,22 @@ function create(path: string, info: LockInfo): boolean {
   return true;
 }
 
+/** An unreadable lock younger than this may still be being written. */
+const UNREADABLE_GRACE_MS = 10_000;
+
 function isStale(
+  path: string,
   holder: LockInfo | undefined,
   host: string,
   now: Date,
   options: LockOptions,
 ): boolean {
   if (holder === undefined) {
-    return true;
+    try {
+      return now.getTime() - statSync(path).mtimeMs > UNREADABLE_GRACE_MS;
+    } catch {
+      return true; // gone already
+    }
   }
   const age = now.getTime() - Date.parse(holder.startedAt);
   if (!Number.isFinite(age) || age > (options.staleMs ?? DEFAULT_STALE_MS)) {

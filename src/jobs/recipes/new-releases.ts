@@ -47,6 +47,9 @@ export type FeedClient = NewReleasesClient &
 
 const DAY_MS = 86_400_000;
 
+/** The most artists (seeds and similar) a feed checks per refresh. */
+export const MAX_FEED_ARTISTS = 1_000;
+
 export async function resolveNewReleasesFeed(
   client: FeedClient,
   def: NewReleasesRecipeDef,
@@ -91,13 +94,19 @@ export async function resolveNewReleasesFeed(
     include: def.include,
     filter,
     hideFavourites: def.hideFavourites,
+    maxArtists: MAX_FEED_ARTISTS,
   });
   if (plan.failedArtists.length > 0) {
     complete = false;
     notes.push(`Could not read the releases of ${plan.failedArtists.join(", ")}.`);
   }
   if (plan.capped) {
-    notes.push(`Only the first ${plan.checkedArtists} of ${plan.totalArtists} artists were checked.`);
+    // Which artists fall past the cap shifts as the list changes: removing
+    // their releases would churn the playlist, so remove nothing.
+    complete = false;
+    notes.push(
+      `Only the first ${plan.checkedArtists.toLocaleString("en-GB")} of ${plan.totalArtists.toLocaleString("en-GB")} artists were checked.`,
+    );
   }
 
   const releases =

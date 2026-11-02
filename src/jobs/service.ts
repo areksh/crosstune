@@ -5,7 +5,7 @@
  * next refresh reconciles the playlist to the new recipe.
  */
 
-import { newJobId, validateJob, type InvalidJob, type Job, type JobState } from "./model.js";
+import { emptyJobState, newJobId, validateJob, type InvalidJob, type Job, type JobState } from "./model.js";
 import type { GlobalFlags, GlobalStore, JobStateStore, JobStore, RunLog, RunRecord } from "./stores.js";
 
 export class UnknownJobError extends Error {
@@ -19,6 +19,8 @@ export interface JobView {
   job: Job;
   state: JobState;
   recentRuns: RunRecord[];
+  /** Why the job's state could not be read (it is shown as empty, and skipped). */
+  stateError?: string;
 }
 
 export interface JobsService {
@@ -29,7 +31,7 @@ export interface JobsService {
   /** Replace a job's definition (keeping its id, creation time and state). */
   update(id: string, input: unknown): Job;
   setEnabled(id: string, enabled: boolean): Job;
-  /** Clear a pause; a job whose playlist was deleted creates a new one next run. */
+  /** Clear a "playlist deleted" pause: the next run creates a new playlist. */
   resume(id: string): JobState;
   /** Forget a job; says which playlist it managed, for the caller to delete. */
   remove(id: string): { job: Job; playlistId?: number };
@@ -68,11 +70,19 @@ export function jobsService(deps: JobsServiceDeps): JobsService {
     const { file } = load();
     deps.jobs.save({ ...file, jobs: file.jobs.map((existing) => (existing.id === job.id ? job : existing)) });
   };
-  const view = (job: Job): JobView => ({
-    job,
-    state: deps.state.load(job.id),
-    recentRuns: deps.runs.read(job.id, RECENT_RUNS),
-  });
+  const view = (job: Job): JobView => {
+    const recentRuns = deps.runs.read(job.id, RECENT_RUNS);
+    try {
+      return { job, state: deps.state.load(job.id), recentRuns };
+    } catch (error) {
+      return {
+        job,
+        state: emptyJobState(),
+        recentRuns,
+        stateError: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
 
   return {
     list: () => {
@@ -121,6 +131,9 @@ export function jobsService(deps: JobsServiceDeps): JobsService {
     resume: (id) => {
       find(id);
       const state = deps.state.load(id);
+      if (state.paused === undefined) {
+        return state; // paused by the user only: enabling it is enough
+      }
       const next: JobState = { ...state, owned: [] };
       delete next.paused;
       delete next.playlistId;
@@ -130,7 +143,12 @@ export function jobsService(deps: JobsServiceDeps): JobsService {
     },
     remove: (id) => {
       const job = find(id);
-      const { playlistId } = deps.state.load(id);
+      let playlistId: number | undefined;
+      try {
+        playlistId = deps.state.load(id).playlistId;
+      } catch {
+        // An unreadable state still lets the job be removed.
+      }
       const { file } = load();
       deps.jobs.save({ ...file, jobs: file.jobs.filter((existing) => existing.id !== id) });
       deps.state.remove(id);

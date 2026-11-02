@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -55,9 +55,16 @@ describe("tryAcquireLock", () => {
     ).toBeUndefined();
   });
 
-  it("takes over an unreadable lock", () => {
+  it("takes over an unreadable lock once it is a few seconds old", () => {
     writeFileSync(path, "garbage");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(path, old, old);
     expect(tryAcquireLock(path, { pid: 2, host: "box" })).toBeDefined();
+  });
+
+  it("leaves alone a lock that is still being written", () => {
+    writeFileSync(path, "");
+    expect(tryAcquireLock(path, { pid: 2, host: "box" })).toBeUndefined();
   });
 
   it("release removes only its own lock", () => {

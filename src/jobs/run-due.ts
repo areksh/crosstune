@@ -14,6 +14,7 @@ import { RefreshWriteError, refreshManagedPlaylist, type RefreshClient } from ".
 import { nextRunAt, retryAt } from "./schedule.js";
 import {
   JobsFileError,
+  JobStateError,
   type GlobalFlags,
   type GlobalStore,
   type JobStateStore,
@@ -94,7 +95,21 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     }
     throw error;
   }
-  const { file, invalid } = loaded;
+  const { file } = loaded;
+  const invalid = [...loaded.invalid];
+  // A job whose state cannot be read is reported and skipped, never started
+  // over (that would make a second playlist).
+  const withState = (job: Job): { job: Job; state: JobState }[] => {
+    try {
+      return [{ job, state: deps.state.load(job.id) }];
+    } catch (error) {
+      if (!(error instanceof JobStateError)) {
+        throw error;
+      }
+      invalid.push({ index: file.jobs.indexOf(job), id: job.id, error: error.message });
+      return [];
+    }
+  };
 
   let due: { job: Job; state: JobState }[];
   if (options.onlyJobId !== undefined) {
@@ -102,10 +117,10 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     if (job === undefined) {
       throw new Error(`No job ${options.onlyJobId}`);
     }
-    due = [{ job, state: deps.state.load(job.id) }];
+    due = withState(job);
   } else {
     due = file.jobs
-      .map((job) => ({ job, state: deps.state.load(job.id) }))
+      .flatMap(withState)
       .filter(({ job, state }) => isDue(job, state, now))
       .sort((a, b) => (a.state.nextRunAt ?? "").localeCompare(b.state.nextRunAt ?? ""));
   }

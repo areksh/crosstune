@@ -173,20 +173,20 @@ export class Journal {
   /** Append records, compacting the file instead when that drops old ones. */
   #append(records: HistoryRecord[], now: Date): void {
     try {
-      const compact = (): boolean => {
+      const write = (): true => {
         const all = [...parseHistory(this.#store.read()), ...records];
         const kept = pruneRecords(all, now, this.#limits);
         if (kept.length < all.length) {
           this.#store.replace(serializeRecords(kept));
-          return true;
+        } else {
+          this.#store.append(serializeRecords(records));
         }
-        return false;
+        return true;
       };
-      // Compaction re-reads and rewrites the file under the lock; when another
-      // process holds it, append now and compact on a later write.
-      const compacted =
-        this.#store.exclusive === undefined ? compact() : this.#store.exclusive(compact);
-      if (compacted !== true) {
+      // Under the lock, so a compaction elsewhere cannot drop this record;
+      // if the lock stays busy, append anyway (and compact on a later write).
+      const written = this.#store.exclusive === undefined ? write() : this.#store.exclusive(write);
+      if (written !== true) {
         this.#store.append(serializeRecords(records));
       }
     } catch (error) {

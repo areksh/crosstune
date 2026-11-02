@@ -80,12 +80,14 @@ export function formatJobList(list: { jobs: JobView[]; invalid: InvalidJob[]; fl
     lines.push("No jobs yet. Create one with: qobuz-helper jobs create new-releases <artists...> --name <name>");
     return lines.join("\n");
   }
-  for (const { job, state } of list.jobs) {
+  for (const { job, state, stateError } of list.jobs) {
     lines.push(`${job.id}  ${job.name}`);
     lines.push(
       `    ${describeSchedule(job.schedule)} -- ${describeArtists(job)}, ${describeWindow(job.recipe.window)}; ${job.edits === "respect" ? "respects your edits" : "strict mirror"}`,
     );
-    const status = !job.enabled
+    const status = stateError !== undefined
+      ? `skipped: ${stateError}`
+      : !job.enabled
       ? "paused by you"
       : state.paused !== undefined
         ? "paused: the playlist was deleted (jobs resume <id> makes a new one)"

@@ -159,6 +159,14 @@ describe("job state", () => {
     expect(parseJobState(JSON.parse(JSON.stringify(state)))).toEqual(state);
   });
 
+  it("skips unusable similar artists rather than rejecting the state", () => {
+    const state = parseJobState({
+      ...emptyJobState(),
+      similar: { takenAt: "x", artists: [{ id: 1, name: "" }, { id: 2, name: "Air" }, "junk"] },
+    });
+    expect(state.similar?.artists).toEqual([{ id: 2, name: "Air" }]);
+  });
+
   it("rejects a state of another version", () => {
     expect(() => parseJobState({ version: 9 })).toThrow(/version/);
   });
