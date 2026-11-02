@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A change could vanish from the history when two qobuz-helper processes
+  wrote it at the same moment (say the CLI while the web UI was open): trimming
+  the history rewrites the file from what it read, dropping a record the other
+  process appended in between. Trimming now holds a lock file, and appends
+  instead while another process holds it.
+
 - The deduplicator now removes a track that was added to a playlist twice.
   Both entries carry the same track id, and the plan marked "the track to
   keep" by id, so every entry of the kept track was kept and nothing was
@@ -50,6 +56,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reduced-motion setting, and on a phone the sidebar stacks above the content.
 
 ### Added
+
+- Managed playlists: playlists qobuz-helper keeps up to date on a schedule --
+  the new releases of chosen artists (or favourite artists, or a playlist's),
+  optionally with their similar artists, in the last N days, since a date, or
+  each artist's newest N. Tracks you remove stay out (or, per playlist, every
+  refresh mirrors the recipe exactly); a refresh that could not read everything
+  removes nothing; a deleted playlist pauses its job. New commands: `jobs`,
+  `run-due` (for cron, systemd, launchd or Task Scheduler; `schedule print`
+  writes the entry), `serve` (the web UI plus a one-minute ticker, for an
+  always-on machine) and `login --print-url` (sign in without a browser). New
+  web view *Managed playlists*, also opened from New releases and Similar
+  artists with *Keep this updated...*.
 
 - History & undo. Every change qobuz-helper makes to your account -- from the
   CLI or the web UI -- is recorded in `history.jsonl` beside the session

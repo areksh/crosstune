@@ -97,7 +97,8 @@ type Job =
 
 interface ManagedPlaylistJob {
   kind: "managed-playlist";
-  playlistId?: number;          // set by the first run, which creates the playlist
+  // (the playlist's id lives in the job's state: the runner creates it, and
+  //  only the CLI and UI write jobs.json -- refined while planning)
   isPublic: boolean;            // default false
   edits: "respect" | "mirror";  // default "respect"
   recipe: RecipeDef;            // section 5
@@ -322,7 +323,8 @@ interface RunDueDeps {
 ### Schedule
 
 `nextRunAt` = the first slot of the schedule **strictly after `now`** (local
-time, `at` and `weekday` honoured; DST gaps move to the next valid minute). This
+time, `at` and `weekday` honoured; a time inside a DST gap is moved forward by the gap, as `Date`
+normalises it). This
 gives anacron-style catch-up: a laptop asleep through several slots runs the
 job **once** on wake. A newly created job runs on the next `runDue`.
 

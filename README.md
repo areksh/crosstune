@@ -65,6 +65,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   what it added is taken out, what it removed is put back in its old place, and
   a playlist it created is deleted. Available on the CLI and in the web UI (see
   [History and undo](#history-and-undo)).
+- **Managed playlists** -- playlists qobuz-helper keeps up to date on a
+  schedule: the new releases of artists you choose (or your favourite artists,
+  or a playlist's), optionally with their similar artists. Artists with nothing
+  new add nothing; tracks you take out stay out. Runs from your system's
+  scheduler or an always-on `serve` (see [Managed playlists](#managed-playlists)).
 
 The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
@@ -674,6 +679,74 @@ the history. With `--json`, `history` prints `entries` and `undo` prints
 `entry`, `plan` (`steps`, `notes`, `warnings`), `applied` and `result`.
 
 If the browser does not open automatically, the CLI prints the URL to visit.
+
+#### Managed playlists
+
+A managed playlist is a *job*: a saved recipe qobuz-helper refreshes on a
+schedule. Its recipe is the new releases of some artists -- listed by name or
+link, your favourite artists, or a playlist's artists -- optionally with each
+one's top similar artists (a list kept for 30 days, then looked up again), and
+a window:
+
+- `--window last-days:30` -- released in the last 30 days (the default); older
+  releases drop out of the playlist as they age;
+- `--window since:2026-01-01` -- everything since a date; the playlist only grows;
+- `--window latest:2` -- each artist's 2 newest releases, whenever they came out.
+
+Reissues and remasters are left out as in [New releases](#commands); releases
+already in your favourite albums are kept unless `--hide-favourites`.
+`--max-releases`, `--max-tracks` and `--fit <minutes>` cap the playlist.
+
+```sh
+# Preview, then save: creates the playlist and fills it straight away
+npm run dev -- jobs create new-releases "Air" "Bonobo" --similar 3 --name "New from my artists"
+npm run dev -- jobs create new-releases "Air" "Bonobo" --similar 3 --name "New from my artists" --apply
+
+# Your favourite artists, refreshed every Friday at 07:30
+npm run dev -- jobs create new-releases --favourites --every week --weekday fri --at 07:30 --name "Fresh" --apply
+
+npm run dev -- jobs                      # list them, with the last and next run
+npm run dev -- jobs run <id> --dry-run   # what the next refresh would change
+npm run dev -- jobs run <id>             # refresh now
+npm run dev -- jobs pause <id>           # and: resume, show, remove [--delete-playlist]
+```
+
+**Your edits.** By default (`--edits respect`) a refresh only touches the tracks
+it added: a track you remove from the playlist is remembered and never added
+again, and a track you add yourself is never removed. With `--edits mirror`
+every refresh resets the playlist to exactly the recipe. Each refresh is one
+[history](#history-and-undo) entry; undoing one counts as removing its tracks.
+
+**Running on a schedule.** Refreshes happen whenever qobuz-helper runs the jobs
+that are due -- either from your system's scheduler, every 15 minutes:
+
+```sh
+npm run build
+node dist/cli.js schedule print --systemd   # or --cron, --launchd, --windows
+```
+
+prints a ready-to-install snippet that calls `qobuz-helper run-due` (which only
+does something when a job is due); or from `qobuz-helper serve`, the web UI
+plus a ticker, for a machine that stays on (`serve --no-open --port 8080` on a
+server). A refresh missed while the computer was off or asleep runs once when
+it is back. `run-due` never opens a browser: if the session has expired, jobs
+stop until you run `qobuz-helper login` again (on a machine without a browser,
+`login --print-url` prints a link to open on any device; paste back the address
+you end up on). On a headless server, reach the web UI through an SSH tunnel:
+`ssh -L 8080:127.0.0.1:8080 server`, then open `http://127.0.0.1:8080`.
+
+**Safety.** If anything cannot be read during a refresh (an artist, an album),
+the refresh adds what it can and removes nothing. If you delete a managed
+playlist in Qobuz, its job pauses; `jobs resume <id>` makes a new playlist.
+Failures retry after 15 minutes, 1 hour, then 6 hours. The jobs live in
+`jobs.json` beside the session (with `jobs-state/` and the run log
+`jobs-runs.jsonl`); an invalid hand edit to one job is reported and the others
+keep running.
+
+In the web UI, *Managed playlists* lists the jobs with their last and next run
+(Run now, Preview, Pause, Edit, Delete -- optionally with the playlist) and
+creates them with a preview; *New releases* and *Similar artists* have a
+*Keep this updated...* button that opens the form filled in.
 
 #### Logging
 
