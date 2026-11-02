@@ -1080,18 +1080,31 @@ describe("parseJobsArgs", () => {
     expect(() => parseJobsArgs(["frobnicate"])).toThrow(/Unknown jobs action/);
   });
 
+  it("parses the suggestion actions", () => {
+    expect(parseJobsArgs(["suggestions", "a1b2c3d4"])).toEqual({ action: "suggestions", id: "a1b2c3d4" });
+    expect(parseJobsArgs(["accept", "a1b2c3d4", "upgrade:1>2", "repair:3"])).toEqual({
+      action: "accept",
+      id: "a1b2c3d4",
+      keys: ["upgrade:1>2", "repair:3"],
+    });
+    expect(parseJobsArgs(["ignore", "a1b2c3d4", "--all"])).toEqual({ action: "ignore", id: "a1b2c3d4", keys: "all" });
+    expect(() => parseJobsArgs(["accept", "a1b2c3d4"])).toThrow(/--all/);
+  });
+
   it("creates a new-releases feed with the defaults", () => {
     expect(parseJobsArgs(["create", "new-releases", "Air", "Bonobo", "--name", "Fresh"])).toEqual({
       action: "create",
       apply: false,
+      kind: "new-releases",
       definition: {
         name: "Fresh",
-        kind: "managed-playlist",
+        kind: "playlist",
         enabled: true,
-        isPublic: false,
+        target: { type: "created", isPublic: false },
         edits: "respect",
         schedule: { every: "day", at: "06:00" },
-        recipe: {
+        tidy: {},
+        source: {
           type: "new-releases",
           artists: { type: "list", artists: [] },
           window: { type: "last-days", days: 30 },
@@ -1103,7 +1116,7 @@ describe("parseJobsArgs", () => {
     });
   });
 
-  it("takes every create option", () => {
+  it("takes every new-releases option", () => {
     const parsed = parseJobsArgs([
       "create", "new-releases", "--favourites", "--name", "Fresh", "--similar", "3",
       "--window", "since:2026-01-01", "--include", "albums", "--edits", "mirror",
@@ -1116,11 +1129,11 @@ describe("parseJobsArgs", () => {
       apply: true,
       artistQueries: [],
       definition: {
-        isPublic: true,
+        target: { type: "created", isPublic: true },
         edits: "mirror",
         schedule: { every: "week", weekday: 5, at: "07:30" },
         shape: { maxReleases: 10, maxTracks: 100, maxMinutes: 90 },
-        recipe: {
+        source: {
           artists: { type: "favourites" },
           similar: { perArtist: 3, refreshDays: 30 },
           window: { type: "since", date: "2026-01-01" },
@@ -1134,19 +1147,87 @@ describe("parseJobsArgs", () => {
 
   it("takes a playlist's artists", () => {
     expect(parseJobsArgs(["create", "new-releases", "--playlist", "42", "--name", "x"])).toMatchObject({
-      definition: { recipe: { artists: { type: "playlist", playlistId: 42 } } },
+      definition: { source: { artists: { type: "playlist", playlistId: 42 } } },
     });
+  });
+
+  it("creates a combined playlist with tidy-ups, into an existing playlist", () => {
+    expect(
+      parseJobsArgs([
+        "create", "combined", "11", "favourites", "--playlist", "12", "--mode", "common", "--order", "shuffle",
+        "--into", "99", "--dedupe", "--upgrade=weekly", "--suggest", "--dedupe-keep", "first-added",
+      ]),
+    ).toMatchObject({
+      kind: "combined",
+      definition: {
+        target: { type: "adopted", playlistId: 99 },
+        source: {
+          type: "combined",
+          inputs: [{ type: "playlist", playlistId: 11 }, { type: "favourites" }, { type: "playlist", playlistId: 12 }],
+          mode: "common",
+          order: "shuffle",
+        },
+        tidy: { dedupe: { mode: "suggest", keep: ["first-added"] }, upgrade: { cadence: "weekly", mode: "suggest" } },
+      },
+    });
+  });
+
+  it("creates follow, smart, discovery and tidy jobs", () => {
+    expect(parseJobsArgs(["create", "follow", "5", "--archive", "--name", "Kept"])).toMatchObject({
+      definition: { source: { type: "follow", playlistId: 5, keepRemoved: true } },
+    });
+    expect(
+      parseJobsArgs([
+        "create", "smart", "favourites", "--hires", "--decades", "90s,2000s", "--favourited-within", "30",
+        "--max-length", "4:30", "--order", "newest-favourited", "--name", "New hi-res",
+      ]),
+    ).toMatchObject({
+      definition: {
+        source: {
+          type: "smart",
+          from: [{ type: "favourites" }],
+          rules: [
+            { type: "quality", quality: "hires" },
+            { type: "decades", decades: ["1990s", "2000s"] },
+            { type: "favourited-within", days: 30 },
+            { type: "duration", maxSeconds: 270 },
+          ],
+          order: "newest-favourited",
+        },
+      },
+    });
+    expect(
+      parseJobsArgs(["create", "discovery", "Air", "--similar", "5", "--artists-per-rotation", "8", "--rotation", "day", "--name", "Radio"]),
+    ).toMatchObject({
+      artistQueries: ["Air"],
+      definition: { source: { type: "discovery", seeds: { type: "list" }, similar: { perArtist: 5 }, artistsPerRotation: 8, rotation: "day" } },
+    });
+    expect(parseJobsArgs(["create", "tidy", "favourites", "--upgrade", "--repair", "--repair-remove"])).toMatchObject({
+      definition: {
+        target: { type: "favourites" },
+        tidy: { upgrade: {}, repair: { action: "remove" } },
+      },
+    });
+    const tidy = parseJobsArgs(["create", "tidy", "77", "--dedupe"]);
+    expect(tidy).toMatchObject({ definition: { target: { type: "adopted", playlistId: 77 } } });
+    expect((tidy as { definition: object }).definition).not.toHaveProperty("name");
   });
 
   it("rejects bad create input", () => {
     expect(() => parseJobsArgs(["create", "new-releases", "Air"])).toThrow(/--name/);
     expect(() => parseJobsArgs(["create", "new-releases", "--name", "x"])).toThrow(/artists/);
     expect(() => parseJobsArgs(["create", "new-releases", "Air", "--favourites", "--name", "x"])).toThrow(/one source/);
-    expect(() => parseJobsArgs(["create", "discovery", "--name", "x"])).toThrow(/new-releases/);
+    expect(() => parseJobsArgs(["create", "radio", "--name", "x"])).toThrow(/new-releases/);
     expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--similar", "0"])).toThrow(/--similar/);
     expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--at", "6"])).toThrow(/--at/);
     expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--weekday", "someday"])).toThrow(/--weekday/);
     expect(() => parseJobsArgs(["create", "new-releases", "Air", "--name", "x", "--every", "month"])).toThrow(/--every/);
+    expect(() => parseJobsArgs(["create", "follow", "5", "--hires", "--name", "x"])).toThrow(/does not apply/);
+    expect(() => parseJobsArgs(["create", "smart", "favourites", "--name", "x"])).toThrow(/rule/);
+    expect(() => parseJobsArgs(["create", "tidy", "favourites"])).toThrow(/--dedupe/);
+    expect(() => parseJobsArgs(["create", "tidy", "5", "--dedupe", "--into", "6"])).toThrow(/--into/);
+    expect(() => parseJobsArgs(["create", "follow", "5", "6", "--name", "x"])).toThrow(/one playlist/);
+    expect(() => parseJobsArgs(["create", "tidy", "5", "--dedupe=daily"])).toThrow(/--dedupe/);
   });
 });
 

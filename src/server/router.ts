@@ -142,7 +142,7 @@ import { HISTORY_TOOLS, toSummary } from "../features/history.js";
 import type { Journal } from "../features/journal.js";
 import { applyUndo, describeStep, planUndo } from "../features/undo.js";
 import type { RefreshPreview } from "../jobs/refresh.js";
-import type { RunSummary } from "../jobs/run-due.js";
+import type { AcceptOutcome, RunSummary } from "../jobs/run-due.js";
 import { UnknownJobError, type JobsService } from "../jobs/service.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
@@ -217,6 +217,8 @@ export interface ApiDeps {
     runNow(id: string, dryRun: boolean): Promise<RunSummary>;
     /** What the first refresh of a not-yet-saved definition would do. */
     preview(input: unknown): Promise<RefreshPreview>;
+    /** Accept a job's suggestions now (see acceptNow). */
+    accept(id: string, keys: readonly string[] | "all"): Promise<AcceptOutcome>;
   };
 }
 
@@ -2184,6 +2186,34 @@ async function jobsRoute(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
         return { status: 409, body: { error: summary.message ?? "Jobs are already running.", summary } };
       }
       return { status: 200, body: { summary } };
+    }
+    if (action === "/suggestions" && req.method === "POST") {
+      const keys = (field: string): readonly string[] | "all" | undefined => {
+        const value = body[field];
+        if (value === undefined) {
+          return undefined;
+        }
+        if (value === "all" || (Array.isArray(value) && value.every((key) => typeof key === "string") && value.length <= 2_000)) {
+          return value as readonly string[] | "all";
+        }
+        throw new Error(`${field} must be "all" or a list of suggestion keys`);
+      };
+      const accept = keys("accept");
+      const ignore = keys("ignore");
+      if ((accept === undefined) === (ignore === undefined)) {
+        return { status: 400, body: { error: "give accept or ignore" } };
+      }
+      if (ignore !== undefined) {
+        return { status: 200, body: { state: jobs.service.ignore(id, ignore) } };
+      }
+      if (jobs.service.get(id) === undefined) {
+        throw new UnknownJobError(id);
+      }
+      const outcome = await jobs.accept(id, accept ?? []);
+      if (outcome.status === "busy") {
+        return { status: 409, body: { error: outcome.message, outcome } };
+      }
+      return { status: 200, body: { outcome } };
     }
     if (action === "/runs" && req.method === "GET") {
       const view = jobs.service.get(id);

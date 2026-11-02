@@ -60,7 +60,7 @@ import {
   type WordPlaySource,
 } from "../features/word-play.js";
 import type { ReleaseType } from "../qobuz/index.js";
-import type { FeedArtists, NewReleasesRecipeDef, Schedule, Shape } from "../jobs/model.js";
+import type { Schedule, Shape } from "../jobs/model.js";
 import type { ScheduleTarget } from "../jobs/schedule-print.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";
 
@@ -1714,30 +1714,29 @@ const JOB_ID = /^[0-9a-f]{8}$/;
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
+/** The kinds `jobs create` makes: a source, or `tidy` (tidy-ups only, on an existing playlist). */
+export const JOB_KINDS = ["new-releases", "combined", "follow", "smart", "discovery", "tidy"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
 /**
  * A new job, as `jobs create` builds it: the definition (without id and
- * creation time; validated by the jobs service) and the artist names or links
- * still to be looked up into its artist list.
+ * creation time; validated by the jobs service), the artist names or links
+ * still to be looked up into its artist list, and whether a name is still to
+ * be found (an adopted playlist's own name).
  */
 export interface JobCreateArgs {
   action: "create";
   apply: boolean;
-  definition: {
-    name: string;
-    kind: "managed-playlist";
-    enabled: boolean;
-    isPublic: boolean;
-    edits: "respect" | "mirror";
-    schedule: Schedule;
-    recipe: Omit<NewReleasesRecipeDef, "artists"> & { artists: FeedArtists };
-    shape?: Shape;
-  };
+  kind: JobKind;
+  definition: Record<string, unknown> & { name?: string; source?: Record<string, unknown> };
+  /** Artist names or links for `source.artists` (new releases) or `source.seeds` (discovery). */
   artistQueries: string[];
 }
 
 export type JobsArgs =
   | { action: "list" }
-  | { action: "show" | "pause" | "resume"; id: string }
+  | { action: "show" | "pause" | "resume" | "suggestions"; id: string }
+  | { action: "accept" | "ignore"; id: string; keys: string[] | "all" }
   | { action: "run"; id: string; dryRun: boolean }
   | { action: "remove"; id: string; deletePlaylist: boolean }
   | JobCreateArgs;
@@ -1781,15 +1780,9 @@ function jobId(raw: string | undefined): string {
 /**
  * Parse the arguments for `jobs`: `list` (default), `show <id>`,
  * `pause <id>`, `resume <id>`, `run <id> [--dry-run]`,
- * `remove <id> [--delete-playlist]`, and
- * `create new-releases [artists...] --name <name> [options] [--apply]`.
- *
- * `create` takes artists (names or links) as positional arguments, or
- * `--favourites`, or `--playlist <id|link>`; `--similar <n>`, `--window`
- * (see {@link parseWindow}; default last-days:30), `--include <kinds>`,
- * `--edits respect|mirror`, `--every hour|day|week`, `--at HH:MM`,
- * `--weekday mon..sun`, `--max-releases`, `--max-tracks`, `--fit <minutes>`,
- * `--public`, `--hide-favourites` and the exclude flags.
+ * `remove <id> [--delete-playlist]`, `suggestions <id>`,
+ * `accept <id> <key...>|--all`, `ignore <id> <key...>|--all`, and
+ * `create <kind> ...` (see {@link parseJobCreate}).
  *
  * @throws {Error} on an unknown action or flag, or invalid input.
  */
@@ -1803,12 +1796,32 @@ export function parseJobsArgs(argv: readonly string[]): JobsArgs {
       return { action: "list" };
     case "show":
     case "pause":
-    case "resume": {
+    case "resume":
+    case "suggestions": {
       const id = jobId(rest[0]);
       if (rest.length > 1) {
         throw new Error(`Unknown argument: ${rest[1]}`);
       }
       return { action, id };
+    }
+    case "accept":
+    case "ignore": {
+      const id = jobId(rest[0]);
+      const keys = rest.slice(1);
+      if (keys.includes("--all")) {
+        if (keys.length > 1) {
+          throw new Error("Give --all or the suggestions' keys, not both");
+        }
+        return { action, id, keys: "all" };
+      }
+      if (keys.length === 0) {
+        throw new Error(`Give the keys of the suggestions to ${action} (see jobs suggestions ${id}), or --all`);
+      }
+      const unknown = keys.find((key) => key.startsWith("--"));
+      if (unknown !== undefined) {
+        throw new Error(`Unknown argument: ${unknown}`);
+      }
+      return { action, id, keys };
     }
     case "run": {
       const id = jobId(rest[0]);
@@ -1835,19 +1848,95 @@ export function parseJobsArgs(argv: readonly string[]): JobsArgs {
     case "create":
       return parseJobCreate(rest);
     default:
-      throw new Error(`Unknown jobs action: ${action} (list, show, create, pause, resume, run, remove)`);
+      throw new Error(
+        `Unknown jobs action: ${action} (list, show, create, pause, resume, run, remove, suggestions, accept, ignore)`,
+      );
   }
 }
 
-function parseJobCreate(argv: readonly string[]): JobCreateArgs {
-  const [kind, ...rest] = argv;
-  if (kind !== "new-releases") {
-    throw new Error("jobs create takes a kind of job: new-releases");
+/** A playlist id or link, or "favourites", as an input. */
+function playlistInput(raw: string, flag: string): { type: "favourites" } | { type: "playlist"; playlistId: number } {
+  if (raw === "favourites" || raw === "favorites") {
+    return { type: "favourites" };
   }
-  const artistQueries: string[] = [];
+  const id = playlistIdOf(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error(`${flag} must be a numeric playlist id, a playlist link or "favourites", got "${raw}"`);
+  }
+  return { type: "playlist", playlistId: id };
+}
+
+function oneOfFlag<T extends string>(flag: string, raw: string, options: readonly T[]): T {
+  if (!(options as readonly string[]).includes(raw)) {
+    throw new Error(`${flag} must be one of ${options.join(", ")}, got "${raw}"`);
+  }
+  return raw as T;
+}
+
+/** "3:30" or "210" (seconds) to seconds. */
+function lengthSeconds(flag: string, raw: string): number {
+  const match = /^(\d+):([0-5]\d)$/.exec(raw);
+  const seconds = match === null ? Number(raw) : Number(match[1]) * 60 + Number(match[2]);
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > 86_400) {
+    throw new Error(`${flag} must be a length written M:SS (or seconds), got "${raw}"`);
+  }
+  return seconds;
+}
+
+function commaList(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/** Which flags each kind takes besides the shared ones. */
+const KIND_FLAGS: Record<JobKind, readonly string[]> = {
+  "new-releases": ["--favourites", "--favorites", "--playlist", "--similar", "--window", "--include", "--hide-favourites", "--hide-favorites", "--max-releases"],
+  discovery: ["--favourites", "--favorites", "--playlist", "--similar", "--artists-per-rotation", "--tracks-per-artist", "--rotation", "--avoid-repeats", "--keep-favourite-tracks"],
+  combined: ["--favourites", "--favorites", "--playlist", "--mode", "--order", "--keep", "--exact-ids-only"],
+  smart: ["--favourites", "--favorites", "--playlist", "--hires", "--cd", "--decades", "--genres", "--favourited-within", "--min-length", "--max-length", "--order"],
+  follow: ["--archive"],
+  tidy: [],
+};
+
+/**
+ * `jobs create <kind> [inputs...] [options] [--apply]`:
+ *
+ * - `new-releases <artists...>|--favourites|--playlist P` with `--similar N`,
+ *   `--window` (see {@link parseWindow}), `--include`, `--hide-favourites`,
+ *   `--max-releases N`;
+ * - `combined <playlist|favourites>...` (or `--playlist P`, `--favourites`)
+ *   with `--mode`, `--order`, `--keep`, `--exact-ids-only`;
+ * - `follow <playlist> [--archive]`;
+ * - `smart <playlist|favourites>...` with `--hires|--cd`, `--decades`,
+ *   `--genres`, `--favourited-within DAYS`, `--min-length`/`--max-length M:SS`,
+ *   `--order`;
+ * - `discovery <artists...>|--favourites|--playlist P` with `--similar N`,
+ *   `--artists-per-rotation M`, `--tracks-per-artist K`, `--rotation day|week`,
+ *   `--avoid-repeats N`, `--keep-favourite-tracks`;
+ * - `tidy <playlist|favourites>`: tidy-ups only.
+ *
+ * Shared: `--name`, `--every hour|day|week`, `--at HH:MM`, `--weekday`,
+ * `--into <playlist>` (manage an existing playlist; respect edits only),
+ * `--public`, `--edits respect|mirror`, `--dedupe[=CADENCE]`,
+ * `--upgrade[=CADENCE]`, `--repair[=CADENCE]`, `--repair-remove`,
+ * `--dedupe-keep <chain>`, `--suggest`, `--max-tracks`, `--fit`, the exclude
+ * flags (sources that filter), and `--apply`.
+ */
+export function parseJobCreate(argv: readonly string[]): JobCreateArgs {
+  const [rawKind, ...rest] = argv;
+  if (rawKind === undefined || !(JOB_KINDS as readonly string[]).includes(rawKind)) {
+    throw new Error(`jobs create takes a kind of job: ${JOB_KINDS.join(", ")}`);
+  }
+  const kind = rawKind as JobKind;
+  const own = new Set(KIND_FLAGS[kind]);
+  const positionals: string[] = [];
+  const inputs: ({ type: "favourites" } | { type: "playlist"; playlistId: number })[] = [];
   let favourites = false;
-  let playlistId: number | undefined;
+  let seedPlaylist: number | undefined;
   let name: string | undefined;
+  let into: number | undefined;
   let similar: number | undefined;
   let window: ReleaseWindow = { type: "last-days", days: 30 };
   let include: ReleaseType[] = [...DEFAULT_NEW_RELEASE_INCLUDE];
@@ -1859,15 +1948,30 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
   let isPublic = false;
   let hideFavourites = false;
   let apply = false;
+  const tidy: Record<string, Record<string, unknown>> = {};
+  let suggest = false;
+  let repairRemove = false;
+  let dedupeKeep: KeepStrategy[] | undefined;
+  const combined: Record<string, unknown> = {};
+  const discovery: Record<string, unknown> = {};
+  const rules: Record<string, unknown>[] = [];
+  let smartOrder: string | undefined;
+  let archive = false;
+  let minLength: number | undefined;
+  let maxLength: number | undefined;
   const filter = new FilterFlags(false);
+  const filters = kind === "new-releases" || kind === "combined" || kind === "discovery";
 
   for (let i = 0; i < rest.length; i += 1) {
-    const used = filter.take(rest, i);
-    if (used > 0) {
-      i += used - 1;
-      continue;
+    if (filters) {
+      const used = filter.take(rest, i);
+      if (used > 0) {
+        i += used - 1;
+        continue;
+      }
     }
     const arg = rest[i] ?? "";
+    const [flag = "", inline] = arg.startsWith("--") ? arg.split("=", 2) : [arg, undefined];
     const value = rest[i + 1];
     const takesValue = (): string => {
       i += 1;
@@ -1876,7 +1980,10 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
       }
       return value;
     };
-    switch (arg) {
+    if (flag.startsWith("--") && Object.values(KIND_FLAGS).some((flags) => flags.includes(flag)) && !own.has(flag) && !SHARED_FLAGS.has(flag)) {
+      throw new Error(`${flag} does not apply to a ${kind} job`);
+    }
+    switch (flag) {
       case "--name": {
         const given = takesValue().trim();
         if (given.length === 0) {
@@ -1888,13 +1995,27 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
       case "--favourites":
       case "--favorites":
         favourites = true;
+        if (kind === "combined" || kind === "smart") {
+          inputs.push({ type: "favourites" });
+        }
         break;
       case "--playlist": {
-        const id = playlistIdOf(takesValue());
-        if (!Number.isInteger(id) || id <= 0) {
-          throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
+        const input = playlistInput(takesValue(), "--playlist");
+        if (kind === "combined" || kind === "smart") {
+          inputs.push(input);
+        } else if (input.type === "playlist") {
+          seedPlaylist = input.playlistId;
+        } else {
+          favourites = true;
         }
-        playlistId = id;
+        break;
+      }
+      case "--into": {
+        const input = playlistInput(takesValue(), "--into");
+        if (input.type !== "playlist") {
+          throw new Error("--into takes a playlist; manage the favourites with: jobs create tidy favourites");
+        }
+        into = input.playlistId;
         break;
       }
       case "--similar":
@@ -1906,22 +2027,12 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
       case "--include":
         include = parseIncludeList(takesValue());
         break;
-      case "--edits": {
-        const mode = takesValue();
-        if (mode !== "respect" && mode !== "mirror") {
-          throw new Error(`--edits must be respect or mirror, got "${mode}"`);
-        }
-        edits = mode;
+      case "--edits":
+        edits = oneOfFlag("--edits", takesValue(), ["respect", "mirror"] as const);
         break;
-      }
-      case "--every": {
-        const given = takesValue();
-        if (given !== "hour" && given !== "day" && given !== "week") {
-          throw new Error(`--every must be hour, day or week, got "${given}"`);
-        }
-        every = given;
+      case "--every":
+        every = oneOfFlag("--every", takesValue(), ["hour", "day", "week"] as const);
         break;
-      }
       case "--at": {
         const given = takesValue();
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given)) {
@@ -1955,34 +2066,113 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
       case "--hide-favorites":
         hideFavourites = true;
         break;
+      case "--dedupe":
+      case "--upgrade":
+      case "--repair":
+        tidy[flag.slice(2)] = inline === undefined ? {} : { cadence: oneOfFlag(flag, inline, ["every-pass", "weekly", "monthly"] as const) };
+        break;
+      case "--repair-remove":
+        repairRemove = true;
+        break;
+      case "--dedupe-keep":
+        dedupeKeep = parseKeepChain(takesValue());
+        break;
+      case "--suggest":
+        suggest = true;
+        break;
+      case "--mode":
+        combined["mode"] = oneOfFlag("--mode", takesValue(), COMBINE_MODES);
+        break;
+      case "--order":
+        if (kind === "smart") {
+          smartOrder = oneOfFlag("--order", takesValue(), ["as-listed", "newest-favourited", "newest-release", "by-artist", "shuffle"] as const);
+        } else {
+          combined["order"] = oneOfFlag("--order", takesValue(), COMBINE_ORDERS);
+        }
+        break;
+      case "--keep":
+        combined["keep"] = oneOfFlag("--keep", takesValue(), COMBINE_KEEPS);
+        break;
+      case "--exact-ids-only":
+        combined["matchSongs"] = false;
+        break;
+      case "--archive":
+        archive = true;
+        break;
+      case "--hires":
+      case "--cd":
+        rules.push({ type: "quality", quality: flag === "--hires" ? "hires" : "cd" });
+        break;
+      case "--decades":
+        rules.push({
+          type: "decades",
+          decades: commaList(takesValue()).map((decade) => (/^\d{2}s$/.test(decade) ? `19${decade}` : decade)),
+        });
+        break;
+      case "--genres":
+        rules.push({ type: "genres", genres: commaList(takesValue()) });
+        break;
+      case "--favourited-within":
+        rules.push({ type: "favourited-within", days: positiveInteger(arg, takesValue(), 3650) });
+        break;
+      case "--min-length":
+        minLength = lengthSeconds(arg, takesValue());
+        break;
+      case "--max-length":
+        maxLength = lengthSeconds(arg, takesValue());
+        break;
+      case "--artists-per-rotation":
+        discovery["artistsPerRotation"] = positiveInteger(arg, takesValue(), 50);
+        break;
+      case "--tracks-per-artist":
+        discovery["tracksPerArtist"] = positiveInteger(arg, takesValue(), 10);
+        break;
+      case "--rotation":
+        discovery["rotation"] = oneOfFlag("--rotation", takesValue(), ["day", "week"] as const);
+        break;
+      case "--avoid-repeats": {
+        const n = Number(takesValue());
+        if (!Number.isInteger(n) || n < 0 || n > 52) {
+          throw new Error(`--avoid-repeats must be a whole number from 0 to 52, got "${value}"`);
+        }
+        discovery["avoidRepeatsFor"] = n;
+        break;
+      }
+      case "--keep-favourite-tracks":
+        discovery["skipFavouriteTracks"] = false;
+        break;
       case "--apply":
         apply = true;
         break;
       default:
-        if (arg.startsWith("--")) {
+        if (flag.startsWith("--")) {
           throw new Error(`Unknown argument: ${arg}`);
         }
-        artistQueries.push(arg);
+        if (kind === "combined" || kind === "smart") {
+          inputs.push(playlistInput(arg, `a ${kind} input`));
+        } else {
+          positionals.push(arg);
+        }
     }
   }
 
-  if (name === undefined) {
-    throw new Error("--name <playlist name> is required");
-  }
-  const sources = [artistQueries.length > 0, favourites, playlistId !== undefined].filter(Boolean).length;
-  if (sources === 0) {
-    throw new Error("Give the artists (names or links), --favourites or --playlist <id>");
-  }
-  if (sources > 1) {
-    throw new Error("Give only one source of artists: names, --favourites or --playlist");
-  }
-  const artists: FeedArtists = favourites
-    ? { type: "favourites" }
-    : playlistId !== undefined
-      ? { type: "playlist", playlistId }
-      : { type: "list", artists: [] };
-  const schedule: Schedule =
-    every === "hour" ? { every } : every === "day" ? { every, at } : { every, weekday, at };
+  // The source.
+  const artistQueries: string[] = [];
+  const artistsOf = (): Record<string, unknown> => {
+    const given = [positionals.length > 0, favourites, seedPlaylist !== undefined].filter(Boolean).length;
+    if (given === 0) {
+      throw new Error("Give the artists (names or links), --favourites or --playlist <id>");
+    }
+    if (given > 1) {
+      throw new Error("Give only one source of artists: names, --favourites or --playlist");
+    }
+    artistQueries.push(...positionals);
+    return favourites
+      ? { type: "favourites" }
+      : seedPlaylist !== undefined
+        ? { type: "playlist", playlistId: seedPlaylist }
+        : { type: "list", artists: [] };
+  };
   const spec = filter.spec();
   const exclude =
     spec === undefined
@@ -1992,30 +2182,117 @@ function parseJobCreate(argv: readonly string[]): JobCreateArgs {
           ...(spec.excludeAlbums?.length && { excludeAlbums: [...spec.excludeAlbums] }),
           ...(spec.excludeArtists?.length && { excludeArtists: [...spec.excludeArtists] }),
         };
-  return {
-    action: "create",
-    apply,
-    definition: {
-      name,
-      kind: "managed-playlist",
-      enabled: true,
-      isPublic,
-      edits,
-      schedule,
-      recipe: {
+  const withExclude = (def: Record<string, unknown>) => (exclude === undefined ? def : { ...def, exclude });
+  let source: Record<string, unknown> | undefined;
+  let target: Record<string, unknown> | undefined;
+  switch (kind) {
+    case "new-releases":
+      source = withExclude({
         type: "new-releases",
-        artists,
+        artists: artistsOf(),
         window,
         include,
         hideFavourites,
         ...(similar !== undefined && { similar: { perArtist: similar, refreshDays: 30 } }),
-        ...(exclude !== undefined && { exclude }),
-      },
+      });
+      break;
+    case "discovery":
+      source = withExclude({
+        type: "discovery",
+        seeds: artistsOf(),
+        ...(similar !== undefined && { similar: { perArtist: similar, refreshDays: 30 } }),
+        ...discovery,
+      });
+      break;
+    case "combined":
+      source = withExclude({ type: "combined", inputs, ...combined });
+      break;
+    case "smart":
+      if (minLength !== undefined || maxLength !== undefined) {
+        rules.push({
+          type: "duration",
+          ...(minLength !== undefined && { minSeconds: minLength }),
+          ...(maxLength !== undefined && { maxSeconds: maxLength }),
+        });
+      }
+      if (rules.length === 0) {
+        throw new Error("A smart job needs at least one rule: --hires, --cd, --decades, --genres, --favourited-within, --min-length, --max-length");
+      }
+      source = { type: "smart", from: inputs, rules, ...(smartOrder !== undefined && { order: smartOrder }) };
+      break;
+    case "follow": {
+      const [only, ...more] = positionals;
+      if (only === undefined || more.length > 0) {
+        throw new Error("jobs create follow takes one playlist (an id or a link)");
+      }
+      const input = playlistInput(only, "follow");
+      if (input.type !== "playlist") {
+        throw new Error("follow takes a playlist, not the favourites");
+      }
+      source = { type: "follow", playlistId: input.playlistId, keepRemoved: archive };
+      break;
+    }
+    case "tidy": {
+      const [only, ...more] = positionals;
+      if (only === undefined || more.length > 0) {
+        throw new Error('jobs create tidy takes one playlist (an id or a link) or "favourites"');
+      }
+      const input = playlistInput(only, "tidy");
+      target = input.type === "favourites" ? { type: "favourites" } : { type: "adopted", playlistId: input.playlistId };
+      if (Object.keys(tidy).length === 0) {
+        throw new Error("Choose the tidy-ups: --dedupe, --upgrade and/or --repair");
+      }
+      break;
+    }
+  }
+  if (target === undefined) {
+    target = into === undefined ? { type: "created", isPublic } : { type: "adopted", playlistId: into };
+  } else if (into !== undefined) {
+    throw new Error("--into does not apply to a tidy job (give the playlist itself)");
+  }
+  if (target["type"] === "created" && name === undefined) {
+    throw new Error("--name <playlist name> is required for a new playlist");
+  }
+
+  // Tidy-ups.
+  for (const def of Object.values(tidy)) {
+    if (suggest) {
+      def["mode"] = "suggest";
+    }
+  }
+  if (repairRemove) {
+    (tidy["repair"] ??= {})["action"] = "remove";
+  }
+  if (dedupeKeep !== undefined) {
+    (tidy["dedupe"] ??= {})["keep"] = dedupeKeep;
+  }
+
+  const schedule: Schedule =
+    every === "hour" ? { every } : every === "day" ? { every, at } : { every, weekday, at };
+  return {
+    action: "create",
+    apply,
+    kind,
+    definition: {
+      ...(name !== undefined && { name }),
+      kind: "playlist",
+      enabled: true,
+      target,
+      edits,
+      schedule,
+      tidy,
+      ...(source !== undefined && { source }),
       ...(Object.keys(shape).length > 0 && { shape }),
     },
     artistQueries,
   };
 }
+
+/** Flags every kind of job takes. */
+const SHARED_FLAGS = new Set([
+  "--name", "--into", "--edits", "--every", "--at", "--weekday", "--max-tracks", "--fit", "--public",
+  "--dedupe", "--upgrade", "--repair", "--repair-remove", "--dedupe-keep", "--suggest", "--apply",
+]);
 
 /** `run-due [--dry-run]`. */
 export function parseRunDueArgs(argv: readonly string[]): { dryRun: boolean } {

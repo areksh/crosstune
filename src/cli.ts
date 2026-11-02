@@ -215,10 +215,17 @@ import {
   fileJobStore,
   fileRunLog,
 } from "./cli/job-store.js";
-import { formatJobList, formatPreview, formatRunSummary, describeResult } from "./jobs/format.js";
+import {
+  describeResult,
+  formatAccept,
+  formatJobList,
+  formatPreview,
+  formatRunSummary,
+  formatSuggestions,
+} from "./jobs/format.js";
 import { emptyJobState, validateJob, type Job } from "./jobs/model.js";
-import { refreshManagedPlaylist, type RefreshClient } from "./jobs/refresh.js";
-import { runDue, type ConnectResult, type RunDueDeps } from "./jobs/run-due.js";
+import { runPass, type RefreshClient } from "./jobs/refresh.js";
+import { acceptNow, runDue, type ConnectResult, type RunDueDeps } from "./jobs/run-due.js";
 import { scheduleSnippet } from "./jobs/schedule-print.js";
 import { jobsService, type JobsService } from "./jobs/service.js";
 import { openInBrowser } from "./cli/open-browser.js";
@@ -789,6 +796,21 @@ function runJobsOffline(args: JobsArgs): boolean {
       logger.info(`Resumed ${args.id}; it runs on the next run-due or serve tick.`);
       return true;
     }
+    case "suggestions": {
+      const view = service.get(args.id);
+      if (view === undefined) {
+        throw new Error(`No job ${args.id} (see qobuz-helper jobs list)`);
+      }
+      output.set("suggestions", view.state.suggestions);
+      logger.info(formatSuggestions(view));
+      return true;
+    }
+    case "ignore": {
+      const state = service.ignore(args.id, args.keys);
+      output.set("state", state);
+      logger.info(`Ignored; ${state.suggestions.length} suggestion(s) left.`);
+      return true;
+    }
     case "remove":
       if (args.deletePlaylist) {
         return false;
@@ -817,6 +839,17 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
     );
     return;
   }
+  if (args.action === "accept") {
+    const outcome = await acceptNow(
+      jobRunnerDeps(journal, async () => ({ ok: true, client })),
+      args.id,
+      args.keys,
+      new Date(),
+    );
+    output.set("outcome", outcome);
+    logger.info(formatAccept(outcome));
+    return;
+  }
   if (args.action === "run") {
     const summary = await runDue(
       jobRunnerDeps(journal, async () => ({ ok: true, client })),
@@ -831,7 +864,7 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
     return;
   }
 
-  const definition = { ...args.definition };
+  const definition: Record<string, unknown> = { ...args.definition };
   if (args.artistQueries.length > 0) {
     const found: { id: number; name: string }[] = [];
     const problems: string[] = [];
@@ -847,16 +880,29 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
     if (problems.length > 0) {
       throw new Error(`No Qobuz artist found for: ${problems.join(", ")}`);
     }
-    definition.recipe = { ...definition.recipe, artists: { type: "list", artists: found } };
+    const field = args.kind === "discovery" ? "seeds" : "artists";
+    definition["source"] = { ...args.definition.source, [field]: { type: "list", artists: found } };
+  }
+  if (definition["name"] === undefined) {
+    // A job on an existing playlist is named after it.
+    const target = definition["target"] as { type: string; playlistId?: number };
+    definition["name"] =
+      target.type === "favourites"
+        ? "Favourites"
+        : (await client.getPlaylist(target.playlistId ?? 0)).name;
   }
   const now = new Date();
   // Validate and preview the first refresh before saving anything.
   const draft: Job = validateJob({ ...definition, id: "00000000", createdAt: now.toISOString() });
-  const { preview } = await refreshManagedPlaylist(client, draft, emptyJobState(), { now, dryRun: true });
+  const { preview } = await runPass(client, draft, emptyJobState(), { now, dryRun: true });
   output.assign({ definition: draft, preview });
   logger.info(formatPreview(draft.name, preview));
   if (!args.apply) {
-    logger.info("\n(dry run -- pass --apply to save the job and make the playlist)");
+    logger.info(
+      draft.target.type === "created"
+        ? "\n(dry run -- pass --apply to save the job and make the playlist)"
+        : "\n(dry run -- pass --apply to save the job and run it)",
+    );
     return;
   }
   const job = service.create(definition, now);
@@ -879,8 +925,9 @@ function jobsApi(journal: Journal, client: RefreshClient): NonNullable<ApiDeps["
     preview: async (input) => {
       const now = new Date();
       const job = validateJob({ ...(input as object), id: "00000000", createdAt: now.toISOString() });
-      return (await refreshManagedPlaylist(client, job, emptyJobState(), { now, dryRun: true })).preview;
+      return (await runPass(client, job, emptyJobState(), { now, dryRun: true })).preview;
     },
+    accept: (id, keys) => acceptNow(deps, id, keys, new Date()),
   };
 }
 
@@ -2066,7 +2113,14 @@ function printUsage(): void {
       "  qobuz-helper history [--limit N]",
       "  qobuz-helper undo [<id>] [--apply]",
       "  qobuz-helper jobs [list | show <id> | pause <id> | resume <id> | run <id> [--dry-run] | remove <id> [--delete-playlist]]",
-      '  qobuz-helper jobs create new-releases (\"Artist\" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--window last-days:N|since:YYYY-MM-DD|latest:N] [--include albums,eps,live,compilations] [--edits respect|mirror] [--every hour|day|week] [--at HH:MM] [--weekday mon..sun] [--max-releases N] [--max-tracks N] [--fit <minutes>] [--public] [--hide-favourites] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
+      "  qobuz-helper jobs [suggestions <id> | accept <id> <key...>|--all | ignore <id> <key...>|--all]",
+      '  qobuz-helper jobs create new-releases ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--window last-days:N|since:YYYY-MM-DD|latest:N] [--include albums,eps,live,compilations] [--max-releases N] [--hide-favourites] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [shared options]',
+      '  qobuz-helper jobs create combined <playlist|favourites>... --name "<name>" [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [shared options]',
+      '  qobuz-helper jobs create follow <playlist> --name "<name>" [--archive] [shared options]',
+      '  qobuz-helper jobs create smart <playlist|favourites>... --name "<name>" [--hires|--cd] [--decades 1990s,2000s] [--genres jazz,soul] [--favourited-within DAYS] [--min-length M:SS] [--max-length M:SS] [--order as-listed|newest-favourited|newest-release|by-artist|shuffle] [shared options]',
+      '  qobuz-helper jobs create discovery ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--artists-per-rotation M] [--tracks-per-artist K] [--rotation day|week] [--avoid-repeats N] [--keep-favourite-tracks] [shared options]',
+      "  qobuz-helper jobs create tidy <playlist|favourites> (--dedupe | --upgrade | --repair)... [shared options]",
+      "    shared options: [--into <playlist>] [--edits respect|mirror] [--every hour|day|week] [--at HH:MM] [--weekday mon..sun] [--dedupe[=every-pass|weekly|monthly]] [--upgrade[=...]] [--repair[=...]] [--repair-remove] [--dedupe-keep <chain>] [--suggest] [--max-tracks N] [--fit <minutes>] [--public] [--apply]",
       "  qobuz-helper run-due [--dry-run]",
       "  qobuz-helper serve [--no-open] [--port N]",
       "  qobuz-helper schedule print (--cron | --systemd | --launchd | --windows)",
@@ -2097,7 +2151,7 @@ function printUsage(): void {
       'stats --decade-playlist takes a decade such as 1990s (or unknown); it creates "Favourites: 1990s" (or --name) only with --apply.',
       "Every change is recorded in history.jsonl beside the session (the last 200, up to 90 days); history lists them (--limit, default 20).",
       "undo shows how the latest change not yet undone (or the entry <id>) would be reversed, and reverses it only with --apply.",
-      "jobs create previews the first refresh and saves (and runs) the job only with --apply; defaults: --window last-days:30, albums and eps, --edits respect (tracks you remove stay out, tracks you add stay), --every day --at 06:00.",
+      "jobs create previews the first pass and saves (and runs) the job only with --apply; defaults: --window last-days:30, albums and eps, --edits respect (tracks you remove stay out, tracks you add stay), --every day --at 06:00. --into manages one of your playlists instead of making one (respect edits only). Tidy-ups default to: repair weekly, upgrade monthly, dedupe every pass; they apply their changes (undoable in history) unless --suggest, which leaves them for jobs accept/ignore.",
       "Jobs run whenever run-due (from your OS scheduler: see schedule print) or serve (web UI + a ticker, for an always-on machine) runs; missed runs catch up once.",
       "login --print-url signs in on a machine without a browser: open the printed link anywhere and paste back the address you end up on.",
       "word-play reports only unless --apply is given; --split defaults to fewest, --max-span to 6 (1-8), --count to 25 (1-100); the playlist is named after the text unless --name is given.",

@@ -12,7 +12,7 @@ import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.
 import { Journal, recordingClient } from "../features/journal.js";
 import { emptyJobState, type JobsFile, type JobState } from "../jobs/model.js";
 import type { RefreshPreview } from "../jobs/refresh.js";
-import type { RunSummary } from "../jobs/run-due.js";
+import type { AcceptOutcome, RunSummary } from "../jobs/run-due.js";
 import { jobsService } from "../jobs/service.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
@@ -2178,19 +2178,20 @@ describe("POST /api/history/plan and /api/history/undo", () => {
 describe("job routes", () => {
   const input = {
     name: "Fresh",
-    kind: "managed-playlist",
+    kind: "playlist",
     schedule: { every: "day" },
-    recipe: {
+    target: { type: "created" },
+    source: {
       type: "new-releases",
       artists: { type: "list", artists: [{ id: 1, name: "Air" }] },
       window: { type: "last-days", days: 30 },
     },
   };
   const summary = { status: "ran" as const, reports: [], invalid: [] };
-  const preview = { createsPlaylist: true, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [] };
+  const preview = { createsPlaylist: true, add: [], remove: [], newlyDismissed: [], withheldRemovals: 0, complete: true, notes: [], findings: [] };
 
   function jobDeps(overrides: Partial<NonNullable<ApiDeps["jobs"]>> = {}) {
-    let file: JobsFile = { version: 1, jobs: [] };
+    let file: JobsFile = { version: 2, jobs: [] };
     const states = new Map<string, JobState>();
     let n = 0;
     const jobsSvc = jobsService({
@@ -2209,6 +2210,7 @@ describe("job routes", () => {
       service: jobsSvc,
       runNow: vi.fn(async () => summary as RunSummary),
       preview: vi.fn(async () => preview as RefreshPreview),
+      accept: vi.fn(async () => ({ status: "accepted" as const, applied: 1, stale: 0, replaced: 1, removed: 0, notes: [] }) as AcceptOutcome),
       ...overrides,
     };
     return { jobs, states, account: history.account, journal: history.journal, d: { ...history.deps, jobs } };
@@ -2295,6 +2297,40 @@ describe("job routes", () => {
     d.service.searchArtists = vi.fn(async (q: string) => (q === "Air" ? [{ id: 1, name: "Air" }] : []));
     const res = await handleApi(request("POST", "/api/jobs/artists", { queries: ["Air", "Nobody"] }), d);
     expect(res.body).toEqual({ artists: [{ id: 1, name: "Air" }], problems: ["Nobody"] });
+  });
+
+  it("accepts and ignores suggestions", async () => {
+    const { d, jobs, states } = jobDeps();
+    await handleApi(request("POST", "/api/jobs", { job: { ...input, tidy: { upgrade: { mode: "suggest" } } } }), d);
+    states.set("00000001", {
+      ...emptyJobState(),
+      suggestions: [{ key: "upgrade:1>2", tidy: "upgrade", summary: "s", change: { type: "replace", trackId: 1, newTrackId: 2 }, foundAt: "x" }],
+    });
+    const accepted = await handleApi(request("POST", "/api/jobs/00000001/suggestions", { accept: ["upgrade:1>2"] }), d);
+    expect(accepted.body).toMatchObject({ outcome: { status: "accepted", applied: 1 } });
+    expect(jobs.accept).toHaveBeenCalledWith("00000001", ["upgrade:1>2"]);
+    const ignored = await handleApi(request("POST", "/api/jobs/00000001/suggestions", { ignore: "all" }), d);
+    expect(ignored.body).toMatchObject({ state: { suggestions: [], ignored: ["upgrade:1>2"] } });
+    expect((await handleApi(request("POST", "/api/jobs/00000001/suggestions", {}), d)).status).toBe(400);
+    expect((await handleApi(request("POST", "/api/jobs/00000001/suggestions", { accept: 3 }), d)).status).toBe(400);
+    expect((await handleApi(request("POST", "/api/jobs/ffffffff/suggestions", { accept: "all" }), d)).status).toBe(404);
+  });
+
+  it("answers 409 when accepting while another runner is busy", async () => {
+    const { d } = jobDeps({ accept: vi.fn(async () => ({ status: "busy" as const, message: "busy" })) });
+    await handleApi(request("POST", "/api/jobs", { job: input }), d);
+    const res = await handleApi(request("POST", "/api/jobs/00000001/suggestions", { accept: "all" }), d);
+    expect(res.status).toBe(409);
+  });
+
+  it("never deletes a playlist the job adopted", async () => {
+    const { d, account } = jobDeps();
+    const playlistId = account.seedPlaylist("Mine", [1]);
+    const created = await handleApi(request("POST", "/api/jobs", { job: { ...input, target: { type: "adopted", playlistId } } }), d);
+    expect(created.status).toBe(200);
+    const res = await handleApi(request("DELETE", "/api/jobs/00000001", { deletePlaylist: true }), d);
+    expect(res.body).toMatchObject({ playlistDeleted: false });
+    expect(account.playlists.has(playlistId)).toBe(true);
   });
 
   it("deletes the playlist too when asked, as a history entry", async () => {
