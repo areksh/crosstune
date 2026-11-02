@@ -9,7 +9,7 @@
 
 import { QobuzError, type Playlist, type Track } from "../qobuz/index.js";
 import type { JobState, ManagedPlaylistJob, RunResultSummary } from "./model.js";
-import { planMoves, reconcile, type PresentEntry } from "./reconcile.js";
+import { planMoves, reconcile, settlePending, type PresentEntry } from "./reconcile.js";
 import { resolveNewReleasesFeed, type FeedClient } from "./recipes/new-releases.js";
 
 export type RefreshClient = FeedClient & {
@@ -46,6 +46,21 @@ export interface RefreshOutcome {
 }
 
 export const MANAGED_DESCRIPTION = "Managed by qobuz-helper";
+
+/**
+ * A refresh failed after it may have changed the playlist. `state` is what to
+ * save so the next refresh carries on from what was done: the playlist (even
+ * if just created) and the writes in flight (`pending`).
+ */
+export class RefreshWriteError extends Error {
+  readonly state: JobState;
+
+  constructor(cause: unknown, state: JobState) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "RefreshWriteError";
+    this.state = state;
+  }
+}
 
 /** True for Qobuz's "no such thing" (HTTP 404). */
 export function isNotFound(error: unknown): boolean {
@@ -108,12 +123,14 @@ export async function refreshManagedPlaylist(
     state: state.similar === undefined ? {} : { similar: state.similar },
   });
   const present = playlistId === undefined ? [] : entriesOf(await client.getPlaylistTracks(playlistId));
+  const owned0 =
+    state.pending === undefined ? state.owned : settlePending(state.owned, present, state.pending);
   const plan = reconcile({
     mode: job.edits,
     desired: recipe.tracks,
     complete: recipe.complete,
     present,
-    owned: state.owned,
+    owned: owned0,
     dismissed: state.dismissed,
   });
 
@@ -149,28 +166,52 @@ export async function refreshManagedPlaylist(
     };
   }
 
-  if (playlistId === undefined) {
-    playlistId = (
-      await client.createPlaylist(job.name, { description: MANAGED_DESCRIPTION, isPublic: job.isPublic })
-    ).id;
-  }
-  if (plan.remove.length > 0) {
-    await client.removeTracksFromPlaylist(playlistId, plan.remove);
-  }
   let owned = plan.keptOwned;
-  if (plan.add.length > 0) {
-    await client.addTracksToPlaylist(playlistId, plan.add);
-    const before = new Set(present.map((entry) => entry.playlistTrackId));
-    const adding = new Set(plan.add);
-    const after = entriesOf(await client.getPlaylistTracks(playlistId));
-    owned = [
-      ...owned,
-      ...after.filter((entry) => !before.has(entry.playlistTrackId) && adding.has(entry.trackId)),
-    ];
-    const reordered = await reorder(client, playlistId, after, owned, recipe.tracks.map((t) => t.trackId));
-    if (!reordered) {
-      notes.push("The new tracks could not be moved into place; they are at the end.");
+  try {
+    if (playlistId === undefined) {
+      playlistId = (
+        await client.createPlaylist(job.name, { description: MANAGED_DESCRIPTION, isPublic: job.isPublic })
+      ).id;
     }
+    if (plan.remove.length > 0) {
+      await client.removeTracksFromPlaylist(playlistId, plan.remove);
+    }
+    let after: PresentEntry[];
+    if (plan.add.length > 0) {
+      await client.addTracksToPlaylist(playlistId, plan.add);
+      const before = new Set(present.map((entry) => entry.playlistTrackId));
+      const adding = new Set(plan.add);
+      after = entriesOf(await client.getPlaylistTracks(playlistId));
+      owned = [
+        ...owned,
+        ...after.filter((entry) => !before.has(entry.playlistTrackId) && adding.has(entry.trackId)),
+      ];
+    } else {
+      const removed = new Set(plan.remove);
+      after = present.filter((entry) => !removed.has(entry.playlistTrackId));
+    }
+    // New tracks go into place; a mirrored playlist is kept in order even when
+    // nothing was added (a respected one keeps the order the user gave it).
+    if (plan.add.length > 0 || job.edits === "mirror") {
+      const reordered = await reorder(client, playlistId, after, owned, recipe.tracks.map((t) => t.trackId));
+      if (!reordered) {
+        notes.push("The tracks could not be moved into place; new ones are at the end.");
+      }
+    }
+  } catch (cause) {
+    const partial: JobState = {
+      ...state,
+      owned: owned0,
+      dismissed: plan.dismissed,
+      pending: { removed: plan.remove, added: plan.add },
+    };
+    if (playlistId !== undefined) {
+      partial.playlistId = playlistId;
+    }
+    if (recipe.similar !== undefined) {
+      partial.similar = recipe.similar;
+    }
+    throw new RefreshWriteError(cause, partial);
   }
 
   const result: RunResultSummary = {
@@ -189,6 +230,7 @@ export async function refreshManagedPlaylist(
     lastRunAt: now.toISOString(),
     lastResult: result,
   };
+  delete next.pending;
   if (recipe.similar !== undefined) {
     next.similar = recipe.similar;
   }

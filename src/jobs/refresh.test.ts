@@ -5,7 +5,7 @@ import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.
 import { Journal, recordingClient } from "../features/journal.js";
 import { applyUndo, planUndo } from "../features/undo.js";
 import { emptyJobState, validateJob, type JobState, type ManagedPlaylistJob } from "./model.js";
-import { refreshManagedPlaylist, type RefreshClient } from "./refresh.js";
+import { RefreshWriteError, refreshManagedPlaylist, type RefreshClient } from "./refresh.js";
 
 const A: Artist = { id: 1, name: "Air" };
 const DAY1 = new Date("2026-11-01T12:00:00Z");
@@ -206,6 +206,68 @@ describe("refreshManagedPlaylist", () => {
     expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
     const third = await run(recorded, second.state);
     expect(third.state.dismissed).toEqual([31]);
+    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+  });
+
+  it("keeps the new playlist when adding to it fails, and fills it next run", async () => {
+    const { account, client } = world();
+    account.failAfter("addTracksToPlaylist", 0);
+    const error = await run(client, emptyJobState()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RefreshWriteError);
+    const saved = (error as RefreshWriteError).state;
+    expect(saved.playlistId).toBeDefined();
+    const second = await run(client, saved);
+    expect(second.state.playlistId).toBe(saved.playlistId);
+    expect(account.calls.filter((c) => c.startsWith("createPlaylist"))).toHaveLength(1);
+    expect(account.trackIds(saved.playlistId ?? 0)).toEqual([21, 22, 11, 12]);
+    expect(second.state.pending).toBeUndefined();
+  });
+
+  it("owns tracks it added before a failed read-back, so they still age out", async () => {
+    const { account, client } = world();
+    account.failAfter("getPlaylistTracks", 0); // the read-back after adding
+    const error = await run(client, emptyJobState()).catch((e: unknown) => e);
+    const saved = (error as RefreshWriteError).state;
+    expect(saved.pending?.added).toEqual([21, 22, 11, 12]);
+    const id = saved.playlistId ?? 0;
+    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    const second = await run(client, saved);
+    expect(second.state.owned.map((e) => e.trackId).sort()).toEqual([11, 12, 21, 22]);
+    expect(second.result.added).toBe(0);
+    const third = await run(client, second.state, { now: new Date("2026-11-22T12:00:00Z") });
+    expect(account.trackIds(id)).toEqual([21, 22]);
+    expect(third.state.dismissed).toEqual([]);
+  });
+
+  it("does not dismiss what a removal that failed part-way did remove", async () => {
+    const { account, client } = world();
+    const first = await run(client, emptyJobState());
+    const id = first.state.playlistId ?? 0;
+    // Removing r1's two tracks: the first goes, then the request fails.
+    const remove = account.removeTracksFromPlaylist.bind(account);
+    client.removeTracksFromPlaylist = async (playlistId, ptids) => {
+      await remove(playlistId, ptids.slice(0, 1));
+      throw new Error("Qobuz 500");
+    };
+    const later = new Date("2026-11-22T12:00:00Z");
+    const error = await run(client, first.state, { now: later }).catch((e: unknown) => e);
+    const saved = (error as RefreshWriteError).state;
+    client.removeTracksFromPlaylist = remove;
+    const second = await run(client, saved, { now: later });
+    expect(second.state.dismissed).toEqual([]);
+    expect(account.trackIds(id)).toEqual([21, 22]);
+  });
+
+  it("reorders a mirrored playlist even when nothing is added", async () => {
+    const { account, client } = world();
+    const mirror = job({ edits: "mirror" });
+    const first = await run(client, emptyJobState(), { job: mirror });
+    const id = first.state.playlistId ?? 0;
+    const entries = account.entryIds(id);
+    // The user drags the last track to the top.
+    await account.movePlaylistTracks(id, [entries[3] ?? 0], 1);
+    expect(account.trackIds(id)).toEqual([12, 21, 22, 11]);
+    await run(client, first.state, { job: mirror });
     expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
   });
 });

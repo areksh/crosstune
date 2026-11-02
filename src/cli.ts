@@ -558,7 +558,7 @@ async function main(): Promise<void> {
     const recorded = recordingClient(client, journal);
     await (command === "undo"
       ? run(recorded, session)
-      : journal.run({ tool: command }, () => run(recorded, session)));
+      : journal.run({ tool: command === "jobs" ? "managed" : command }, () => run(recorded, session)));
   }
   output.flush();
 }

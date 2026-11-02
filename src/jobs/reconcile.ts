@@ -111,6 +111,36 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
   };
 }
 
+/**
+ * Settle what a refresh that failed part-way was writing, before reconciling:
+ * owned entries it was removing that are gone are dropped (they are not the
+ * user's removals, so not dismissed), and entries of the tracks it was adding
+ * are owned (one per track, not already owned) -- otherwise they would look
+ * added by hand and never age out.
+ */
+export function settlePending(
+  owned: readonly OwnedEntry[],
+  present: readonly PresentEntry[],
+  pending: { removed: readonly number[]; added: readonly number[] },
+): OwnedEntry[] {
+  const presentIds = new Set(present.map((entry) => entry.playlistTrackId));
+  const removing = new Set(pending.removed);
+  const kept = owned.filter(
+    (entry) => presentIds.has(entry.playlistTrackId) || !removing.has(entry.playlistTrackId),
+  );
+  const ownedIds = new Set(kept.map((entry) => entry.playlistTrackId));
+  const ownedTracks = new Set(kept.map((entry) => entry.trackId));
+  const adding = new Set(pending.added);
+  const adopted: OwnedEntry[] = [];
+  for (const entry of present) {
+    if (!ownedIds.has(entry.playlistTrackId) && adding.has(entry.trackId) && !ownedTracks.has(entry.trackId)) {
+      ownedTracks.add(entry.trackId);
+      adopted.push({ playlistTrackId: entry.playlistTrackId, trackId: entry.trackId });
+    }
+  }
+  return [...kept, ...adopted];
+}
+
 function unique(ids: readonly number[]): number[] {
   return [...new Set(ids)];
 }

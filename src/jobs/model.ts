@@ -108,6 +108,13 @@ export interface JobState {
   owned: OwnedEntry[];
   /** Tracks the user took out; never added again (respect mode). */
   dismissed: number[];
+  /**
+   * What a refresh that failed part-way was writing: playlist-track ids it was
+   * removing and track ids it was adding. The next refresh settles them (see
+   * settlePending), so a half-done write is neither mistaken for the user's
+   * edits nor left unowned.
+   */
+  pending?: { removed: number[]; added: number[] };
   similar?: { takenAt: string; artists: ArtistRef[] };
   lastResult?: RunResultSummary;
 }
@@ -463,6 +470,15 @@ export function parseJobState(raw: unknown): JobState {
   state.dismissed = Array.isArray(value["dismissed"])
     ? value["dismissed"].map((id) => integer(id, "dismissed track", 0, Number.MAX_SAFE_INTEGER))
     : [];
+  if (value["pending"] !== undefined) {
+    const pending = record(value["pending"], "pending");
+    const ids = (raw: unknown, what: string): number[] =>
+      Array.isArray(raw) ? raw.map((id) => integer(id, what, 0, Number.MAX_SAFE_INTEGER)) : [];
+    state.pending = {
+      removed: ids(pending["removed"], "pending removal"),
+      added: ids(pending["added"], "pending addition"),
+    };
+  }
   if (value["similar"] !== undefined) {
     const similar = record(value["similar"], "similar");
     state.similar = {

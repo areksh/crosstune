@@ -145,6 +145,7 @@ describe("job state", () => {
       paused: { reason: "playlist-deleted" as const, since: "2026-11-02T06:00:00.000Z" },
       owned: [{ playlistTrackId: 10, trackId: 1 }],
       dismissed: [5],
+      pending: { removed: [11], added: [3, 4] },
       similar: { takenAt: "2026-11-01T00:00:00.000Z", artists: [{ id: 2, name: "Air" }] },
       lastResult: {
         at: "2026-11-02T06:00:00.000Z",

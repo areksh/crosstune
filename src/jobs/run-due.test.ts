@@ -14,7 +14,7 @@ import {
   type JobState,
   type RunResultSummary,
 } from "./model.js";
-import type { RefreshClient, RefreshOutcome } from "./refresh.js";
+import { RefreshWriteError, type RefreshClient, type RefreshOutcome } from "./refresh.js";
 import { runDue, type RunDueDeps } from "./run-due.js";
 import { JobsFileError, type GlobalFlags, type RunRecord } from "./stores.js";
 
@@ -236,5 +236,25 @@ describe("runDue", () => {
     expect(states.size).toBe(0);
     expect(runs).toEqual([]);
     expect(deps.refresh.mock.calls[0]?.[3]).toEqual({ now: NOW, dryRun: true });
+  });
+
+  it("saves the partial state a refresh that failed mid-write carries", async () => {
+    const { deps, states } = setup([job("aaaaaaaa", { schedule: { every: "day" } })]);
+    const partial = { ...emptyJobState(), playlistId: 42, pending: { removed: [], added: [7] } };
+    deps.refresh.mockRejectedValueOnce(new RefreshWriteError(new Error("Qobuz 500"), partial));
+    const summary = await runDue(deps, NOW);
+    expect(summary.reports[0]?.result).toMatchObject({ status: "failed", error: "Qobuz 500" });
+    expect(states.get("aaaaaaaa")).toMatchObject({ playlistId: 42, pending: { added: [7] }, consecutiveFailures: 1 });
+  });
+
+  it("saves the partial state when the session is rejected mid-write", async () => {
+    const { deps, states } = setup([job("aaaaaaaa")]);
+    const partial = { ...emptyJobState(), playlistId: 42 };
+    deps.refresh.mockRejectedValueOnce(
+      new RefreshWriteError(new QobuzError("authentication", "expired"), partial),
+    );
+    const summary = await runDue(deps, NOW);
+    expect(summary.status).toBe("needs-sign-in");
+    expect(states.get("aaaaaaaa")?.playlistId).toBe(42);
   });
 });

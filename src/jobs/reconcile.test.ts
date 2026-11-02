@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planMoves, reconcile, type ReconcileInput } from "./reconcile.js";
+import { planMoves, reconcile, settlePending, type ReconcileInput } from "./reconcile.js";
 
 const desired = (...trackIds: number[]) => trackIds.map((trackId) => ({ trackId, source: "album:x" }));
 /** Present entries: playlist-track id = 100 + track id unless given as [ptid, track]. */
@@ -193,5 +193,32 @@ describe("planMoves", () => {
       const ranked = moved.filter((e) => e.rank !== undefined).map((e) => e.rank);
       expect(ranked).toEqual([...ranked].sort((a, b) => (a ?? 0) - (b ?? 0)));
     }
+  });
+});
+
+describe("settlePending", () => {
+  it("drops owned entries a failed run had removed, without dismissing them", () => {
+    const owned = present(1, 2, 3);
+    const settled = settlePending(owned, present(1, 3), { removed: [102], added: [] });
+    expect(settled).toEqual(present(1, 3));
+  });
+
+  it("keeps an owned entry the user removed when the failed run did not mean to", () => {
+    const owned = present(1, 2);
+    expect(settlePending(owned, present(1), { removed: [], added: [] })).toEqual(owned);
+  });
+
+  it("adopts entries a failed run had added", () => {
+    const settled = settlePending(present(1), present(1, 7, 8, 9), { removed: [], added: [7, 8] });
+    expect(settled).toEqual(present(1, 7, 8));
+  });
+
+  it("adopts one copy of each track only, and none already owned", () => {
+    const settled = settlePending(
+      present([500, 1]),
+      present([500, 1], [501, 1], [600, 7], [601, 7]),
+      { removed: [], added: [1, 7] },
+    );
+    expect(settled).toEqual(present([500, 1], [600, 7]));
   });
 });
