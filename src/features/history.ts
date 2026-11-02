@@ -616,6 +616,7 @@ const TOOL_NAMES: Record<string, string> = {
   upgrade: "Upgrade & repair",
   stats: "Library stats",
   "new-releases": "New releases",
+  managed: "Managed playlist",
   import: "Import",
   restore: "Restore backup",
   undo: "Undo",
