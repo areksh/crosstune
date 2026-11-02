@@ -899,20 +899,67 @@ export class QobuzClient {
    * @throws {QobuzError} kind `authentication` if not signed in.
    */
   async removeFavoriteTracks(trackIds: readonly number[]): Promise<void> {
-    for (const batch of chunk(trackIds, MAX_TRACK_IDS_PER_REQUEST)) {
-      const response = await this.#signedGet(
-        "favoritedelete",
-        paths.favoriteDelete,
-        [["track_ids", batch.join(",")]],
-        { requireAuth: true },
+    await this.#deleteFavorites("track_ids", trackIds.map(String));
+  }
+
+  /**
+   * Remove albums from the user's favourites by album id. No-op for an empty
+   * list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async removeFavoriteAlbums(albumIds: readonly string[]): Promise<void> {
+    await this.#deleteFavorites("album_ids", [...albumIds]);
+  }
+
+  /**
+   * Remove artists from the user's favourites by artist id. No-op for an
+   * empty list.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in.
+   */
+  async removeFavoriteArtists(artistIds: readonly number[]): Promise<void> {
+    await this.#deleteFavorites("artist_ids", artistIds.map(String));
+  }
+
+  /**
+   * Delete one of the signed-in user's playlists, via `playlist/delete`.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in, or
+   *   `api-response` if Qobuz rejects the deletion.
+   */
+  async deletePlaylist(playlistId: number): Promise<void> {
+    const response = await this.#signedGet(
+      "playlistdelete",
+      paths.playlistDelete,
+      [["playlist_id", String(playlistId)]],
+      { requireAuth: true },
+    );
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/delete failed with HTTP ${response.status}`,
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `favorite/delete failed with HTTP ${response.status}`,
-        );
-      }
     }
+  }
+
+  /**
+   * Look up a playlist's name and track count, without its tracks (one
+   * `playlist/get` request).
+   *
+   * @throws {QobuzError} kind `api-response` if Qobuz has no such playlist.
+   */
+  async getPlaylist(playlistId: number): Promise<Playlist> {
+    const response = await this.#signedGet("playlistget", paths.playlistGet, [
+      ["playlist_id", String(playlistId)],
+    ]);
+    if (!response.ok) {
+      throw new QobuzError(
+        "api-response",
+        `playlist/get failed with HTTP ${response.status}`,
+      );
+    }
+    return parsePlaylist(await response.json());
   }
 
   /**
@@ -988,6 +1035,30 @@ export class QobuzClient {
         throw new QobuzError(
           "api-response",
           `favorite/create failed with HTTP ${response.status}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Remove favourites of one type via `favorite/delete`, batched like
+   * {@link #createFavorites}. No-op for an empty list.
+   */
+  async #deleteFavorites(
+    key: "track_ids" | "album_ids" | "artist_ids",
+    ids: readonly string[],
+  ): Promise<void> {
+    for (const batch of chunk(ids, MAX_TRACK_IDS_PER_REQUEST)) {
+      const response = await this.#signedGet(
+        "favoritedelete",
+        paths.favoriteDelete,
+        [[key, batch.join(",")]],
+        { requireAuth: true },
+      );
+      if (!response.ok) {
+        throw new QobuzError(
+          "api-response",
+          `favorite/delete failed with HTTP ${response.status}`,
         );
       }
     }

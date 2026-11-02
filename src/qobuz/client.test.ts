@@ -40,6 +40,8 @@ interface FetchOptions {
   playlist?: unknown;
   userPlaylists?: unknown;
   album?: unknown;
+  playlistGet?: unknown;
+  playlistGetStatus?: number;
 }
 
 /**
@@ -132,8 +134,14 @@ function makeFetch(options: FetchOptions): typeof fetch {
     if (path.endsWith("/playlist/updateTracksPosition")) {
       return new Response(JSON.stringify({ status: "success" }), { status: 200 });
     }
+    if (path.endsWith("/playlist/get")) {
+      return new Response(JSON.stringify(options.playlistGet ?? {}), {
+        status: options.playlistGetStatus ?? 200,
+      });
+    }
     if (
       path.endsWith("/playlist/deleteTracks") ||
+      path.endsWith("/playlist/delete") ||
       path.endsWith("/favorite/delete")
     ) {
       return new Response(JSON.stringify({ status: "success" }), { status: 200 });
@@ -1079,5 +1087,83 @@ describe("QobuzClient removal methods", () => {
     await expect(client.removeFavoriteTracks([1])).rejects.toBeInstanceOf(
       QobuzError,
     );
+  });
+});
+
+describe("QobuzClient.deletePlaylist", () => {
+  it("deletes a playlist by id with the user token", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.deletePlaylist(555);
+
+    const request = recorded.find((r) => r.url.pathname.endsWith("/playlist/delete"));
+    expect(request?.url.searchParams.get("playlist_id")).toBe("555");
+    expect(request?.url.searchParams.get("request_sig")).toMatch(/^[0-9a-f]{32}$/);
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("requires sign-in", async () => {
+    const { client } = await initedClient({});
+    await expect(client.deletePlaylist(555)).rejects.toBeInstanceOf(QobuzError);
+  });
+});
+
+describe("QobuzClient.getPlaylist", () => {
+  it("reads a playlist's name and track count without its tracks", async () => {
+    const { client, recorded } = await initedClient({
+      playlistGet: { id: 555, name: "Late Night", tracks_count: 42 },
+    });
+
+    await expect(client.getPlaylist(555)).resolves.toEqual({
+      id: 555,
+      name: "Late Night",
+      trackCount: 42,
+    });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/playlist/get"));
+    expect(request?.url.searchParams.get("playlist_id")).toBe("555");
+    expect(request?.url.searchParams.get("extra")).toBeNull();
+  });
+
+  it("throws when Qobuz has no such playlist", async () => {
+    const { client } = await initedClient({ playlistGetStatus: 404 });
+    await expect(client.getPlaylist(555)).rejects.toBeInstanceOf(QobuzError);
+  });
+});
+
+describe("QobuzClient remove-favourite albums and artists", () => {
+  it("removes albums and artists through favorite/delete", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    await client.removeFavoriteAlbums(["alb-a", "alb-b"]);
+    await client.removeFavoriteArtists([55]);
+
+    const deletes = recorded.filter((r) => r.url.pathname.endsWith("/favorite/delete"));
+    expect(deletes[0]?.url.searchParams.get("album_ids")).toBe("alb-a,alb-b");
+    expect(deletes[1]?.url.searchParams.get("artist_ids")).toBe("55");
+    for (const request of deletes) {
+      expect(request.headers.get("X-User-Auth-Token")).toBe("tok-session");
+    }
+  });
+
+  it("batches large removals and sends nothing for an empty list", async () => {
+    const { client, recorded } = await initedClient({
+      loginBody: validSessionBody(),
+    });
+    await client.loginWithOAuthCode("code");
+
+    const ids = Array.from({ length: 70 }, (_, i) => i + 1);
+    await client.removeFavoriteArtists(ids);
+    await client.removeFavoriteAlbums([]);
+
+    const batches = idBatches(recorded, "/favorite/delete", "artist_ids");
+    expect(batches.length).toBe(2);
+    expect(batches.flat()).toEqual(ids);
+    expect(recorded.some((r) => r.url.searchParams.has("album_ids"))).toBe(false);
   });
 });

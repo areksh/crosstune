@@ -29,6 +29,7 @@ export const paths = {
   playlistCreate: "/playlist/create",
   playlistAddTracks: "/playlist/addTracks",
   playlistDeleteTracks: "/playlist/deleteTracks",
+  playlistDelete: "/playlist/delete",
   favoriteCreate: "/favorite/create",
   favoriteDelete: "/favorite/delete",
   /**
