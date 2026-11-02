@@ -44,6 +44,12 @@ export interface HistoryStore {
   append(text: string): void;
   /** Replace the whole history (compaction). */
   replace(text: string): void;
+  /**
+   * Run `fn` holding the history's lock, so a compaction cannot drop a record
+   * another process appends meanwhile; undefined (without running `fn`) when
+   * another process holds it. Optional: without it, compaction is unlocked.
+   */
+  exclusive?<T>(fn: () => T): T | undefined;
 }
 
 export interface JournalOptions {
@@ -167,11 +173,20 @@ export class Journal {
   /** Append records, compacting the file instead when that drops old ones. */
   #append(records: HistoryRecord[], now: Date): void {
     try {
-      const all = [...parseHistory(this.#store.read()), ...records];
-      const kept = pruneRecords(all, now, this.#limits);
-      if (kept.length < all.length) {
-        this.#store.replace(serializeRecords(kept));
-      } else {
+      const compact = (): boolean => {
+        const all = [...parseHistory(this.#store.read()), ...records];
+        const kept = pruneRecords(all, now, this.#limits);
+        if (kept.length < all.length) {
+          this.#store.replace(serializeRecords(kept));
+          return true;
+        }
+        return false;
+      };
+      // Compaction re-reads and rewrites the file under the lock; when another
+      // process holds it, append now and compact on a later write.
+      const compacted =
+        this.#store.exclusive === undefined ? compact() : this.#store.exclusive(compact);
+      if (compacted !== true) {
         this.#store.append(serializeRecords(records));
       }
     } catch (error) {

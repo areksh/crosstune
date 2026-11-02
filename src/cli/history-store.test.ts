@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { tryAcquireLock } from "./file-lock.js";
 import { defaultHistoryPath, fileHistoryStore } from "./history-store.js";
 
 describe("history-store", () => {
@@ -21,6 +22,16 @@ describe("history-store", () => {
 
   it("lives beside the session, honouring XDG_CONFIG_HOME", () => {
     expect(defaultHistoryPath({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/qobuz-helper/history.jsonl");
+  });
+
+  it("runs exclusive sections under a lock, refusing while another process holds it", () => {
+    const store = fileHistoryStore(file);
+    expect(store.exclusive?.(() => "ran")).toBe("ran");
+    const held = tryAcquireLock(`${file}.lock`, { isAlive: () => true });
+    expect(held).toBeDefined();
+    expect(store.exclusive?.(() => "ran")).toBeUndefined();
+    held?.release();
+    expect(store.exclusive?.(() => "ran")).toBe("ran");
   });
 
   it("reads nothing before anything is written", () => {

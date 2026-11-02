@@ -13,6 +13,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { HistoryStore } from "../features/journal.js";
+import { tryAcquireLock } from "./file-lock.js";
+
+/** A compaction takes well under this; an older history lock is a leftover. */
+const HISTORY_LOCK_STALE_MS = 60_000;
 
 /** The default history path, honouring `XDG_CONFIG_HOME`. */
 export function defaultHistoryPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -42,6 +46,18 @@ export function fileHistoryStore(filePath: string = defaultHistoryPath()): Histo
       const temporary = `${filePath}.${process.pid}.tmp`;
       writeFileSync(temporary, text, { mode: 0o600 });
       renameSync(temporary, filePath);
+    },
+    exclusive: <T>(fn: () => T): T | undefined => {
+      mkdirSync(dirname(filePath), { recursive: true });
+      const lock = tryAcquireLock(`${filePath}.lock`, { staleMs: HISTORY_LOCK_STALE_MS });
+      if (lock === undefined) {
+        return undefined;
+      }
+      try {
+        return fn();
+      } finally {
+        lock.release();
+      }
     },
   };
 }

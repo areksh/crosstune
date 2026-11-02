@@ -129,6 +129,52 @@ describe("Journal", () => {
     expect(entriesOf(store).map((e) => e.id)).toEqual(["id2", "id3"]);
   });
 
+  it("compacts inside the store's exclusive section", () => {
+    const store = new MemoryStore();
+    let inside = false;
+    let replacedInside = false;
+    const locked = Object.assign(store, {
+      exclusive<T>(fn: () => T): T {
+        inside = true;
+        try {
+          return fn();
+        } finally {
+          inside = false;
+        }
+      },
+    });
+    const original = store.replace.bind(store);
+    store.replace = (text: string) => {
+      replacedInside = inside;
+      original(text);
+    };
+    const journal = new Journal({
+      store: locked,
+      source: "web",
+      now: () => new Date("2026-11-02T20:00:00.000Z"),
+      limits: { maxEntries: 1, maxAgeDays: 90 },
+    });
+    journal.record(createOp);
+    journal.record(createOp);
+    expect(store.replaces).toBe(1);
+    expect(replacedInside).toBe(true);
+  });
+
+  it("appends instead of compacting while the store is busy", () => {
+    const store = Object.assign(new MemoryStore(), { exclusive: () => undefined });
+    const journal = new Journal({
+      store,
+      source: "web",
+      now: () => new Date("2026-11-02T20:00:00.000Z"),
+      limits: { maxEntries: 1, maxAgeDays: 90 },
+    });
+    journal.record(createOp);
+    journal.record(createOp);
+    expect(store.replaces).toBe(0);
+    expect(store.appends).toBe(2);
+    expect(entriesOf(store)).toHaveLength(2);
+  });
+
   it("reports a failed write without failing the action", async () => {
     const onWriteError = vi.fn();
     const journal = new Journal({
