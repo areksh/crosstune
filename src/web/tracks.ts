@@ -182,7 +182,7 @@ export function trackRow(
 }
 
 /** A length in seconds as "4:51". */
-function clockTime(seconds: number): string {
+export function clockTime(seconds: number): string {
   const whole = Math.round(seconds);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }

@@ -80,6 +80,10 @@ function addSourceRow(): void {
 
   const select = document.createElement("select");
   select.className = "combine-source";
+  if (index === 0) {
+    // Where "Open in Combine" puts a playlist.
+    select.id = "combine-source-first";
+  }
   fillSourceSelect(select, index);
   row.appendChild(select);
 

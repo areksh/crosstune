@@ -19,6 +19,8 @@ import { initHomeView } from "./views/home.js";
 import { initImportExportView } from "./views/import-export.js";
 import { initManagedView } from "./views/managed.js";
 import { initNewReleasesView } from "./views/new-releases.js";
+import { guardUnsavedPlaylist } from "./views/playlist-editor.js";
+import { initPlaylistsView } from "./views/playlists.js";
 import { initPlaylistView } from "./views/playlist.js";
 import { initSimilarView } from "./views/similar.js";
 import { initStatsView } from "./views/stats.js";
@@ -31,6 +33,7 @@ const VIEWS = [
   "albums",
   "similar",
   "word-play",
+  "playlists",
   "deduplicate",
   "combine",
   "upgrade",
@@ -46,9 +49,9 @@ function isView(value: string): value is View {
   return (VIEWS as readonly string[]).includes(value);
 }
 
-/** The view named by the current URL hash, defaulting to home. */
+/** The view named by the current URL hash ("#/playlists/12" is playlists), defaulting to home. */
 function currentView(): View {
-  const name = location.hash.replace(/^#\/?/, "");
+  const name = location.hash.replace(/^#\/?/, "").split("/")[0] ?? "";
   return isView(name) ? name : "home";
 }
 
@@ -78,12 +81,15 @@ async function loadSession(): Promise<void> {
   }
 }
 
+// First, so that it can keep the user on an unsaved playlist before any view reacts.
+guardUnsavedPlaylist();
 initArtworkToggle();
 initHomeView();
 initPlaylistView();
 initAlbumsView();
 initSimilarView();
 initWordPlayView();
+initPlaylistsView();
 initDeduplicateView();
 initCombineView();
 initStatsView();

@@ -57,6 +57,22 @@ export async function openPlaylist(
   return { playlist, entries: toEntries(tracks) };
 }
 
+/** The managed playlist job behind a playlist. */
+export interface ManagedInfo {
+  jobName: string;
+  /** How it treats edits made by hand; `tidy`: it only tidies up. */
+  mode: "respect" | "mirror" | "tidy";
+}
+
+/** A playlist as the manager lists it. */
+export interface ManagerPlaylist extends Playlist {
+  /** Whether it is the user's own (others can only be read). */
+  owned: boolean;
+  managed?: ManagedInfo;
+  /** Names of the managed playlists whose source reads it. */
+  readBy: string[];
+}
+
 // ---- Saving -----------------------------------------------------------------
 
 export interface SaveRequest extends DraftChanges {
@@ -373,7 +389,8 @@ export function formatRemoveArtists(plan: RemoveArtistsPlan, includeGuests: bool
       const hint = suggestion === undefined ? "" : ` (did you mean ${suggestion.name}?)`;
       lines.push(`${name}: not in ${plan.playlists.length === 1 ? "this playlist" : "these playlists"}${hint}`);
     } else {
-      lines.push(`${name}: ${songs(main)}${guest === 0 ? "" : `, and ${guest} as a guest`}`);
+      const parts = [main > 0 ? songs(main) : "", guest > 0 ? `${guest} as a guest` : ""];
+      lines.push(`${name}: ${parts.filter((part) => part !== "").join(", and ")}`);
     }
   }
   plan.problems.forEach(({ line, reason }) => lines.push(`${line}: ${reason}`));

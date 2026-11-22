@@ -32,6 +32,7 @@
           </div>
           <div class="nav-group">
             <span class="nav-label">Tidy up</span>
+            <a class="nav-link" data-view="playlists" href="#/playlists">Playlists</a>
             <a class="nav-link" data-view="deduplicate" href="#/deduplicate">Deduplicator</a>
             <a class="nav-link" data-view="combine" href="#/combine">Combine playlists</a>
             <a class="nav-link" data-view="upgrade" href="#/upgrade">Upgrade &amp; repair</a>
@@ -128,6 +129,13 @@
             </section>
             <section class="tool-group">
               <h2>Tidy up</h2>
+              <a class="tool-link" href="#/playlists">
+                <span class="tool-name">Playlists</span>
+                <span class="tool-desc">
+                  Open a playlist to select, remove, move and reorder its songs,
+                  or remove whole artists at once.
+                </span>
+              </a>
               <a class="tool-link" href="#/deduplicate">
                 <span class="tool-name">Deduplicator</span>
                 <span class="tool-desc">
@@ -1017,6 +1025,155 @@
               <p id="wp-commit-result" class="result" hidden></p>
             </div>
           </section>
+        </section>
+
+        <!-- Playlists -->
+        <section id="view-playlists" class="view" hidden>
+          <div id="pl-list-page">
+            <header class="view-header">
+              <div class="view-title">
+                <h1>Playlists</h1>
+                <p class="lede">
+                  Open a playlist to edit its songs, or tick several to remove
+                  artists from all of them.
+                </p>
+              </div>
+            </header>
+            <div class="pl-controls">
+              <input id="pl-filter" type="text" placeholder="Filter playlists" aria-label="Filter playlists" />
+              <label class="field field-inline">
+                <span>Sort by</span>
+                <select id="pl-sort">
+                  <option value="changed">recently changed</option>
+                  <option value="name">name</option>
+                  <option value="songs">number of songs</option>
+                </select>
+              </label>
+              <label class="checkbox"><input id="pl-tick-all" type="checkbox" /> Tick all shown</label>
+            </div>
+            <p id="pl-result" class="result" role="status" hidden></p>
+            <p id="pl-error" class="error" role="alert" hidden></p>
+            <p id="pl-status" class="hint" aria-live="polite">Loading...</p>
+            <ul id="pl-list" class="pl-list"></ul>
+            <div id="pl-bar" class="commit-bar" hidden>
+              <p id="pl-bar-count" class="commit-count"></p>
+              <button id="pl-remove-artists" type="button">Remove artists...</button>
+            </div>
+
+            <section id="pl-artists" class="panel" hidden>
+              <div class="panel-head">
+                <h2>Remove artists</h2>
+                <button id="pl-artists-close" type="button" class="secondary small">Close</button>
+              </div>
+              <p id="pl-artists-where" class="hint"></p>
+              <label class="field">
+                <span>Artists, one per line: names, Qobuz artist links or /patterns/</span>
+                <textarea id="pl-artists-lines" rows="5" placeholder="Portishead&#10;https://play.qobuz.com/artist/..."></textarea>
+              </label>
+              <div class="actions">
+                <button id="pl-artists-find" type="button">Find their songs</button>
+              </div>
+              <p id="pl-artists-error" class="error" role="alert" hidden></p>
+              <div id="pl-artists-found" class="pl-artist-results" aria-live="polite"></div>
+              <div id="pl-artists-hits"></div>
+              <div id="pl-artists-bar" class="commit-bar" hidden>
+                <p class="commit-note">Ticked songs are removed. You can undo it in History.</p>
+                <button id="pl-artists-remove" type="button" class="danger">Remove</button>
+              </div>
+            </section>
+          </div>
+
+          <div id="pl-editor" hidden>
+            <header class="pl-editor-head">
+              <a href="#/playlists" class="pl-back">&larr; Playlists</a>
+              <div class="pl-title-row">
+                <h1 id="pl-name"></h1>
+                <div class="pl-head-actions">
+                  <details class="menu" id="pl-open-in">
+                    <summary>Open in</summary>
+                    <div class="menu-items" id="pl-open-in-items"></div>
+                  </details>
+                  <details class="menu" id="pl-more">
+                    <summary>Playlist</summary>
+                    <div class="menu-items" id="pl-more-items"></div>
+                  </details>
+                </div>
+              </div>
+              <p id="pl-meta" class="hint"></p>
+              <p id="pl-notice" class="info" hidden></p>
+            </header>
+            <p id="pl-editor-status" class="hint" aria-live="polite"></p>
+            <p id="pl-editor-error" class="error" role="alert" hidden></p>
+            <p id="pl-editor-result" class="result" role="status" hidden></p>
+
+            <div id="pl-editor-body" hidden>
+              <div class="pl-toolbar">
+                <input id="pl-search" type="search" placeholder="Search title, artist, album" aria-label="Search the songs" />
+                <details class="menu" id="pl-select-menu">
+                  <summary>Select</summary>
+                  <div class="menu-items" id="pl-select-items"></div>
+                </details>
+                <details class="menu" id="pl-sort-menu">
+                  <summary>Sort</summary>
+                  <div class="menu-items" id="pl-sort-items"></div>
+                </details>
+                <button id="pl-artists-toggle" type="button" class="secondary small" aria-expanded="false" aria-controls="pl-artist-panel">Artists</button>
+                <button id="pl-by-toggle" type="button" class="secondary small" aria-expanded="false" aria-controls="pl-by-panel">By artist...</button>
+              </div>
+
+              <section id="pl-artist-panel" class="panel pl-panel" hidden aria-label="Artists in this playlist">
+                <input id="pl-artist-filter" type="text" placeholder="Filter artists" aria-label="Filter artists" />
+                <ul id="pl-artist-list" class="pl-artist-list"></ul>
+              </section>
+
+              <section id="pl-by-panel" class="panel pl-panel" hidden aria-label="Find songs by artist">
+                <label class="field">
+                  <span>Artists, one per line: names, Qobuz artist links or /patterns/</span>
+                  <textarea id="pl-by-lines" rows="5" placeholder="Portishead&#10;Massive Attack"></textarea>
+                </label>
+                <div id="pl-by-found" class="pl-artist-results" aria-live="polite"></div>
+                <label class="checkbox"><input id="pl-by-guests" type="checkbox" /> <span id="pl-by-guests-label">Include songs where they are only a guest</span></label>
+                <div class="segmented" role="radiogroup" aria-label="What to do with them">
+                  <label><input type="radio" name="pl-by-mode" value="remove" checked /> Remove these artists</label>
+                  <label><input type="radio" name="pl-by-mode" value="keep" /> Keep only these artists</label>
+                </div>
+                <div class="actions">
+                  <button id="pl-by-select" type="button" class="secondary">Select them</button>
+                  <button id="pl-by-apply" type="button">Remove</button>
+                </div>
+              </section>
+
+              <p id="pl-shown" class="hint pl-shown"></p>
+              <p id="pl-help" class="hint pl-help">
+                Click to select, shift-click for a range. Drag by the handle, or use Alt with the arrow
+                keys. Delete removes; Ctrl+Z undoes. Nothing changes on Qobuz until you save.
+              </p>
+              <ul id="pl-songs" class="pl-songs" role="listbox" aria-multiselectable="true" aria-label="Songs" tabindex="0" aria-describedby="pl-help"></ul>
+
+              <details id="pl-removed" class="pl-removed" hidden>
+                <summary id="pl-removed-summary"></summary>
+                <button id="pl-put-all-back" type="button" class="secondary small">Put all back</button>
+                <ul id="pl-removed-list" class="pl-removed-list"></ul>
+              </details>
+
+              <div id="pl-edit-bar" class="commit-bar pl-edit-bar" hidden>
+                <div id="pl-selection" class="pl-bar-row" hidden>
+                  <p id="pl-selected" class="commit-note" aria-live="polite"></p>
+                  <div class="pl-bar-buttons" id="pl-selection-actions"></div>
+                </div>
+                <div id="pl-draft" class="pl-bar-row" hidden>
+                  <p id="pl-draft-summary" class="commit-note"></p>
+                  <div class="pl-bar-buttons">
+                    <button id="pl-undo" type="button" class="secondary small">Undo</button>
+                    <button id="pl-redo" type="button" class="secondary small">Redo</button>
+                    <button id="pl-discard" type="button" class="secondary small">Discard</button>
+                    <button id="pl-save" type="button">Save changes</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p id="pl-live" class="visually-hidden" aria-live="polite"></p>
+          </div>
         </section>
 
         <!-- Deduplicator -->

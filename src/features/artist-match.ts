@@ -68,7 +68,8 @@ export function parseArtistTerms(
       const matches = compileArtistTerm(line);
       terms.push(line.startsWith("/") ? { line, matches } : { line, name: line, matches });
     } catch (error) {
-      problems.push({ line, reason: error instanceof Error ? error.message : String(error) });
+      const reason = error instanceof Error ? error.message : String(error);
+      problems.push({ line, reason: reason.replace(/^Invalid exclude pattern ".*": /s, "not a valid pattern: ") });
     }
   }
   return { terms, problems };

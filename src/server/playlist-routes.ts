@@ -19,6 +19,8 @@ import {
   resolveRemoveArtists,
   savePlaylist,
   saveProblem,
+  type ManagedInfo,
+  type ManagerPlaylist,
   type PlaylistRemoval,
   type SaveRequest,
 } from "../features/playlist-manager.js";
@@ -37,22 +39,6 @@ export const MANAGER_WRITES: readonly string[] = [
   "delete",
   "remove-artists/commit",
 ].map((name) => `${MANAGER_PREFIX}${name}`);
-
-/** The managed playlist job behind a playlist. */
-export interface ManagedInfo {
-  jobName: string;
-  /** How it treats edits made by hand; `tidy`: it only tidies up. */
-  mode: "respect" | "mirror" | "tidy";
-}
-
-/** A playlist as the manager lists it. */
-export interface ManagerPlaylist extends Playlist {
-  /** Whether it is the user's own (others can only be read). */
-  owned: boolean;
-  managed?: ManagedInfo;
-  /** Names of the managed playlists whose source reads it. */
-  readBy: string[];
-}
 
 /** A request that cannot be carried out, with the status to answer. */
 class RouteError extends Error {
