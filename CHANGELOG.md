@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Playlists**: a playlist manager in the web UI. Lists your playlists (rename,
+  describe, make public or private, duplicate, delete) and opens one as a draft
+  with every song on one page: search, select with clicks, shift-click or the
+  keyboard, drag one song or a whole selection, sort, shuffle, reverse, spread
+  out artists, and quick selections (duplicates, other versions, live,
+  unplayable, not hi-res, by date added, already in Favourites or another
+  playlist). Selected songs can be removed, moved or copied to another playlist,
+  split into a new one or favourited. Paste a list of artists to remove all
+  their songs, or keep only theirs, with guest appearances counted separately.
+  Edits have undo and redo and reach Qobuz only on *Save changes*, as one entry
+  in the history; a playlist changed elsewhere meanwhile is never overwritten,
+  and a song moved to another playlist is taken out only once it has arrived.
+- Remove artists from several playlists at once: in *Playlists*, or with the new
+  `remove-artists` command (a report unless `--apply` is given).
+- The Deduplicator points out songs you have in **other versions** (live,
+  acoustic, remixes) and keeps them, with an option -- *Also treat other versions
+  as the same song*, or `--include-versions` -- to count them as duplicates.
+- Undo now restores the order of reordered playlists, and changed playlist names,
+  descriptions and visibility. Undoing a large removal takes a few requests
+  instead of one per song.
 - Managed playlists can now be filled by more sources: a live **combined**
   playlist kept in sync with the playlists it combines, a copy that **follows**
   (or **archives**) another playlist, a **smart** playlist of tracks meeting
@@ -26,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Deduplicator (and Combine, and scheduled tidy-ups) could take a live or
+  remixed version for a duplicate of the original and remove it: matching by
+  artist and title ignored the version label Qobuz keeps apart from the title.
+  The label now counts, edition wording ("2011 Remaster") aside.
+- Songs with titles in other scripts (Cyrillic, Japanese, Greek...) could all
+  count as one song: everything outside a-z and 0-9 was dropped before comparing,
+  which left nothing. Letters of every script are kept now, and titles that are
+  only punctuation ("?", "!!!") are compared as written.
+- Undoing a change no longer leaves other songs at the end of the playlist when
+  one of them can no longer be played, and says which could not be put back:
+  Qobuz accepts such an add without an error and adds nothing.
+- A deleted playlist that was public comes back public when the deletion is
+  undone.
 - A change could vanish from the history when two qobuz-helper processes
   wrote it at the same moment (say the CLI while the web UI was open): trimming
   the history rewrites the file from what it read, dropping a record the other

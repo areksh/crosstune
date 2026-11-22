@@ -33,6 +33,11 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
   brown fox / jumped / over / ..."), or titles from your favourites or a
   playlist whose first letters spell a word or run from A to Z. Available on
   the CLI and in the web UI.
+- **Playlists** -- open any of your playlists to select many songs at once and
+  remove, move, copy, reorder or favourite them, drag them into order, sort or
+  shuffle, and remove every song by a list of artists -- in one playlist or
+  several. Edits are a draft until you save, and every save can be undone. In
+  the web UI; removing artists is on the CLI too.
 - **Deduplicator** -- report and remove duplicate tracks in a playlist or your
   favourites, including remasters and the same song on different albums, or
   scan all your playlists to also find songs saved in more than one of them.
@@ -392,8 +397,9 @@ npm run dev -- deduplicate --all-playlists
 The deduplicator matches tracks by ISRC or by a normalised artist+title
 signature: it treats remasters and the same song on different albums as
 duplicates, while keeping genuinely different versions (live, acoustic, remix)
-separate. For each duplicate group it marks one copy to keep and the rest to
-remove:
+separate. Songs you have in several versions are listed after the duplicates
+and kept; `--include-versions` counts them as duplicates instead. For each
+duplicate group it marks one copy to keep and the rest to remove:
 
 ```
 1. Black Sabbath - Paranoid
@@ -424,6 +430,23 @@ web UI.
 
 By default the command only **reports** the plan. Add `--apply` to actually
 remove the tracks marked `drop` (from the playlist, or from your favourites).
+
+```sh
+# What removing these artists from a playlist would remove, then do it
+npm run dev -- remove-artists --playlist 12345678 "Portishead" "Massive Attack"
+npm run dev -- remove-artists --playlist 12345678 "Portishead" "Massive Attack" --apply
+
+# From all your playlists, a list of artists from a file, guest spots too
+cat artists.txt | npm run dev -- remove-artists --all-playlists --include-guests
+```
+
+`remove-artists` takes names (the whole name, ignoring case and accents), Qobuz
+artist links and `/patterns/`, as arguments or on stdin, and `--playlist` (an id
+or link, repeatable) or `--all-playlists` (your own playlists). A song is an
+artist's when they are its main artist or a joint one; songs where they are only
+a guest are listed and kept unless `--include-guests` is given. An artist found
+nowhere is reported, with a suggestion when one is spelled like it. Without
+`--apply` it only reports.
 
 ```sh
 # Merge two playlists into a new one, each song once (dry run, then --apply)
@@ -645,10 +668,12 @@ days old, are kept; older ones are dropped the next time something is written.
 
 **What undo does.** For each playlist an entry touched, undo removes the
 entries it added (by their entry ids, so copies of the same track you added
-yourself are left alone), puts the tracks it removed back -- appended, then
-moved to their old positions -- and deletes a playlist the entry created if it
-still holds only what the entry put there (otherwise it removes just those
-tracks and keeps the playlist). Favourites it added are removed and favourites
+yourself are left alone), puts the tracks it removed back in their old
+positions and the ones it moved back where they were, and deletes a playlist the
+entry created if it still holds only what the entry put there (otherwise it
+removes just those tracks and keeps the playlist). A song is never taken out of
+where a change put it if it could not be put back where it was. Changed playlist
+names, descriptions and visibility are set back. Favourites it added are removed and favourites
 it removed are added back. `undo` without an id picks the latest change that is
 neither undone nor itself an undo, so running it again walks back through your
 history. The undo is recorded as an entry of its own ("Undid: ..."), which can
@@ -665,15 +690,16 @@ restore exactly what it found.
   and a playlist's name or description changed elsewhere stays changed.
 - Tracks already gone: added tracks you have since removed are skipped (and
   listed), and a playlist deleted since cannot have its changes undone.
-- Tracks Qobuz no longer streams may not go back into a playlist or your
-  favourites.
+- Tracks Qobuz no longer streams cannot go back into a playlist (Qobuz ignores
+  the request); undo says how many did not.
 - Favourites come back as newly added, so their "date added" order is not the
   original one.
 - Old positions assume the rest of the playlist is as the entry left it; after
   other changes, tracks go back at the same index, which may now be a different
   spot. If a move fails, the tracks stay at the end of the playlist (and undo
   says so).
-- Reordering of tracks the entry did not add is reported, not reversed.
+- Reorderings recorded before qobuz-helper kept what reversing them needs are
+  reported, not reversed.
 - A deleted playlist (undoing an undo) comes back as a new playlist, with a new
   id and link.
 
@@ -867,7 +893,8 @@ the write's `"result"`.
 
 | Command | Keys |
 | ------- | ---- |
-| `deduplicate` | `source`, `keep`, `groups` (or, with `--all-playlists`, `playlistCount`, `within`, `across`), `toRemove`, `applied`, `removed` |
+| `deduplicate` | `source`, `keep`, `groups`, `versions` (or, with `--all-playlists`, `playlistCount`, `within`, `across`), `toRemove`, `applied`, `removed` |
+| `remove-artists` | `artists`, `problems`, `playlists` (each with its `hits`), `includeGuests`, `toRemove`, `applied`, `removed`, `reports` |
 | `upgrade` | `source`, `plan`, `changes`, `applied`, `result` |
 | `import` | `file`, `target`, `format` (as read: a CSV may be `spotify`), `plan` (each matched item has `via`: `id`, `isrc` or `search`), `counts`, `applied`, `result`; restoring a backup: `file`, `target`, `backup`, `applied`, `result` |
 | `export` (needs `--out` or `--out-dir`) | `source`, `format`, then `kind`, `count` and `out`; or a backup's `favourites` and `playlists` counts; or, for `--all-playlists`, `outDir` and `files` |
@@ -1010,6 +1037,35 @@ browser.
    or an existing one (songs already in it are skipped) -- and save. Songs are
    added in sentence or letter order.
 
+**Playlists:**
+
+1. Open a playlist from the list (or tick several and choose *Remove artists* to
+   take artists out of all of them). Every song is on one page, with markers for
+   duplicates, other versions of a song, and songs Qobuz no longer plays.
+2. Select: click rows, shift-click for a range, *Select* for duplicates, other
+   versions, live recordings, unplayable songs, dates and so on, *Artists* for
+   the artists in it with their counts, or *By artist* to paste a list -- to
+   remove those artists' songs or keep only theirs. A search narrows the list,
+   and "all" then means what is shown.
+3. Edit: remove; move or copy to another playlist; make a new playlist of them;
+   favourite; drag by the handle (a selection moves together); top, bottom or a
+   given place; *Sort* for sorting, shuffling or spreading out artists -- the
+   whole playlist or just the selected songs. *Taken out* lists what you removed,
+   to put any of it back.
+   Keys: arrows move, Space selects, Shift+arrows extend, Ctrl+A selects all
+   shown, Delete removes, Alt+Up/Down moves, Ctrl+Z and Ctrl+Shift+Z undo and
+   redo, Escape clears the selection.
+4. *Save changes* sums up what will happen and then writes it, as one entry in
+   the History. Until then nothing in the playlist has changed on Qobuz, and you
+   are asked before leaving with unsaved edits. Copying, favouriting, renaming,
+   duplicating and deleting happen at once.
+
+If the playlist changed on Qobuz since you opened it, nothing is written: the
+page says what changed and can bring it into your draft. Songs you move are
+taken out only once they are seen in the other playlist. Removing a song Qobuz
+no longer plays cannot be undone, and the save dialog says so. Opening a managed
+playlist tells you what its next refresh will do to your edits.
+
 **Deduplicator:**
 
 1. Choose a source (your favourites, a playlist, or all your playlists) and
@@ -1020,7 +1076,10 @@ browser.
    or use "Keep all" to keep the whole group. Scanning all playlists first
    lists the songs saved in more than one playlist, one row per playlist, all
    ticked; untick a playlist to remove the song from it. Below that, each
-   playlist's own duplicates are grouped under its name.
+   playlist's own duplicates are grouped under its name. Songs you have in
+   *other versions* (live, acoustic, remixes) are listed after the duplicates,
+   all kept; untick any you do not want, or tick *Also treat other versions as
+   the same song* before scanning to count them as duplicates.
 3. Apply to remove the unticked copies.
 
 **Combine playlists:**
