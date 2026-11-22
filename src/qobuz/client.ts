@@ -853,13 +853,15 @@ export class QobuzClient {
 
   /**
    * Move playlist entries (by playlist-track id) in front of the entry at the
-   * 1-based position `insertBefore` in the playlist as it is now, keeping their
-   * relative order; 0 or 1 means the top.
+   * 1-based position `insertBefore` in the playlist as it is now, in the order
+   * the ids are given; 0 or 1 means the top, and the length + 1 the end.
    *
    * `playlist/updateTracksPosition` is undocumented (it is what the Qobuz web
    * player uses). Its `insert_before` semantics were checked against the live
-   * API in November 2026 on a scratch playlist: the 1-based position of the
-   * entry to go in front of, counted before the move. Callers still treat it
+   * API in November 2026 on scratch playlists: the 1-based position of the
+   * entry to go in front of, counted before the move (when that entry is itself
+   * moved: after the unmoved entries ahead of it). Entries keep their ids and
+   * added dates, 220 ids fit one request, and unknown ids are ignored. Callers still treat it
    * as best-effort: a failure leaves the entries where they were (e.g. at the
    * end after an add), it never loses tracks.
    *
@@ -944,7 +946,38 @@ export class QobuzClient {
   }
 
   /**
-   * Look up a playlist's name and track count, without its tracks (one
+   * Change a playlist's name, description or visibility, via
+   * `playlist/update`; fields not given stay as they are (checked live,
+   * November 2026). Returns the playlist as Qobuz now has it.
+   *
+   * @throws {QobuzError} kind `authentication` if not signed in, or
+   *   `api-response` if Qobuz rejects the change.
+   */
+  async updatePlaylist(
+    playlistId: number,
+    changes: { name?: string; description?: string; isPublic?: boolean },
+  ): Promise<Playlist> {
+    const kvPairs: Array<[string, string]> = [["playlist_id", String(playlistId)]];
+    if (changes.name !== undefined) {
+      kvPairs.push(["name", changes.name]);
+    }
+    if (changes.description !== undefined) {
+      kvPairs.push(["description", changes.description]);
+    }
+    if (changes.isPublic !== undefined) {
+      kvPairs.push(["is_public", String(changes.isPublic)]);
+    }
+    const response = await this.#signedGet("playlistupdate", paths.playlistUpdate, kvPairs, {
+      requireAuth: true,
+    });
+    if (!response.ok) {
+      throw new QobuzError("api-response", `playlist/update failed with HTTP ${response.status}`);
+    }
+    return parsePlaylist(await response.json());
+  }
+
+  /**
+   * Look up a playlist's details, without its tracks (one
    * `playlist/get` request).
    *
    * @throws {QobuzError} kind `api-response` if Qobuz has no such playlist.

@@ -20,6 +20,8 @@ export interface Track {
   version?: string;
   /** Disc (medium) number within its album, when present (album/get tracks). */
   discNumber?: number;
+  /** Track number on its disc, when present. */
+  trackNumber?: number;
   /** Track artist (performer) name, when present. */
   artist?: string;
   /**
@@ -28,6 +30,10 @@ export interface Track {
    * playlist's artists.
    */
   artistId?: number;
+  /** Other artists credited as a main artist (see {@link parseCredits}); absent when none. */
+  jointArtists?: string[];
+  /** Artists credited as featured (see {@link parseCredits}); absent when none. */
+  guestArtists?: string[];
   /** International Standard Recording Code, when present. */
   isrc?: string;
   /** Album title the track appears on, when present. */
@@ -58,6 +64,8 @@ export interface Track {
   genre?: string;
   /** When the track was added to the favourites (ISO), on favourite tracks only. */
   favouritedAt?: string;
+  /** When the track was added to the playlist (ISO), on playlist tracks only. */
+  addedAt?: string;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
@@ -94,6 +102,15 @@ export interface Playlist {
   name: string;
   /** Number of tracks in the playlist, when the response carries it. */
   trackCount?: number;
+  description?: string;
+  isPublic?: boolean;
+  isCollaborative?: boolean;
+  /** Total length in seconds. */
+  duration?: number;
+  /** When it last changed (ISO). */
+  updatedAt?: string;
+  /** Id of the user it belongs to. */
+  ownerId?: number;
 }
 
 /** A page of playlists plus the total available, for paginated fetches. */
@@ -362,6 +379,9 @@ function parseTrack(item: unknown): Track | undefined {
   if (typeof item["media_number"] === "number") {
     track.discNumber = item["media_number"];
   }
+  if (typeof item["track_number"] === "number") {
+    track.trackNumber = item["track_number"];
+  }
 
   const performer = item["performer"];
   if (isRecord(performer)) {
@@ -370,6 +390,15 @@ function parseTrack(item: unknown): Track | undefined {
     }
     if (typeof performer["id"] === "number") {
       track.artistId = performer["id"];
+    }
+  }
+  if (typeof item["performers"] === "string") {
+    const { joint, guests } = parseCredits(item["performers"], track.artist);
+    if (joint.length > 0) {
+      track.jointArtists = joint;
+    }
+    if (guests.length > 0) {
+      track.guestArtists = guests;
     }
   }
   if (typeof item["isrc"] === "string") {
@@ -402,6 +431,10 @@ function parseTrack(item: unknown): Track | undefined {
   }
   if (typeof item["playlist_track_id"] === "number") {
     track.playlistTrackId = item["playlist_track_id"];
+    const addedAt = isoFromSeconds(item["created_at"]);
+    if (addedAt !== undefined) {
+      track.addedAt = addedAt;
+    }
   }
   if (typeof item["maximum_bit_depth"] === "number") {
     track.bitDepth = item["maximum_bit_depth"];
@@ -418,6 +451,68 @@ function parseTrack(item: unknown): Track | undefined {
   return track;
 }
 
+/** A unix time in seconds as an ISO string, or undefined when it is not one. */
+function isoFromSeconds(value: unknown): string | undefined {
+  // Beyond this, Date cannot represent it and toISOString would throw.
+  return typeof value === "number" && value > 0 && value < 8.64e12
+    ? new Date(value * 1000).toISOString()
+    : undefined;
+}
+
+/**
+ * The artists a `performers` credits string names besides the main one: joint
+ * main artists, and featured guests. The string is "Name, Role, Role - Name,
+ * Role - ..." with stray carriage returns. Only the main and featured roles
+ * matter here: any other credit, and one without a role, is passed over.
+ */
+export function parseCredits(
+  performers: string,
+  mainArtist?: string,
+): { joint: string[]; guests: string[] } {
+  const joint: string[] = [];
+  const guests: string[] = [];
+  const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+  const add = (list: string[], name: string): void => {
+    const isMain = mainArtist !== undefined && same(name, mainArtist.trim());
+    if (name.length > 0 && !isMain && !list.some((known) => same(known, name))) {
+      list.push(name);
+    }
+  };
+  for (const credit of performers.replace(/[\r\n]+/g, " ").split(" - ")) {
+    const pieces = credit.split(",").map((piece) => piece.trim());
+    const firstRole = pieces.findIndex((piece, i) => i > 0 && creditRole(piece) !== undefined);
+    if (firstRole === -1) {
+      continue;
+    }
+    const roles = pieces.slice(firstRole).map(creditRole);
+    const name = nameBeforeRoles(pieces.slice(0, firstRole));
+    if (roles.includes("main")) {
+      add(joint, name);
+    } else {
+      add(guests, name);
+    }
+  }
+  return { joint, guests: guests.filter((guest) => !joint.some((name) => same(name, guest))) };
+}
+
+function creditRole(piece: string): "main" | "featured" | undefined {
+  const role = piece.replace(/\s+/g, "").toLowerCase();
+  return role === "mainartist" ? "main" : role === "featuredartist" ? "featured" : undefined;
+}
+
+/**
+ * The name at the start of a credit, given the pieces before its main or
+ * featured role. A second piece belongs to the name only when it reads like
+ * the rest of one ("Tyler, The Creator"; "Crosby, Stills & Nash"), as other
+ * roles may come first too ("Juelz Santana, Composer, FeaturedArtist").
+ */
+function nameBeforeRoles(pieces: readonly string[]): string {
+  const [first = "", second] = pieces;
+  return second !== undefined && (/^(the|jr|sr|ii|iii)\b/i.test(second) || second.includes("&"))
+    ? `${first}, ${second}`
+    : first;
+}
+
 /** Copy a track's non-empty `version` label (Qobuz sends null when there is none). */
 function readVersion(item: Record<string, unknown>, track: Track): void {
   if (typeof item["version"] === "string" && item["version"].length > 0) {
@@ -425,8 +520,8 @@ function readVersion(item: Record<string, unknown>, track: Track): void {
   }
 }
 
-/** Copy a track's `duration` (seconds) when it is a non-negative number. */
-function readDuration(item: Record<string, unknown>, track: Track): void {
+/** Copy a `duration` (seconds) when it is a non-negative number. */
+function readDuration(item: Record<string, unknown>, track: { duration?: number }): void {
   const duration = item["duration"];
   if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) {
     track.duration = duration;
@@ -472,6 +567,24 @@ function toPlaylist(item: unknown): Playlist | undefined {
   const playlist: Playlist = { id: item["id"], name };
   if (typeof item["tracks_count"] === "number") {
     playlist.trackCount = item["tracks_count"];
+  }
+  if (typeof item["description"] === "string" && item["description"].length > 0) {
+    playlist.description = item["description"];
+  }
+  if (typeof item["is_public"] === "boolean") {
+    playlist.isPublic = item["is_public"];
+  }
+  if (typeof item["is_collaborative"] === "boolean") {
+    playlist.isCollaborative = item["is_collaborative"];
+  }
+  readDuration(item, playlist);
+  const updatedAt = isoFromSeconds(item["updated_at"]);
+  if (updatedAt !== undefined) {
+    playlist.updatedAt = updatedAt;
+  }
+  const owner = item["owner"];
+  if (isRecord(owner) && typeof owner["id"] === "number") {
+    playlist.ownerId = owner["id"];
   }
   return playlist;
 }

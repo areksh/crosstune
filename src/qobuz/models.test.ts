@@ -8,6 +8,7 @@ import {
   parseArtistPageTracks,
   parseArtists,
   parseArtistsPage,
+  parseCredits,
   parsePlaylist,
   parsePlaylists,
   parsePlaylistsPage,
@@ -380,10 +381,7 @@ describe("parseArtistsPage", () => {
 
 describe("parsePlaylist", () => {
   it("extracts id and name", () => {
-    expect(parsePlaylist({ id: 999, name: "Jazz", is_public: false })).toEqual({
-      id: 999,
-      name: "Jazz",
-    });
+    expect(parsePlaylist({ id: 999, name: "Jazz" })).toEqual({ id: 999, name: "Jazz" });
   });
 
   it("includes the track count when present", () => {
@@ -391,6 +389,30 @@ describe("parsePlaylist", () => {
       id: 1,
       name: "P",
       trackCount: 42,
+    });
+  });
+
+  it("includes its details when present", () => {
+    expect(
+      parsePlaylist({
+        id: 1,
+        name: "P",
+        description: "For the car",
+        is_public: false,
+        is_collaborative: true,
+        duration: 195054,
+        updated_at: 1795049786,
+        owner: { id: 7, name: "someone" },
+      }),
+    ).toEqual({
+      id: 1,
+      name: "P",
+      description: "For the car",
+      isPublic: false,
+      isCollaborative: true,
+      duration: 195054,
+      updatedAt: "2026-11-19T00:56:26.000Z",
+      ownerId: 7,
     });
   });
 
@@ -497,5 +519,76 @@ describe("album artwork", () => {
     expect(parseAlbumTracks({ tracks: { items: [{ id: 1, title: "T" }] } })).toEqual([
       { id: 1, title: "T" },
     ]);
+  });
+});
+
+describe("parseCredits", () => {
+  it("finds guests and joint main artists, in either spelling", () => {
+    expect(
+      parseCredits(
+        "Portishead, MainArtist - A Guest, FeaturedArtist\r - X, Composer\r\n - B Joint, Main Artist, Producer - C Guest, Featured Artist",
+        "Portishead",
+      ),
+    ).toEqual({ joint: ["B Joint"], guests: ["A Guest", "C Guest"] });
+  });
+
+  it("finds the role among others, and compares the main artist without case", () => {
+    expect(
+      parseCredits("Cam'ron, MainArtist - Juelz Santana, Composer, FeaturedArtist", "Cam'Ron"),
+    ).toEqual({ joint: [], guests: ["Juelz Santana"] });
+  });
+
+  it("keeps names that hold a comma", () => {
+    expect(
+      parseCredits("Tyler, The Creator, FeaturedArtist - Crosby, Stills & Nash, MainArtist", "Crosby, Stills & Nash"),
+    ).toEqual({ joint: [], guests: ["Tyler, The Creator"] });
+  });
+
+  it("passes over credits without a role, other roles and repeats", () => {
+    expect(parseCredits("Copyright Control - A, FeaturedArtist - a, FeaturedArtist - B, Vocals", "M")).toEqual({
+      joint: [],
+      guests: ["A"],
+    });
+    expect(parseCredits("", "M")).toEqual({ joint: [], guests: [] });
+  });
+});
+
+describe("playlist track fields", () => {
+  it("reads the added date of a playlist track, and its credits", () => {
+    const [track] = parseTracks({
+      tracks: {
+        items: [
+          {
+            id: 1,
+            title: "T",
+            track_number: 4,
+            performer: { id: 9, name: "Main" },
+            performers: "Main, MainArtist - Guest, FeaturedArtist",
+            created_at: 1794176267,
+            playlist_track_id: 55,
+          },
+        ],
+      },
+    });
+    expect(track).toMatchObject({
+      trackNumber: 4,
+      guestArtists: ["Guest"],
+      addedAt: "2026-11-08T22:17:47.000Z",
+      playlistTrackId: 55,
+    });
+    expect(track).not.toHaveProperty("jointArtists");
+  });
+
+  it("ignores created_at outside playlists, and impossible dates", () => {
+    const [plain, broken] = parseTracks({
+      tracks: {
+        items: [
+          { id: 1, title: "T", created_at: 1794176267 },
+          { id: 2, title: "U", created_at: 1e300, playlist_track_id: 5 },
+        ],
+      },
+    });
+    expect(plain).not.toHaveProperty("addedAt");
+    expect(broken).not.toHaveProperty("addedAt");
   });
 });

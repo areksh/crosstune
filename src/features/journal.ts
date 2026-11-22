@@ -203,6 +203,7 @@ export class Journal {
 export const MUTATING_METHODS = [
   "createPlaylist",
   "deletePlaylist",
+  "updatePlaylist",
   "addTracksToPlaylist",
   "removeTracksFromPlaylist",
   "movePlaylistTracks",

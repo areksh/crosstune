@@ -42,6 +42,7 @@ interface FetchOptions {
   album?: unknown;
   playlistGet?: unknown;
   playlistGetStatus?: number;
+  playlistUpdateStatus?: number;
 }
 
 /**
@@ -133,6 +134,11 @@ function makeFetch(options: FetchOptions): typeof fetch {
     }
     if (path.endsWith("/playlist/updateTracksPosition")) {
       return new Response(JSON.stringify({ status: "success" }), { status: 200 });
+    }
+    if (path.endsWith("/playlist/update")) {
+      return new Response(JSON.stringify({ id: 555, name: "Renamed", is_public: true }), {
+        status: options.playlistUpdateStatus ?? 200,
+      });
     }
     if (path.endsWith("/playlist/get")) {
       return new Response(JSON.stringify(options.playlistGet ?? {}), {
@@ -1165,5 +1171,40 @@ describe("QobuzClient remove-favourite albums and artists", () => {
     expect(batches.length).toBe(2);
     expect(batches.flat()).toEqual(ids);
     expect(recorded.some((r) => r.url.searchParams.has("album_ids"))).toBe(false);
+  });
+});
+
+describe("QobuzClient.updatePlaylist", () => {
+  it("sends only the fields given, with the user token", async () => {
+    const { client, recorded } = await initedClient({ loginBody: validSessionBody() });
+    await client.loginWithOAuthCode("code");
+
+    await expect(client.updatePlaylist(555, { name: "Renamed" })).resolves.toEqual({
+      id: 555,
+      name: "Renamed",
+      isPublic: true,
+    });
+
+    const request = recorded.find((r) => r.url.pathname.endsWith("/playlist/update"));
+    expect(request?.url.searchParams.get("playlist_id")).toBe("555");
+    expect(request?.url.searchParams.get("name")).toBe("Renamed");
+    expect(request?.url.searchParams.has("description")).toBe(false);
+    expect(request?.url.searchParams.has("is_public")).toBe(false);
+    expect(request?.headers.get("X-User-Auth-Token")).toBe("tok-session");
+  });
+
+  it("can clear the description and make it private", async () => {
+    const { client, recorded } = await initedClient({ loginBody: validSessionBody() });
+    await client.loginWithOAuthCode("code");
+    await client.updatePlaylist(555, { description: "", isPublic: false });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/playlist/update"));
+    expect(request?.url.searchParams.get("description")).toBe("");
+    expect(request?.url.searchParams.get("is_public")).toBe("false");
+  });
+
+  it("throws when Qobuz rejects the change", async () => {
+    const { client } = await initedClient({ loginBody: validSessionBody(), playlistUpdateStatus: 403 });
+    await client.loginWithOAuthCode("code");
+    await expect(client.updatePlaylist(555, { name: "X" })).rejects.toThrow("playlist/update failed with HTTP 403");
   });
 });
