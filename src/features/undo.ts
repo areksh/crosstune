@@ -30,6 +30,7 @@ import {
   type PlaylistDetails,
 } from "./history.js";
 import type { Journal } from "./journal.js";
+import { addInOrder, missingFrom } from "./playlist-add.js";
 import { mergeOrder, planOrder } from "./playlist-order.js";
 
 /** The read planning needs. */
@@ -379,27 +380,6 @@ function replayBackwards(
   return { order: list, removedTracks, unknownMoves };
 }
 
-/**
- * Add tracks in order, in as few requests as possible with no track id twice
- * in one: Qobuz adds a track repeated within one request only once, while
- * separate requests may add it again (checked live, November 2026).
- */
-async function addInOrder(
-  client: UndoClient,
-  playlistId: number,
-  trackIds: readonly number[],
-): Promise<void> {
-  let request: number[] = [];
-  for (const id of trackIds) {
-    if (request.includes(id)) {
-      await client.addTracksToPlaylist(playlistId, request);
-      request = [];
-    }
-    request.push(id);
-  }
-  await client.addTracksToPlaylist(playlistId, request);
-}
-
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -532,17 +512,6 @@ async function recreate(
     step.trackIds.forEach((id) => unrestored.add(id));
     throw error;
   }
-}
-
-/** The `wanted` ids not in `got`, counting repeats. */
-function missingFrom(wanted: readonly number[], got: readonly number[]): number[] {
-  const left = new Map<number, number>();
-  got.forEach((id) => left.set(id, (left.get(id) ?? 0) + 1));
-  return wanted.filter((id) => {
-    const n = left.get(id) ?? 0;
-    left.set(id, n - 1);
-    return n <= 0;
-  });
 }
 
 /**
