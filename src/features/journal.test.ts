@@ -420,7 +420,7 @@ describe("recordingClient", () => {
     expect(account.trackIds(id)).toHaveLength(10);
   });
 
-  it("records moves and reads the playlist afresh after one", async () => {
+  it("records moves with where their entries were, without reading it again", async () => {
     const { store, journal, account, client } = setup();
     const id = account.seedPlaylist("Late Night", [1, 2]);
     const [, e2] = account.entryIds(id);
@@ -437,9 +437,56 @@ describe("recordingClient", () => {
       playlistName: "Late Night",
       playlistTrackIds: [e2],
       insertBefore: 1,
+      from: [1],
     });
-    // before add 1, after add 1, before add 2 (the move invalidated it), after add 2.
-    expect(account.calls.filter((c) => c.startsWith("getPlaylistTracks"))).toHaveLength(4);
+    // before add 1, after add 1, after add 2: the move's outcome is known.
+    expect(account.calls.filter((c) => c.startsWith("getPlaylistTracks"))).toHaveLength(3);
+  });
+
+  it("records a move's entries as positioned by the moves before it", async () => {
+    const { store, journal, account, client } = setup();
+    const id = account.seedPlaylist("Late Night", [1, 2, 3]);
+    const [e1, e2, e3] = account.entryIds(id);
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.movePlaylistTracks!(id, [e3!, 999], 1);
+      await client.movePlaylistTracks!(id, [e2!, e1!], 1);
+    });
+    const ops = entriesOf(store)[0]?.ops ?? [];
+    expect(ops).toMatchObject([
+      { kind: "move-tracks", playlistTrackIds: [e3], from: [2] },
+      { kind: "move-tracks", playlistTrackIds: [e2, e1], from: [2, 1] },
+    ]);
+    expect(account.entryIds(id)).toEqual([e2, e1, e3]);
+    expect(entriesOf(store)[0]?.label).toBe("Reordered Late Night");
+  });
+
+  it("records changed details as they were", async () => {
+    const { store, journal, account, client } = setup();
+    const id = account.seedPlaylist("Late Night", [1]);
+    await journal.run({ tool: "playlist-manager" }, () =>
+      client.updatePlaylist!(id, { name: "Early Morning", isPublic: true, description: "Calm" }),
+    );
+    expect(entriesOf(store)[0]).toMatchObject({
+      label:
+        "Renamed Late Night to Early Morning; made Early Morning public; changed the description of Early Morning",
+      ops: [
+        {
+          kind: "update-playlist",
+          playlistId: id,
+          before: { name: "Late Night", isPublic: false, description: "" },
+          after: { name: "Early Morning", isPublic: true, description: "Calm" },
+        },
+      ],
+    });
+  });
+
+  it("does not change details it could not record", async () => {
+    const { journal, account, client } = setup();
+    const id = account.seedPlaylist("Late Night", [1]);
+    account.failAfter("getPlaylist", 0);
+    await expect(client.updatePlaylist!(id, { name: "X" })).rejects.toThrow();
+    expect(account.playlists.get(id)?.name).toBe("Late Night");
+    expect(journal.items()).toEqual([]);
   });
 
   it("records favourites added and removed, batch by batch", async () => {
@@ -465,7 +512,7 @@ describe("recordingClient", () => {
     const id = account.seedPlaylist("Old", [4, 5]);
     await journal.run({ tool: "undo", label: "Undid: x" }, () => client.deletePlaylist!(id));
     expect(entriesOf(store)[0]?.ops).toEqual([
-      { kind: "delete-playlist", playlistId: id, name: "Old", trackIds: [4, 5] },
+      { kind: "delete-playlist", playlistId: id, name: "Old", trackIds: [4, 5], isPublic: false },
     ]);
   });
 });

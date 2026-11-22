@@ -11,8 +11,9 @@
  * {@link recordingClient} wraps the Qobuz client so that every mutating method
  * (see {@link MUTATING_METHODS}) records what it did -- no tool can forget.
  * It reads what reversing a change needs: a playlist's entries around an add
- * (to learn the new entries' ids and positions) and before a removal (to keep
- * each removed track and its position). A partial failure records what did
+ * (to learn the new entries' ids and positions), before a removal (to keep each
+ * removed track and its position) and before a move (to keep where its entries
+ * were). A partial failure records what did
  * happen before the error is rethrown.
  */
 
@@ -20,6 +21,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 import type { Playlist, Track } from "../qobuz/index.js";
+import { applyMove } from "./playlist-order.js";
 import {
   describeEntry,
   foldHistory,
@@ -34,6 +36,7 @@ import {
   type HistoryRecord,
   type HistorySource,
   type Operation,
+  type PlaylistDetails,
   type PlaylistEntryRecord,
 } from "./history.js";
 
@@ -301,10 +304,53 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       const scope = journal.scope();
       // Read first: a deletion that cannot be recorded is not made.
       const tracks = await client.getPlaylistTracks(playlistId);
-      const name = (await nameOf(scope, playlistId)) ?? `playlist ${playlistId}`;
+      let details: Playlist | undefined;
+      try {
+        details = await client.getPlaylist?.call(client, playlistId);
+      } catch {
+        // Deleted all the same; undo then recreates it private.
+      }
+      const name = details?.name ?? scope.names.get(playlistId) ?? `playlist ${playlistId}`;
       await call("deletePlaylist", playlistId);
       scope.snapshots.delete(playlistId);
-      journal.record({ kind: "delete-playlist", playlistId, name, trackIds: tracks.map((t) => t.id) });
+      journal.record({
+        kind: "delete-playlist",
+        playlistId,
+        name,
+        trackIds: tracks.map((t) => t.id),
+        ...(details?.isPublic !== undefined && { isPublic: details.isPublic }),
+        ...(details?.description !== undefined && { description: details.description }),
+      });
+    },
+
+    async updatePlaylist(playlistId: number, changes: PlaylistDetails) {
+      const scope = journal.scope();
+      // Read first: a change that cannot be recorded is not made.
+      const was = await client.getPlaylist?.call(client, playlistId);
+      const updated = await call<Playlist>("updatePlaylist", playlistId, changes);
+      const before: PlaylistDetails = {};
+      if (was !== undefined) {
+        if (changes.name !== undefined) {
+          before.name = was.name;
+        }
+        if (changes.description !== undefined) {
+          before.description = was.description ?? "";
+        }
+        if (changes.isPublic !== undefined && was.isPublic !== undefined) {
+          before.isPublic = was.isPublic;
+        }
+      }
+      if (changes.name !== undefined) {
+        scope.names.set(playlistId, changes.name);
+      }
+      journal.record({
+        kind: "update-playlist",
+        playlistId,
+        ...(was !== undefined && { playlistName: was.name }),
+        before,
+        after: { ...changes },
+      });
+      return updated;
     },
 
     async addTracksToPlaylist(playlistId: number, trackIds: readonly number[]) {
@@ -398,16 +444,34 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
     },
 
     async movePlaylistTracks(playlistId: number, playlistTrackIds: readonly number[], insertBefore: number) {
+      if (playlistTrackIds.length === 0) {
+        return call("movePlaylistTracks", playlistId, playlistTrackIds, insertBefore);
+      }
       const scope = journal.scope();
+      const before = scope.snapshots.get(playlistId) ?? (await tryRead(playlistId));
       scope.snapshots.delete(playlistId);
       await call("movePlaylistTracks", playlistId, playlistTrackIds, insertBefore);
-      if (playlistTrackIds.length > 0) {
+      let moved = [...playlistTrackIds];
+      let from: number[] | undefined;
+      if (before !== undefined && before.every((t) => t.playlistTrackId !== undefined)) {
+        const places = new Map(before.map((t, index) => [t.playlistTrackId!, index]));
+        // Qobuz ignores ids that are not in the playlist.
+        moved = moved.filter((id) => places.has(id));
+        from = moved.map((id) => places.get(id)!);
+        const byId = new Map(before.map((t) => [t.playlistTrackId!, t]));
+        scope.snapshots.set(
+          playlistId,
+          applyMove([...byId.keys()], moved, insertBefore).map((id) => byId.get(id)!),
+        );
+      }
+      if (moved.length > 0) {
         journal.record({
           kind: "move-tracks",
           playlistId,
           ...(await named(scope, playlistId)),
-          playlistTrackIds: [...playlistTrackIds],
+          playlistTrackIds: moved,
           insertBefore,
+          ...(from !== undefined && { from }),
         });
       }
     },

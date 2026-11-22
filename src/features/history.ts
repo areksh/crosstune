@@ -29,6 +29,13 @@ export interface PlaylistEntryRecord {
   position: number;
 }
 
+/** A playlist's editable details. */
+export interface PlaylistDetails {
+  name?: string;
+  description?: string;
+  isPublic?: boolean;
+}
+
 /** One change made to the account, recorded with what reversing it needs. */
 export type Operation =
   | {
@@ -45,6 +52,15 @@ export type Operation =
       /** The playlist's tracks, in order, when it was deleted. */
       trackIds: number[];
       isPublic?: boolean;
+      description?: string;
+    }
+  | {
+      kind: "update-playlist";
+      playlistId: number;
+      playlistName?: string;
+      /** The details changed, as they were and as they were made. */
+      before: PlaylistDetails;
+      after: PlaylistDetails;
     }
   | {
       kind: "add-tracks";
@@ -69,6 +85,12 @@ export type Operation =
       playlistName?: string;
       playlistTrackIds: number[];
       insertBefore: number;
+      /**
+       * Where each entry was (0-based) just before the move, for undo. Absent
+       * when the playlist could not be read, and in records made before this
+       * was kept.
+       */
+      from?: number[];
     }
   | { kind: "add-favourites"; type: FavouriteType; ids: Array<number | string> }
   | { kind: "remove-favourites"; type: FavouriteType; ids: Array<number | string> };
@@ -224,6 +246,17 @@ function toEntries(value: unknown): PlaylistEntryRecord[] | undefined {
   return out;
 }
 
+function toDetails(value: unknown): PlaylistDetails | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    ...(isString(value["name"]) && { name: value["name"] }),
+    ...(isString(value["description"]) && { description: value["description"] }),
+    ...(typeof value["isPublic"] === "boolean" && { isPublic: value["isPublic"] }),
+  };
+}
+
 function isFavouriteType(value: unknown): value is FavouriteType {
   return value === "tracks" || value === "albums" || value === "artists";
 }
@@ -272,7 +305,15 @@ function toOperation(value: unknown): Operation | undefined {
         name: value["name"],
         trackIds: value["trackIds"],
         ...(typeof value["isPublic"] === "boolean" && { isPublic: value["isPublic"] }),
+        ...(isString(value["description"]) && { description: value["description"] }),
       };
+    }
+    case "update-playlist": {
+      const before = toDetails(value["before"]);
+      const after = toDetails(value["after"]);
+      return before === undefined || after === undefined
+        ? undefined
+        : { kind: "update-playlist", playlistId, ...playlistName, before, after };
     }
     case "add-tracks":
     case "remove-tracks": {
@@ -305,6 +346,8 @@ function toOperation(value: unknown): Operation | undefined {
         ...playlistName,
         playlistTrackIds: value["playlistTrackIds"],
         insertBefore: value["insertBefore"],
+        ...(isIntArray(value["from"]) &&
+          value["from"].length === value["playlistTrackIds"].length && { from: value["from"] }),
       };
     }
     default:
@@ -510,7 +553,13 @@ export function describeEntry(tool: string, ops: readonly Operation[]): string {
   for (const op of ops) {
     if (op.kind === "delete-playlist") {
       clauses.push(`deleted ${op.name}`);
+    } else if (op.kind === "update-playlist") {
+      clauses.push(...describeDetails(op, name(op.playlistId)));
     }
+  }
+  if (tool === "playlist-manager") {
+    const reordered = new Set(ops.flatMap((op) => (op.kind === "move-tracks" ? [op.playlistId] : [])));
+    reordered.forEach((id) => clauses.push(`reordered ${name(id)}`));
   }
   if (clauses.length === 0) {
     const moved = ops.find((op) => op.kind === "move-tracks");
@@ -522,6 +571,26 @@ export function describeEntry(tool: string, ops: readonly Operation[]): string {
   const text = clauses.length > 3 ? [...clauses.slice(0, 2), `${clauses.length - 2} more changes`] : clauses;
   const joined = text.join("; ");
   return joined.charAt(0).toUpperCase() + joined.slice(1);
+}
+
+/** What a change of details did, as clauses ("renamed A to B"). */
+function describeDetails(
+  op: Extract<Operation, { kind: "update-playlist" }>,
+  fallback: string,
+): string[] {
+  const { before, after } = op;
+  const was = before.name ?? op.playlistName ?? fallback;
+  const clauses: string[] = [];
+  if (after.name !== undefined && after.name !== before.name) {
+    clauses.push(`renamed ${was} to ${after.name}`);
+  }
+  if (after.isPublic !== undefined && after.isPublic !== before.isPublic) {
+    clauses.push(`made ${after.name ?? was} ${after.isPublic ? "public" : "private"}`);
+  }
+  if (after.description !== undefined && after.description !== before.description) {
+    clauses.push(`changed the description of ${after.name ?? was}`);
+  }
+  return clauses;
 }
 
 /** The playlists and favourite collections an entry touched, as keys. */
@@ -617,6 +686,7 @@ const TOOL_NAMES: Record<string, string> = {
   stats: "Library stats",
   "new-releases": "New releases",
   managed: "Managed playlist",
+  "playlist-manager": "Playlist manager",
   import: "Import",
   restore: "Restore backup",
   undo: "Undo",

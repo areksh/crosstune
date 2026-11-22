@@ -71,6 +71,28 @@ export function stayingIds(current: readonly number[], wanted: readonly number[]
 }
 
 /**
+ * `wanted` with the ids only `current` has put in, each after the id it follows
+ * in `current` (at the top when it leads), and the ids `current` lacks left out.
+ */
+export function mergeOrder(current: readonly number[], wanted: readonly number[]): number[] {
+  const inCurrent = new Set(current);
+  const kept = wanted.filter((id) => inCurrent.has(id));
+  const inWanted = new Set(kept);
+  const leading: number[] = [];
+  const followers = new Map<number, number[]>();
+  let list = leading;
+  for (const id of current) {
+    if (inWanted.has(id)) {
+      list = [];
+      followers.set(id, list);
+    } else {
+      list.push(id);
+    }
+  }
+  return [...leading, ...kept.flatMap((id) => [id, ...(followers.get(id) ?? [])])];
+}
+
+/**
  * The moves that turn `current` into `wanted` (the same ids in another order).
  *
  * Usually only the ids that must move are moved, those that end up side by side

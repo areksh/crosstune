@@ -8,15 +8,17 @@
  * stopping. {@link applyUndo} runs the commit as an entry of its own ("Undid:
  * ...") and marks the original undone.
  *
- * Per playlist, undo first removes the entries the change added (by their
- * playlist-track ids; ones already gone are skipped and reported), then puts
- * the removed tracks back -- appended, then moved to their old positions --
- * latest removal first, and finally deletes a playlist the change created if
- * it holds nothing else. Removed positions were recorded with the change's own
- * additions at the end of the playlist, which is how every tool adds, so
- * taking those additions out first makes the positions line up again.
- * Favourites are re-added or removed. Reordering of entries the change did
- * not add is reported, not reversed.
+ * Per playlist, the order to return to is worked out by replaying the change's
+ * operations backwards over the playlist as it is now: what it added is taken
+ * out, what it removed goes back to its old position, and what it moved goes
+ * back to where it was. Then the removed tracks are added again (Qobuz appends
+ * them), everything is put in that order in as few moves as possible, and the
+ * added entries are removed -- last, and never one whose track could not be put
+ * back, so undoing a move between playlists cannot lose a song. A playlist the
+ * change created is deleted if it holds nothing else. Added entries already
+ * gone are skipped and reported, as are tracks Qobuz no longer lets us add, and
+ * moves recorded without where their entries came from. Favourites are re-added
+ * or removed, and changed playlist details put back.
  */
 
 import type { Playlist, Track } from "../qobuz/index.js";
@@ -25,8 +27,10 @@ import {
   type FavouriteType,
   type HistoryItem,
   type Operation,
+  type PlaylistDetails,
 } from "./history.js";
 import type { Journal } from "./journal.js";
+import { mergeOrder, planOrder } from "./playlist-order.js";
 
 /** The read planning needs. */
 export interface UndoPlanClient {
@@ -40,6 +44,7 @@ export interface UndoClient extends UndoPlanClient {
     options?: { description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
   deletePlaylist(playlistId: number): Promise<void>;
+  updatePlaylist?(playlistId: number, changes: PlaylistDetails): Promise<Playlist>;
   addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
   removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
   movePlaylistTracks?(
@@ -57,16 +62,31 @@ export interface UndoClient extends UndoPlanClient {
 
 /** One reversing step. */
 export type UndoStep =
-  | { kind: "delete-playlist"; playlistId: number; name: string; trackCount: number }
-  | { kind: "remove-tracks"; playlistId: number; name: string; playlistTrackIds: number[] }
+  | { kind: "delete-playlist"; playlistId: number; name: string; trackCount: number; trackIds: number[] }
+  | {
+      kind: "remove-tracks";
+      playlistId: number;
+      name: string;
+      entries: Array<{ playlistTrackId: number; trackId: number }>;
+    }
   | {
       kind: "restore-tracks";
       playlistId: number;
       name: string;
-      /** In ascending order of their old 0-based position. */
-      tracks: Array<{ trackId: number; position: number }>;
+      /** The removed entries to put back, in the order they were. */
+      entries: Array<{ playlistTrackId: number; trackId: number }>;
+      /** The entries in the order to return to, by (old) playlist-track id. */
+      order: number[];
     }
-  | { kind: "recreate-playlist"; name: string; trackIds: number[]; isPublic?: boolean }
+  | { kind: "reorder-playlist"; playlistId: number; name: string; order: number[] }
+  | { kind: "update-playlist"; playlistId: number; name: string; changes: PlaylistDetails }
+  | {
+      kind: "recreate-playlist";
+      name: string;
+      trackIds: number[];
+      isPublic?: boolean;
+      description?: string;
+    }
   | { kind: "add-favourites"; type: FavouriteType; ids: Array<number | string> }
   | { kind: "remove-favourites"; type: FavouriteType; ids: Array<number | string> };
 
@@ -109,9 +129,13 @@ export function describeStep(step: UndoStep): string {
     case "delete-playlist":
       return `Delete the playlist ${step.name} (${plural(step.trackCount, "track")})`;
     case "remove-tracks":
-      return `Remove ${plural(step.playlistTrackIds.length, "track")} from ${step.name}`;
+      return `Remove ${plural(step.entries.length, "track")} from ${step.name}`;
     case "restore-tracks":
-      return `Put ${plural(step.tracks.length, "track")} back in ${step.name}, in their old places`;
+      return `Put ${plural(step.entries.length, "track")} back in ${step.name}, in ${step.entries.length === 1 ? "its old place" : "their old places"}`;
+    case "reorder-playlist":
+      return `Put ${step.name} back in its old order`;
+    case "update-playlist":
+      return describeDetails(step.name, step.changes);
     case "recreate-playlist":
       return `Recreate the playlist ${step.name} with ${plural(step.trackIds.length, "track")}`;
     case "add-favourites":
@@ -119,6 +143,20 @@ export function describeStep(step: UndoStep): string {
     case "remove-favourites":
       return `Remove ${plural(step.ids.length, NOUNS[step.type])} from Favourites`;
   }
+}
+
+function describeDetails(name: string, changes: PlaylistDetails): string {
+  const parts: string[] = [];
+  if (changes.name !== undefined) {
+    parts.push(`name back to ${changes.name}`);
+  }
+  if (changes.isPublic !== undefined) {
+    parts.push(`visibility back to ${changes.isPublic ? "public" : "private"}`);
+  }
+  if (changes.description !== undefined) {
+    parts.push("old description back");
+  }
+  return `Set ${name}: ${parts.join(", ")}`;
 }
 
 function playlistIdOf(op: Operation): number | undefined {
@@ -185,6 +223,7 @@ export async function planUndo(
           name: op.name,
           trackIds: [...op.trackIds],
           ...(op.isPublic !== undefined && { isPublic: op.isPublic }),
+          ...(op.description !== undefined && { description: op.description }),
         });
         break;
       default:
@@ -194,6 +233,11 @@ export async function planUndo(
         }
     }
   }
+  // Put things back before taking anything out, so that a song which cannot be
+  // put back is still where the change put it (see commitUndo).
+  const putsBack = (step: UndoStep): boolean =>
+    step.kind === "restore-tracks" || step.kind === "reorder-playlist" || step.kind === "recreate-playlist";
+  plan.steps = [...plan.steps.filter(putsBack), ...plan.steps.filter((step) => !putsBack(step))];
   return plan;
 }
 
@@ -230,7 +274,13 @@ function planPlaylist(
 
   const onlyOurs = tracks.every((t) => t.playlistTrackId !== undefined && added.has(t.playlistTrackId));
   if (created && onlyOurs) {
-    plan.steps.push({ kind: "delete-playlist", playlistId, name, trackCount: tracks.length });
+    plan.steps.push({
+      kind: "delete-playlist",
+      playlistId,
+      name,
+      trackCount: tracks.length,
+      trackIds: tracks.map((t) => t.id),
+    });
     return;
   }
   if (created) {
@@ -239,8 +289,22 @@ function planPlaylist(
     );
   }
 
-  // 1. Take out what the change added (and did not itself remove again).
-  const toRemove = [...added].filter((id) => !removed.has(id) && present.has(id));
+  // 1. Put back what it removed, in the order the playlist was in.
+  const current = tracks.flatMap((t) => (t.playlistTrackId === undefined ? [] : [t.playlistTrackId]));
+  const { order, removedTracks, unknownMoves } = replayBackwards(current, mine);
+  const restore = order.flatMap((id) => (present.has(id) ? [] : [{ playlistTrackId: id, trackId: removedTracks.get(id)! }]));
+  if (restore.length > 0) {
+    plan.steps.push({ kind: "restore-tracks", playlistId, name, entries: restore, order });
+  } else if (planOrder(current, mergeOrder(current, order)).length > 0) {
+    plan.steps.push({ kind: "reorder-playlist", playlistId, name, order });
+  }
+
+  // 2. Take out what it added (and did not itself remove again).
+  const doomed = tracks.flatMap((t) =>
+    t.playlistTrackId !== undefined && added.has(t.playlistTrackId)
+      ? [{ playlistTrackId: t.playlistTrackId, trackId: t.id }]
+      : [],
+  );
   const gone = [...added].filter((id) => !removed.has(id) && !present.has(id)).length;
   if (gone > 0) {
     plan.notes.push(`${gone} of the tracks added to ${name} ${gone === 1 ? "is" : "are"} no longer in it.`);
@@ -250,68 +314,69 @@ function planPlaylist(
       `${plural(unconfirmed, "track")} sent to ${name} could not be confirmed when added, so ${unconfirmed === 1 ? "it is" : "they are"} not removed.`,
     );
   }
-  if (toRemove.length > 0) {
-    plan.steps.push({ kind: "remove-tracks", playlistId, name, playlistTrackIds: toRemove });
+  if (doomed.length > 0) {
+    plan.steps.push({ kind: "remove-tracks", playlistId, name, entries: doomed });
   }
 
-  // 2. Put back what it removed, latest removal first.
-  for (let i = mine.length - 1; i >= 0; i -= 1) {
-    const op = mine[i]!;
-    if (op.kind !== "remove-tracks") {
-      continue;
-    }
-    const restore = op.entries
-      .filter((e) => !added.has(e.playlistTrackId))
-      .sort((a, b) => a.position - b.position)
-      .map((e) => ({ trackId: e.trackId, position: e.position }));
-    if (restore.length > 0) {
-      plan.steps.push({ kind: "restore-tracks", playlistId, name, tracks: restore });
-    }
-  }
-
-  // 3. Reordering of entries it did not add is not reversed.
-  const reordered = new Set<number>();
-  for (const op of mine) {
-    if (op.kind === "move-tracks") {
-      op.playlistTrackIds.filter((id) => !added.has(id) && present.has(id)).forEach((id) => reordered.add(id));
-    }
-  }
+  // 3. Moves recorded without where their entries were cannot be reversed.
+  const reordered = new Set([...unknownMoves].filter((id) => !added.has(id) && present.has(id)));
   if (reordered.size > 0) {
     plan.notes.push(`The order of ${plural(reordered.size, "track")} in ${name} is not restored.`);
   }
-}
 
-/** A move that puts restored entries back: `count` of them from index `from`. */
-export interface RestoreMove {
-  /** Index into the restored entries (in ascending position order). */
-  from: number;
-  count: number;
-  /** 1-based position of the entry to insert in front of (Qobuz's insert_before). */
-  insertBefore: number;
+  // 4. Its details, as they were before the first change.
+  const changes: PlaylistDetails = {};
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const op = mine[i]!;
+    if (op.kind === "update-playlist") {
+      Object.assign(changes, op.before);
+    }
+  }
+  if (Object.keys(changes).length > 0) {
+    plan.steps.push({ kind: "update-playlist", playlistId, name, changes });
+  }
 }
 
 /**
- * The moves that put restored entries back at their old 0-based `positions`
- * (ascending), after they were appended to a playlist of `kept` other
- * entries. Moved in ascending order, every earlier position is settled and the
- * not-yet-moved ones are still at the end, so the entry now at the target
- * index is the one to go in front of. Consecutive targets move together;
- * entries whose target is at or past the end stay where they are.
+ * Replay one playlist's operations backwards over its current entries: the
+ * order it was in, by playlist-track id (removed entries under their old id).
  */
-export function restoreMoves(kept: number, positions: readonly number[]): RestoreMove[] {
-  const moves: RestoreMove[] = [];
-  positions.forEach((position, i) => {
-    if (position >= kept + i) {
-      return;
+function replayBackwards(
+  current: readonly number[],
+  ops: readonly Operation[],
+): { order: number[]; removedTracks: Map<number, number>; unknownMoves: Set<number> } {
+  let list = [...current];
+  const removedTracks = new Map<number, number>();
+  const unknownMoves = new Set<number>();
+  const putIn = (items: ReadonlyArray<{ id: number; position: number }>): void => {
+    for (const { id, position } of [...items].sort((a, b) => a.position - b.position)) {
+      list.splice(Math.min(position, list.length), 0, id);
     }
-    const last = moves[moves.length - 1];
-    if (last !== undefined && last.from + last.count === i && last.insertBefore - 1 + last.count === position) {
-      last.count += 1;
-    } else {
-      moves.push({ from: i, count: 1, insertBefore: position + 1 });
+  };
+  for (let i = ops.length - 1; i >= 0; i -= 1) {
+    const op = ops[i]!;
+    if (op.kind === "add-tracks") {
+      const ids = new Set(op.entries.map((e) => e.playlistTrackId));
+      list = list.filter((id) => !ids.has(id));
+    } else if (op.kind === "remove-tracks") {
+      const here = new Set(list);
+      const back = op.entries.filter((e) => !here.has(e.playlistTrackId));
+      back.forEach((e) => removedTracks.set(e.playlistTrackId, e.trackId));
+      putIn(back.map((e) => ({ id: e.playlistTrackId, position: e.position })));
+    } else if (op.kind === "move-tracks") {
+      const { from } = op;
+      if (from === undefined) {
+        op.playlistTrackIds.forEach((id) => unknownMoves.add(id));
+        continue;
+      }
+      const here = new Set(list);
+      const back = op.playlistTrackIds.flatMap((id, k) => (here.has(id) ? [{ id, position: from[k]! }] : []));
+      const moved = new Set(back.map((item) => item.id));
+      list = list.filter((id) => !moved.has(id));
+      putIn(back);
     }
-  });
-  return moves;
+  }
+  return { order: list, removedTracks, unknownMoves };
 }
 
 /**
@@ -339,14 +404,22 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Run the steps of a plan in order, reporting each failure and carrying on. */
+/** Counts of the tracks that could not be put back, by track id. */
+type Unrestored = Set<number>;
+
+/**
+ * Run the steps of a plan in order, reporting each failure and carrying on. A
+ * track that could not be put back is never taken out of where it is now.
+ */
 export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<UndoResult> {
   const result: UndoResult = { done: [], failed: [], notes: [] };
+  const unrestored: Unrestored = new Set();
   for (const step of plan.steps) {
     const text = describeStep(step);
     try {
-      await runStep(client, step, result);
-      result.done.push(text);
+      if (await runStep(client, step, result, unrestored)) {
+        result.done.push(text);
+      }
     } catch (error) {
       result.failed.push({ step: text, reason: messageOf(error) });
     }
@@ -354,91 +427,184 @@ export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<Un
   return result;
 }
 
-async function runStep(client: UndoClient, step: UndoStep, result: UndoResult): Promise<void> {
+/** Run a step; false when there was nothing left of it to do. */
+async function runStep(
+  client: UndoClient,
+  step: UndoStep,
+  result: UndoResult,
+  unrestored: Unrestored,
+): Promise<boolean> {
   switch (step.kind) {
     case "delete-playlist":
-      return client.deletePlaylist(step.playlistId);
-    case "remove-tracks":
-      return client.removeTracksFromPlaylist(step.playlistId, step.playlistTrackIds);
-    case "recreate-playlist": {
-      const playlist = await client.createPlaylist(step.name, { isPublic: step.isPublic ?? false });
-      return addInOrder(client, playlist.id, step.trackIds);
+      if (step.trackIds.some((id) => unrestored.has(id))) {
+        throw new Error("kept, as it holds tracks that could not be put back where they were");
+      }
+      await client.deletePlaylist(step.playlistId);
+      return true;
+    case "remove-tracks": {
+      const going = step.entries.filter((e) => !unrestored.has(e.trackId));
+      const staying = step.entries.length - going.length;
+      if (staying > 0) {
+        result.notes.push(
+          `${plural(staying, "track")} ${staying === 1 ? "stays" : "stay"} in ${step.name}, as ${staying === 1 ? "it" : "they"} could not be put back where ${staying === 1 ? "it was" : "they were"}.`,
+        );
+      }
+      await client.removeTracksFromPlaylist(
+        step.playlistId,
+        going.map((e) => e.playlistTrackId),
+      );
+      return going.length > 0;
     }
+    case "recreate-playlist":
+      await recreate(client, step, result, unrestored);
+      return true;
     case "restore-tracks":
-      return restoreTracks(client, step, result);
+      return restoreTracks(client, step, result, unrestored);
+    case "reorder-playlist": {
+      const current = entryIds(await client.getPlaylistTracks(step.playlistId));
+      await moveInto(client, step.playlistId, current, mergeOrder(current, step.order));
+      return true;
+    }
+    case "update-playlist":
+      if (client.updatePlaylist === undefined) {
+        throw new Error("playlist details cannot be changed here");
+      }
+      await client.updatePlaylist(step.playlistId, step.changes);
+      return true;
     case "add-favourites":
-      return step.type === "tracks"
+      await (step.type === "tracks"
         ? client.addFavoriteTracks(step.ids.map(Number))
         : step.type === "albums"
           ? client.addFavoriteAlbums(step.ids.map(String))
-          : client.addFavoriteArtists(step.ids.map(Number));
+          : client.addFavoriteArtists(step.ids.map(Number)));
+      return true;
     case "remove-favourites":
-      return step.type === "tracks"
+      await (step.type === "tracks"
         ? client.removeFavoriteTracks(step.ids.map(Number))
         : step.type === "albums"
           ? client.removeFavoriteAlbums(step.ids.map(String))
-          : client.removeFavoriteArtists(step.ids.map(Number));
+          : client.removeFavoriteArtists(step.ids.map(Number)));
+      return true;
   }
 }
 
-/** Re-add removed tracks (they land at the end), then move them back into place. */
+function entryIds(tracks: readonly Track[]): number[] {
+  return tracks.flatMap((t) => (t.playlistTrackId === undefined ? [] : [t.playlistTrackId]));
+}
+
+async function moveInto(
+  client: UndoClient,
+  playlistId: number,
+  current: readonly number[],
+  wanted: readonly number[],
+): Promise<void> {
+  for (const move of planOrder(current, wanted)) {
+    if (client.movePlaylistTracks === undefined) {
+      throw new Error("playlists cannot be reordered here");
+    }
+    await client.movePlaylistTracks(playlistId, move.playlistTrackIds, move.insertBefore);
+  }
+}
+
+function couldNotPutBack(count: number, name: string): string {
+  return `${plural(count, "track")} could not be put back in ${name}: Qobuz no longer offers ${count === 1 ? "it" : "them"}.`;
+}
+
+/** Create a deleted playlist again, and say what did not come back with it. */
+async function recreate(
+  client: UndoClient,
+  step: Extract<UndoStep, { kind: "recreate-playlist" }>,
+  result: UndoResult,
+  unrestored: Unrestored,
+): Promise<void> {
+  try {
+    const playlist = await client.createPlaylist(step.name, {
+      isPublic: step.isPublic ?? false,
+      ...(step.description !== undefined && { description: step.description }),
+    });
+    await addInOrder(client, playlist.id, step.trackIds);
+    const missing = missingFrom(step.trackIds, (await client.getPlaylistTracks(playlist.id)).map((t) => t.id));
+    missing.forEach((id) => unrestored.add(id));
+    if (missing.length > 0) {
+      result.notes.push(couldNotPutBack(missing.length, step.name));
+    }
+  } catch (error) {
+    step.trackIds.forEach((id) => unrestored.add(id));
+    throw error;
+  }
+}
+
+/** The `wanted` ids not in `got`, counting repeats. */
+function missingFrom(wanted: readonly number[], got: readonly number[]): number[] {
+  const left = new Map<number, number>();
+  got.forEach((id) => left.set(id, (left.get(id) ?? 0) + 1));
+  return wanted.filter((id) => {
+    const n = left.get(id) ?? 0;
+    left.set(id, n - 1);
+    return n <= 0;
+  });
+}
+
+/**
+ * Add removed tracks again (they land at the end), then put the playlist in the
+ * order it was in. False when none came back.
+ */
 async function restoreTracks(
   client: UndoClient,
   step: Extract<UndoStep, { kind: "restore-tracks" }>,
   result: UndoResult,
-): Promise<void> {
-  const before = await client.getPlaylistTracks(step.playlistId);
-  await addInOrder(
-    client,
-    step.playlistId,
-    step.tracks.map((t) => t.trackId),
-  );
-  const atEnd = (count: number): void => {
-    result.notes.push(
-      `${plural(count, "track")} ${count === 1 ? "was" : "were"} put back at the end of ${step.name}, not in ${count === 1 ? "its old place" : "their old places"}.`,
-    );
-  };
-  const moves = restoreMoves(
-    before.length,
-    step.tracks.map((t) => t.position),
-  );
-  if (moves.length === 0) {
-    return;
-  }
-  if (client.movePlaylistTracks === undefined) {
-    atEnd(moves.reduce((n, m) => n + m.count, 0));
-    return;
-  }
-  // Find the new entries: those not there before, matched to the tracks in order.
+  unrestored: Unrestored,
+): Promise<boolean> {
+  let before: Track[];
   let after: Track[];
   try {
+    before = await client.getPlaylistTracks(step.playlistId);
+    await addInOrder(
+      client,
+      step.playlistId,
+      step.entries.map((e) => e.trackId),
+    );
     after = await client.getPlaylistTracks(step.playlistId);
-  } catch {
-    atEnd(moves.reduce((n, m) => n + m.count, 0));
-    return;
+  } catch (error) {
+    // What arrived is unknown, so nothing is taken out elsewhere.
+    step.entries.forEach((e) => unrestored.add(e.trackId));
+    throw error;
   }
-  const known = new Set(before.map((t) => t.playlistTrackId));
+  // Match the new entries to the old ones, in order.
+  const known = new Set(entryIds(before));
   const arrived = new Map<number, number[]>();
   for (const track of after) {
     if (track.playlistTrackId !== undefined && !known.has(track.playlistTrackId)) {
       arrived.set(track.id, [...(arrived.get(track.id) ?? []), track.playlistTrackId]);
     }
   }
-  const entryIds = step.tracks.map((t) => arrived.get(t.trackId)?.shift());
-  for (let i = 0; i < moves.length; i += 1) {
-    const move = moves[i]!;
-    const ids = entryIds.slice(move.from, move.from + move.count);
-    if (ids.some((id) => id === undefined)) {
-      atEnd(moves.slice(i).reduce((n, m) => n + m.count, 0));
-      return;
-    }
-    try {
-      await client.movePlaylistTracks(step.playlistId, ids as number[], move.insertBefore);
-    } catch {
-      atEnd(moves.slice(i).reduce((n, m) => n + m.count, 0));
-      return;
+  const newId = new Map<number, number>();
+  let missing = 0;
+  for (const entry of step.entries) {
+    const id = arrived.get(entry.trackId)?.shift();
+    if (id === undefined) {
+      missing += 1;
+      unrestored.add(entry.trackId);
+    } else {
+      newId.set(entry.playlistTrackId, id);
     }
   }
+  if (missing > 0) {
+    result.notes.push(couldNotPutBack(missing, step.name));
+  }
+  try {
+    const current = entryIds(after);
+    const order = step.order.map((id) => newId.get(id) ?? id);
+    await moveInto(client, step.playlistId, current, mergeOrder(current, order));
+  } catch {
+    const count = newId.size;
+    if (count > 0) {
+      result.notes.push(
+        `${plural(count, "track")} ${count === 1 ? "was" : "were"} put back at the end of ${step.name}, not in ${count === 1 ? "its old place" : "their old places"}.`,
+      );
+    }
+  }
+  return newId.size > 0;
 }
 
 const UNDID = "Undid: ";

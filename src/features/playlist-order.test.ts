@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyMove, planOrder, stayingIds, type OrderMove } from "./playlist-order.js";
+import { applyMove, mergeOrder, planOrder, stayingIds, type OrderMove } from "./playlist-order.js";
 
 const upTo = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
 
@@ -56,6 +56,18 @@ describe("stayingIds", () => {
     expect([...stayingIds([1, 2, 3, 4], [4, 1, 2, 3])].sort()).toEqual([1, 2, 3]);
     expect(stayingIds([1, 2, 3], [1, 2, 3]).size).toBe(3);
     expect(stayingIds([], []).size).toBe(0);
+  });
+});
+
+describe("mergeOrder", () => {
+  it("keeps what only the current list has after what it follows there", () => {
+    expect(mergeOrder([1, 2, 90, 3, 91, 92], [3, 2, 1])).toEqual([3, 91, 92, 2, 90, 1]);
+    expect(mergeOrder([90, 1], [1])).toEqual([90, 1]);
+  });
+
+  it("leaves out what the current list lacks", () => {
+    expect(mergeOrder([1, 3], [3, 2, 1])).toEqual([3, 1]);
+    expect(mergeOrder([], [1])).toEqual([]);
   });
 });
 

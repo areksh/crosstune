@@ -11,7 +11,6 @@ import {
   formatUndoPlan,
   formatUndoResult,
   planUndo,
-  restoreMoves,
 } from "./undo.js";
 
 function setup() {
@@ -37,27 +36,6 @@ function setup() {
   };
   return { store, journal, account, client, undo };
 }
-
-describe("restoreMoves", () => {
-  it("moves each restored entry in front of the one now at its old index", () => {
-    // Three entries stay; the restored ones were at 1 and 3.
-    expect(restoreMoves(3, [1, 3])).toEqual([
-      { from: 0, count: 1, insertBefore: 2 },
-      { from: 1, count: 1, insertBefore: 4 },
-    ]);
-  });
-
-  it("moves consecutive positions together and leaves the ones already at the end", () => {
-    // Nine entries in the end: 5, 6 and 7 still precede a kept one.
-    expect(restoreMoves(4, [0, 1, 5, 6, 7])).toEqual([
-      { from: 0, count: 2, insertBefore: 1 },
-      { from: 2, count: 3, insertBefore: 6 },
-    ]);
-    // Here 6, 7 and 8 are the last three: already in place once appended.
-    expect(restoreMoves(4, [0, 1, 6, 7, 8])).toEqual([{ from: 0, count: 2, insertBefore: 1 }]);
-    expect(restoreMoves(3, [3, 4])).toEqual([]);
-  });
-});
 
 describe("undo of a created playlist", () => {
   it("deletes the playlist when it holds only what the entry added", async () => {
@@ -122,6 +100,15 @@ describe("undo of a created playlist", () => {
     const [recreated] = [...account.playlists.keys()];
     expect(account.trackIds(recreated!)).toEqual([4, 4, 5, 4]);
   });
+
+  it("says which tracks of a deleted playlist did not come back", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Old", [4, 5]);
+    await journal.run({ tool: "other" }, () => client.deletePlaylist(id));
+    account.unplayable.add(5);
+    const { outcome } = await undo();
+    expect(outcome.notes).toEqual(["1 track could not be put back in Old: Qobuz no longer offers it."]);
+  });
 });
 
 describe("undo of playlist changes", () => {
@@ -155,8 +142,8 @@ describe("undo of playlist changes", () => {
     const { plan } = await undo();
 
     expect(plan.steps.map(describeStep)).toEqual([
-      "Remove 2 tracks from Late Night",
       "Put 2 tracks back in Late Night, in their old places",
+      "Remove 2 tracks from Late Night",
     ]);
     expect(plan.notes).toEqual([]);
     expect(account.trackIds(id)).toEqual([10, 1, 20, 2, 30]);
@@ -199,14 +186,188 @@ describe("undo of playlist changes", () => {
     expect(plan.notes).toEqual(["Late Night no longer exists (or cannot be read), so its changes are not undone."]);
   });
 
-  it("says when entries it did not add were reordered", async () => {
+  it("puts a reordered playlist back in its old order, and can redo it", async () => {
     const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [1, 2, 3, 4, 2]);
+    const start = account.entryIds(id);
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.movePlaylistTracks!(id, [start[4]!, start[0]!], 3);
+      await client.movePlaylistTracks!(id, [start[3]!], 1);
+    });
+    const after = account.entryIds(id);
+
+    const { plan } = await undo();
+    expect(plan.steps.map(describeStep)).toEqual(["Put Mix back in its old order"]);
+    expect(plan.notes).toEqual([]);
+    expect(account.entryIds(id)).toEqual(start);
+
+    await undo(journal.items()[0]!.id);
+    expect(account.entryIds(id)).toEqual(after);
+  });
+
+  it("says when moves were recorded without where their entries were", async () => {
+    const { journal, account, client } = setup();
     const id = account.seedPlaylist("Mix", [1, 2]);
     await journal.run({ tool: "other" }, () => client.movePlaylistTracks!(id, [account.entryIds(id)[1]!], 1));
-    const { plan } = await undo();
+    const item = structuredClone(journal.items()[0]!);
+    for (const op of item.ops) {
+      if (op.kind === "move-tracks") {
+        delete op.from;
+      }
+    }
+    const plan = await planUndo(client, item, [item]);
+    expect(plan.steps).toEqual([]);
     expect(plan.notes).toEqual(["The order of 1 track in Mix is not restored."]);
   });
 
+  it("puts everything back after removals and moves, scattered through a long playlist, in few requests", async () => {
+    const { journal, account, client, undo } = setup();
+    const trackIds = Array.from({ length: 900 }, (_, i) => i + 1);
+    const id = account.seedPlaylist("Long", trackIds);
+    const ids = account.entryIds(id);
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.removeTracksFromPlaylist(id, ids.filter((_, i) => i % 3 === 0));
+      await client.movePlaylistTracks!(id, [ids[898]!, ids[1]!], 5);
+    });
+    account.calls.length = 0;
+    const { outcome } = await undo();
+    expect(outcome.notes).toEqual([]);
+    expect(account.trackIds(id)).toEqual(trackIds);
+    expect(account.calls.filter((c) => c.startsWith("movePlaylistTracks")).length).toBeLessThanOrEqual(5);
+  });
+
+  it("reports tracks Qobuz no longer offers and still puts the others in their places", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [1, 2, 3, 4, 5]);
+    const ids = account.entryIds(id);
+    await journal.run({ tool: "playlist-manager" }, () =>
+      client.removeTracksFromPlaylist(id, [ids[0]!, ids[1]!, ids[3]!]),
+    );
+    account.unplayable.add(2);
+    const { outcome } = await undo();
+    expect(account.trackIds(id)).toEqual([1, 3, 4, 5]);
+    expect(outcome.notes).toEqual(["1 track could not be put back in Mix: Qobuz no longer offers it."]);
+  });
+
+  it("reverses any mix of adding, removing and moving, and redoes it", async () => {
+    let seed = 11;
+    const random = (n: number): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return Math.floor((seed / 4294967296) * n);
+    };
+    for (let round = 0; round < 60; round += 1) {
+      const { journal, account, client, undo } = setup();
+      const id = account.seedPlaylist("Mix", Array.from({ length: 4 + random(12) }, () => 1 + random(6)));
+      const start = account.trackIds(id);
+      await journal.run({ tool: "playlist-manager" }, async () => {
+        for (let step = 0; step < 2 + random(6); step += 1) {
+          const ids = account.entryIds(id);
+          const picked = ids.filter(() => random(3) === 0);
+          if (random(3) === 0) {
+            await client.addTracksToPlaylist(id, [1 + random(6), 7 + random(3)]);
+          } else if (random(2) === 0) {
+            await client.removeTracksFromPlaylist(id, picked.slice(0, ids.length - 1));
+          } else {
+            await client.movePlaylistTracks!(id, picked, 1 + random(ids.length + 1));
+          }
+        }
+      });
+      if (journal.items().length === 0) {
+        continue;
+      }
+      const after = account.trackIds(id);
+      const { outcome } = await undo();
+      expect(outcome.failed).toEqual([]);
+      expect(account.trackIds(id)).toEqual(start);
+      await undo(journal.items()[0]!.id);
+      expect(account.trackIds(id)).toEqual(after);
+    }
+  });
+});
+
+describe("undo of a move between playlists", () => {
+  async function moved(unplayable = false) {
+    const world = setup();
+    const { journal, account, client } = world;
+    const from = account.seedPlaylist("From", [1, 2, 3]);
+    const to = account.seedPlaylist("To", [9]);
+    const entry = account.entryIds(from)[1]!;
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.addTracksToPlaylist(to, [2]);
+      await client.removeTracksFromPlaylist(from, [entry]);
+    });
+    if (unplayable) {
+      account.unplayable.add(2);
+    }
+    return { ...world, from, to };
+  }
+
+  it("puts the song back first, then takes it out of where it went", async () => {
+    const { account, undo, from, to } = await moved();
+    const { plan } = await undo();
+    expect(plan.steps.map(describeStep)).toEqual([
+      "Put 1 track back in From, in its old place",
+      "Remove 1 track from To",
+    ]);
+    expect(account.trackIds(from)).toEqual([1, 2, 3]);
+    expect(account.trackIds(to)).toEqual([9]);
+  });
+
+  it("leaves the song where it went when it cannot be put back", async () => {
+    const { account, undo, from, to } = await moved(true);
+    const { outcome } = await undo();
+    expect(account.trackIds(from)).toEqual([1, 3]);
+    expect(account.trackIds(to)).toEqual([9, 2]);
+    expect(outcome.notes).toEqual([
+      "1 track could not be put back in From: Qobuz no longer offers it.",
+      "1 track stays in To, as it could not be put back where it was.",
+    ]);
+  });
+
+  it("leaves the song where it went when putting it back fails", async () => {
+    const { account, undo, from, to } = await moved();
+    account.failAfter("addTracksToPlaylist", 0);
+    const { outcome } = await undo();
+    expect(account.trackIds(from)).toEqual([1, 3]);
+    expect(account.trackIds(to)).toEqual([9, 2]);
+    expect(outcome.failed).toHaveLength(1);
+  });
+
+  it("does not delete a new playlist holding a song that could not be put back", async () => {
+    const { journal, account, client, undo } = setup();
+    const from = account.seedPlaylist("From", [1, 2]);
+    let to = 0;
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      to = (await createPlaylistWithTracks(client, { name: "Split", trackIds: [2] })).id;
+      await client.removeTracksFromPlaylist(from, [account.entryIds(from)[1]!]);
+    });
+    account.unplayable.add(2);
+    const { outcome } = await undo();
+    expect(account.trackIds(to)).toEqual([2]);
+    expect(outcome.failed).toEqual([
+      {
+        step: "Delete the playlist Split (1 track)",
+        reason: "kept, as it holds tracks that could not be put back where they were",
+      },
+    ]);
+  });
+});
+
+describe("undo of changed details", () => {
+  it("sets them back to what they were", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [1]);
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.updatePlaylist!(id, { name: "Mix 2" });
+      await client.updatePlaylist!(id, { name: "Mix 3", isPublic: true });
+    });
+    const { plan } = await undo();
+    expect(plan.steps.map(describeStep)).toEqual(["Set Mix: name back to Mix, visibility back to private"]);
+    expect(account.playlists.get(id)).toMatchObject({ name: "Mix", isPublic: false });
+  });
+});
+
+describe("undo when moving back fails", () => {
   it("leaves restored tracks at the end when moving them back fails", async () => {
     const { journal, account, client, undo } = setup();
     const id = account.seedPlaylist("Mix", [1, 2, 3]);
