@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { readLock, tryAcquireLock } from "./file-lock.js";
+import { acquireLockWithin, readLock, tryAcquireLock } from "./file-lock.js";
 
 let dir: string;
 let path: string;
@@ -75,5 +75,35 @@ describe("tryAcquireLock", () => {
     expect(readLock(path)?.pid).toBe(2);
     second?.release();
     expect(() => readFileSync(path)).toThrow();
+  });
+});
+
+describe("acquireLockWithin", () => {
+  it("waits for the holder to let go", async () => {
+    const held = tryAcquireLock(path, { pid: 1, host: "box" })!;
+    let polls = 0;
+    const lock = await acquireLockWithin(path, 5000, {
+      pid: 2,
+      host: "box",
+      isAlive: () => true,
+      sleep: async () => {
+        polls += 1;
+        if (polls === 3) {
+          held.release();
+        }
+      },
+    });
+    expect(lock).toBeDefined();
+    expect(polls).toBe(3);
+  });
+
+  it("gives up after the wait", async () => {
+    tryAcquireLock(path, { pid: 1, host: "box" });
+    let polls = 0;
+    const sleep = async () => {
+      polls += 1;
+    };
+    expect(await acquireLockWithin(path, 1000, { pid: 2, host: "box", isAlive: () => true, sleep })).toBeUndefined();
+    expect(polls).toBe(4);
   });
 });

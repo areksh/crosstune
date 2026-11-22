@@ -100,6 +100,24 @@ export function tryAcquireLock(path: string, options: LockOptions = {}): FileLoc
   return undefined;
 }
 
+/** Take the lock, trying for up to `waitMs` while someone else holds it. */
+export async function acquireLockWithin(
+  path: string,
+  waitMs: number,
+  options: LockOptions & { sleep?: (ms: number) => Promise<void> } = {},
+): Promise<FileLock | undefined> {
+  const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let waited = 0; ; waited += LOCK_POLL_MS) {
+    const lock = tryAcquireLock(path, options);
+    if (lock !== undefined || waited >= waitMs) {
+      return lock;
+    }
+    await sleep(LOCK_POLL_MS);
+  }
+}
+
+const LOCK_POLL_MS = 250;
+
 function create(path: string, info: LockInfo): boolean {
   let fd: number;
   try {

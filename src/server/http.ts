@@ -49,6 +49,9 @@ export interface StartServerOptions {
   history?: ApiDeps["history"];
   /** Background jobs the API manages (see ApiDeps). */
   jobs?: ApiDeps["jobs"];
+  /** For the playlist manager (see ApiDeps). */
+  ownerId?: ApiDeps["ownerId"];
+  acquireWriteLock?: ApiDeps["acquireWriteLock"];
   /** Port to bind; 0 (default) picks an ephemeral free port. */
   port?: number;
   /** Directory holding the built frontend; defaults to the bundled `dist/web`. */
@@ -151,6 +154,8 @@ async function handle(
         port: address,
         ...(options.history !== undefined && { history: options.history }),
         ...(options.jobs !== undefined && { jobs: options.jobs }),
+        ...(options.ownerId !== undefined && { ownerId: options.ownerId }),
+        ...(options.acquireWriteLock !== undefined && { acquireWriteLock: options.acquireWriteLock }),
       },
     );
     sendResponse(res, response);

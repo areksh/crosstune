@@ -209,7 +209,7 @@ import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
 import { authenticateByPaste, authenticateViaBrowser } from "./cli/oauth-login.js";
 import { configDir } from "./cli/config-dir.js";
-import { tryAcquireLock } from "./cli/file-lock.js";
+import { acquireLockWithin, tryAcquireLock } from "./cli/file-lock.js";
 import {
   fileGlobalStore,
   fileJobStateStore,
@@ -648,6 +648,8 @@ async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
     service: recorded,
     history: { journal },
     jobs: jobsApi(journal, recorded),
+    ownerId: session.userId,
+    acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
     session: {
       displayName: session.displayName,
       subscriptionLabel: session.subscriptionLabel,
@@ -705,6 +707,14 @@ function openJobsService(): JobsService {
   });
 }
 
+/** The lock held while a managed playlist is refreshed or the playlist manager writes. */
+function jobsLockPath(dir: string = configDir()): string {
+  return join(dir, "jobs.lock");
+}
+
+/** How long a playlist manager change waits for a refresh to finish. */
+const WRITE_LOCK_WAIT_MS = 5000;
+
 /** The job runner's files and lock, with each refresh one history entry. */
 function jobRunnerDeps(journal: Journal, connect: RunDueDeps["connect"]): RunDueDeps {
   const dir = configDir();
@@ -713,7 +723,7 @@ function jobRunnerDeps(journal: Journal, connect: RunDueDeps["connect"]): RunDue
     state: fileJobStateStore(dir),
     runs: fileRunLog(dir),
     global: fileGlobalStore(dir),
-    acquireLock: () => tryAcquireLock(join(dir, "jobs.lock")),
+    acquireLock: () => tryAcquireLock(jobsLockPath(dir)),
     connect,
     journalRun: (label, fn) => journal.run({ tool: "managed", label }, fn),
   };
@@ -949,6 +959,8 @@ async function runServe(
     service: recorded,
     history: { journal },
     jobs: jobsApi(journal, recorded),
+    ownerId: session.userId,
+    acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
     session: {
       displayName: session.displayName,
       subscriptionLabel: session.subscriptionLabel,

@@ -12,6 +12,7 @@
  * browser); upstream Qobuz failures map to 502 so the UI can surface them.
  */
 
+import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes } from "./playlist-routes.js";
 import {
   QobuzError,
   RELEASE_TYPES,
@@ -156,6 +157,7 @@ export interface QobuzApiService {
   getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
   getArtistReleases(artistId: number, maxReleases?: number): Promise<ArtistReleases>;
   getUserPlaylists(): Promise<Playlist[]>;
+  getPlaylist(playlistId: number): Promise<Playlist>;
   getPlaylistTracks(playlistId: number): Promise<Track[]>;
   getFavoriteTracks(): Promise<Track[]>;
   getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
@@ -184,9 +186,13 @@ export interface QobuzApiService {
   removeFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
   removeFavoriteArtists(artistIds: readonly number[]): Promise<void>;
   deletePlaylist(playlistId: number): Promise<void>;
+  updatePlaylist(
+    playlistId: number,
+    changes: { name?: string; description?: string; isPublic?: boolean },
+  ): Promise<Playlist>;
   /**
-   * Move playlist entries into place (upgrade & repair). Optional: its endpoint
-   * is unverified, and without it replacements stay at the end of a playlist.
+   * Move playlist entries into place. Optional: without it replacements stay
+   * at the end of a playlist, and the playlist manager cannot reorder.
    */
   movePlaylistTracks?(
     playlistId: number,
@@ -211,6 +217,13 @@ export interface ApiDeps {
   port: number;
   /** The change history; without it the history routes answer 404. */
   history?: { journal: Journal };
+  /** The signed-in user's id: playlists of others are read-only to the manager. */
+  ownerId?: number;
+  /**
+   * Take the lock that keeps the playlist manager's writes and the managed
+   * playlists' refreshes apart (waiting a little); undefined when it stays busy.
+   */
+  acquireWriteLock?(): Promise<{ release(): void } | undefined>;
   /** Background jobs; without it the job routes answer 404. */
   jobs?: {
     service: JobsService;
@@ -288,6 +301,7 @@ const WRITE_ROUTES: Record<string, string> = {
   "/api/import/commit": "import",
   "/api/restore": "restore",
   "/api/word-play/commit": "word-play",
+  ...Object.fromEntries(MANAGER_WRITES.map((path) => [path, "playlist-manager"])),
 };
 
 /** Run a write route as one history entry; everything else as is. */
@@ -309,6 +323,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
 async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.path === "/api/jobs" || req.path.startsWith("/api/jobs/")) {
     return jobsRoute(req, deps);
+  }
+  if (req.path.startsWith(MANAGER_PREFIX)) {
+    return playlistRoutes(req, deps);
   }
   if (req.method === "GET" && req.path === "/api/history") {
     return historyList(deps);
