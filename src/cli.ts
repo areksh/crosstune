@@ -242,6 +242,9 @@ import { startServer } from "./server/http.js";
 import type { ApiDeps } from "./server/router.js";
 import {
   deduplicateTracks,
+  findOtherVersions,
+  formatOtherVersions,
+  toDedupTrack,
   enrichReleaseDates,
   formatAcrossPlaylistsReport,
   formatResolutionReport,
@@ -1399,9 +1402,13 @@ function planDeduplicate(
     const resolved = resolveDuplicateGroups(groups, keep);
     logger.info(`  keeping the ${keep.join(", then ")} copy of each duplicate\n`);
     logger.info(formatResolutionReport(resolved));
+    const versions = findOtherVersions(tracks.map(toDedupTrack));
+    if (versions.length > 0) {
+      logger.info(`\n${formatOtherVersions(versions)}`);
+    }
 
     const removals = tracksToRemove(resolved);
-    output.assign({ source, keep, groups: resolved, toRemove: removals.length, applied: false });
+    output.assign({ source, keep, groups: resolved, versions, toRemove: removals.length, applied: false });
     if (!apply) {
       if (removals.length > 0) {
         logger.info(
@@ -1437,12 +1444,15 @@ function planDeduplicateAllPlaylists(
       `  ${scan.playlistCount} playlists scanned; keeping the ${keep.join(", then ")} copy of each duplicate\n`,
     );
     const removals: PlaylistEntry[] = [];
-    if (scan.within.length === 0) {
+    if (scan.within.every((entry) => entry.groups.length === 0)) {
       logger.info("No duplicates within any playlist.");
     }
-    for (const { playlist, groups } of scan.within) {
+    for (const { playlist, groups, versions } of scan.within) {
       logger.info(`"${playlist.name}" (id ${playlist.id}):`);
       logger.info(`${formatResolutionReport(groups)}\n`);
+      if (versions.length > 0) {
+        logger.info(`${formatOtherVersions(versions)}\n`);
+      }
       for (const track of tracksToRemove(groups)) {
         if (track.playlistTrackId !== undefined) {
           removals.push({ playlistId: playlist.id, playlistTrackId: track.playlistTrackId });

@@ -297,9 +297,12 @@ is seven. A property test checks the plan against a model of Qobuz's move.
   managed refresh, or another save, is running and to try again.
 - Saving is one request, so progress is "Saving..." with what is being written;
   opening says how many songs it is reading.
-- Duplicate markers and "already in..." use the song picker's matching (track
-  id, ISRC, or artist and title *with version*), not the Deduplicator's looser
-  grouping, so a live take is not marked as a copy.
+- What counts as a duplicate is decided in one place (`deduplicate.ts`) for the
+  Deduplicator, this page, Combine, "already in..." and scheduled tidy-ups: the
+  same track, ISRC, or artist and title *with version*. Copies that differ only
+  by version label (live, acoustic, remix) are "other versions": pointed out, by
+  a badge here and a section in the Deduplicator, kept by default, and never
+  touched automatically. (Asked for by the user during the build.)
 - Artist links match the main artist by id, and joint or guest credits by the
   artist's name (credits carry no ids); links are looked up by the server, the
   rest of the matching is pure.
@@ -372,7 +375,7 @@ The review's questions were settled by the author under the go-ahead to build:
 | Undo of a move failing part-way | Restores run first; a song not restored is not removed from where it went |
 | Undo exactness and cost | Backwards replay and one reorder, for every tool |
 | Mirror-managed destinations | Not offered for copy or move |
-| "Same song" | Song picker matching for markers; track id for copy / move |
+| "Same song" | One shared, version-aware matching for markers and tools; track id for copy / move |
 | Non-Latin titles all counting as one song (existing `normalise` bug, which also affects the Deduplicator) | Fixed first, as its own change |
 | Playlists owned by others | None today; if any appear they open read-only (copy out, no edits) and `--all-playlists` reports them as skipped |
 | Jobs lock | Around every playlist-manager write |
@@ -380,6 +383,3 @@ The review's questions were settled by the author under the go-ahead to build:
 | Moves anchored on a moved entry | Never planned; the test account models them as Qobuz does |
 | Artist links | Id for the main artist, name for credits |
 | Managed notice | Reworded to what actually happens |
-
-Out of scope, noted for later: the Deduplicator groups a studio take with a live
-take whose title is the same and whose "Live" is only in the version label.

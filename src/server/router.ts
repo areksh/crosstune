@@ -24,6 +24,8 @@ import {
 } from "../qobuz/index.js";
 import {
   deduplicateTracks,
+  findOtherVersions,
+  toDedupTrack,
   enrichReleaseDates,
   removePlaylistEntries,
   resolveDuplicateGroups,
@@ -737,7 +739,7 @@ async function scan(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
     );
   }
   const resolved = resolveDuplicateGroups(groups, keep);
-  return { status: 200, body: { groups: resolved } };
+  return { status: 200, body: { groups: resolved, versions: findOtherVersions(tracks.map(toDedupTrack)) } };
 }
 
 async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {

@@ -14,11 +14,12 @@
 import { api, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { coverSlot } from "../artwork.js";
-import { groupHead, qualityPill, trackText } from "../tracks.js";
+import { groupHead, qualityPill, titleOf, trackText } from "../tracks.js";
 
 interface DedupTrack {
   id: number;
   title: string;
+  version?: string;
   artist: string;
   album?: string;
   playlistTrackId?: number;
@@ -30,7 +31,8 @@ interface DedupTrack {
 
 interface ResolvedGroup {
   tracks: DedupTrack[];
-  keepId: number;
+  /** The copy kept; absent for a song in several versions, all kept by default. */
+  keepId?: number;
 }
 
 interface PlaylistRef {
@@ -47,7 +49,9 @@ interface AcrossSong {
 /** `/api/deduplicate/scan`: `groups` for one source, the rest for all playlists. */
 interface ScanResponse {
   groups?: ResolvedGroup[];
-  within?: Array<{ playlist: PlaylistRef; groups: ResolvedGroup[] }>;
+  /** Songs held in several versions (live, acoustic...): not duplicates. */
+  versions?: DedupTrack[][];
+  within?: Array<{ playlist: PlaylistRef; groups: ResolvedGroup[]; versions?: DedupTrack[][] }>;
   across?: AcrossSong[];
   playlistCount?: number;
 }
@@ -164,15 +168,16 @@ async function onScan(): Promise<void> {
     });
     scannedSource = source;
     if (source.type === "all-playlists") {
-      scannedGroups = (scan.within ?? []).flatMap(({ playlist, groups }) =>
-        groups.map((group) => ({ group, playlistId: playlist.id })),
+      scannedGroups = (scan.within ?? []).flatMap(({ playlist, groups, versions }) =>
+        [...groups, ...versionGroups(versions)].map((group) => ({ group, playlistId: playlist.id })),
       );
       scannedSongs = scan.across ?? [];
       renderAllPlaylists(scan);
     } else {
-      scannedGroups = (scan.groups ?? []).map((group) => ({ group }));
+      const versions = versionGroups(scan.versions);
+      scannedGroups = [...(scan.groups ?? []), ...versions].map((group) => ({ group }));
       scannedSongs = [];
-      renderGroups(scan.groups ?? []);
+      renderGroups(scan.groups ?? [], versions);
     }
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -182,6 +187,24 @@ async function onScan(): Promise<void> {
   }
 }
 
+function versionGroups(versions: DedupTrack[][] | undefined): ResolvedGroup[] {
+  return (versions ?? []).map((tracks) => ({ tracks }));
+}
+
+/** A section of songs held in several versions, numbered from `firstIndex`. */
+function renderVersions(groups: ResolvedGroup[], firstIndex: number): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "dedup-section";
+  section.appendChild(
+    groupHead("h3", "Other versions", {
+      note: "The same song, but live, acoustic, remixed and so on. All kept; untick any you do not want.",
+      count: String(groups.length),
+    }),
+  );
+  groups.forEach((group, i) => section.appendChild(renderGroup(group, firstIndex + i)));
+  return section;
+}
+
 function showReview(hasAnything: boolean): void {
   el("dedup-results").hidden = false;
   el("dedup-bar").hidden = !hasAnything;
@@ -189,23 +212,27 @@ function showReview(hasAnything: boolean): void {
   setStep("dedup-steps", 1);
 }
 
-function renderGroups(groups: ResolvedGroup[]): void {
+function renderGroups(groups: ResolvedGroup[], versions: ResolvedGroup[]): void {
   const summary = el("dedup-summary");
   const container = el("dedup-groups");
   container.textContent = "";
-  showReview(groups.length > 0);
+  showReview(groups.length + versions.length > 0);
   el("dedup-bar-note").textContent = "Unticked copies are removed.";
 
-  if (groups.length === 0) {
-    summary.textContent = "No duplicates found.";
-    return;
+  summary.textContent =
+    groups.length === 0
+      ? "No duplicates found."
+      : `Found ${groups.length} duplicate group${groups.length === 1 ? "" : "s"}. Ticked copies are kept; the rest are removed when you apply.`;
+  if (versions.length > 0) {
+    summary.textContent += ` ${versions.length} song${versions.length === 1 ? " is" : "s are"} also here in other versions, which are kept.`;
   }
-
-  summary.textContent = `Found ${groups.length} duplicate group${groups.length === 1 ? "" : "s"}. Ticked copies are kept; the rest are removed when you apply.`;
 
   groups.forEach((group, index) => {
     container.appendChild(renderGroup(group, index));
   });
+  if (versions.length > 0) {
+    container.appendChild(renderVersions(versions, groups.length));
+  }
   updateApplyButton();
 }
 
@@ -222,7 +249,7 @@ function renderAllPlaylists(scan: ScanResponse): void {
   el("dedup-bar-note").textContent =
     "Unticked copies are removed, and songs from unticked playlists.";
 
-  const groupCount = scannedGroups.length;
+  const groupCount = within.reduce((n, entry) => n + entry.groups.length, 0);
   el("dedup-summary").textContent =
     `Scanned ${scan.playlistCount ?? 0} playlists: ` +
     `${across.length} song${across.length === 1 ? " is" : "s are"} in more than one playlist, ` +
@@ -242,7 +269,7 @@ function renderAllPlaylists(scan: ScanResponse): void {
   }
 
   let index = 0;
-  for (const { playlist, groups } of within) {
+  for (const { playlist, groups, versions } of within) {
     const section = document.createElement("section");
     section.className = "dedup-section";
     section.appendChild(
@@ -255,6 +282,11 @@ function renderAllPlaylists(scan: ScanResponse): void {
       section.appendChild(renderGroup(group, index));
       index += 1;
     }
+    const others = versionGroups(versions);
+    if (others.length > 0) {
+      section.appendChild(renderVersions(others, index));
+      index += others.length;
+    }
     container.appendChild(section);
   }
   updateApplyButton();
@@ -265,7 +297,7 @@ function renderSong(song: AcrossSong, index: number): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = "dedup-group dedup-song";
   wrapper.dataset["song"] = String(index);
-  const title = `${song.track.artist ? `${song.track.artist} - ` : ""}${song.track.title}`;
+  const title = `${song.track.artist ? `${song.track.artist} - ` : ""}${titleOf(song.track)}`;
   wrapper.appendChild(groupHead("h4", title));
 
   for (const { playlist, tracks } of song.playlists) {
@@ -323,9 +355,11 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
   // the kept id is the keeper (as the server's plan counts it).
   const keep = group.tracks.findIndex((track) => track.id === group.keepId);
   group.tracks.forEach((track, position) => {
-    wrapper.appendChild(renderGroupTrack(track, position, position === keep));
+    wrapper.appendChild(renderGroupTrack(track, position, group.keepId === undefined || position === keep));
   });
-  wrapper.appendChild(keepAllLabel);
+  if (group.keepId !== undefined) {
+    wrapper.appendChild(keepAllLabel);
+  }
   updateGroupStyling(wrapper);
   return wrapper;
 }
@@ -348,7 +382,7 @@ function renderGroupTrack(track: DedupTrack, position: number, keep: boolean): H
   row.appendChild(coverSlot(track.image));
 
   row.appendChild(
-    trackText(`${track.artist ? `${track.artist} - ` : ""}${track.title}`, trackMeta(track)),
+    trackText(`${track.artist ? `${track.artist} - ` : ""}${titleOf(track)}`, trackMeta(track)),
   );
   const pill = qualityPill(track);
   if (pill !== undefined) {

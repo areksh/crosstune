@@ -29,7 +29,7 @@
 
 import type { Playlist, Track } from "../qobuz/index.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
-import { trackSignature } from "./deduplicate.js";
+import { toDedupTrack, trackSignature } from "./deduplicate.js";
 
 /** Where the upgrade tool looks for tracks. */
 export type UpgradeSource =
@@ -177,8 +177,7 @@ function signatureOf(track: Track): string | undefined {
   if (track.artist === undefined || track.artist.length === 0) {
     return undefined;
   }
-  const title = track.version === undefined ? track.title : `${track.title} (${track.version})`;
-  return trackSignature({ id: track.id, title, artist: track.artist });
+  return trackSignature(toDedupTrack(track));
 }
 
 /** A track as found in the source, with where it sits. */

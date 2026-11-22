@@ -22,7 +22,7 @@
  */
 
 import type { Track } from "../qobuz/index.js";
-import { trackSignature } from "./deduplicate.js";
+import { toDedupTrack, trackSignature } from "./deduplicate.js";
 import type { Exclusion } from "./track-filter.js";
 
 /** The plan-wide options, as the CLI flags and API requests give them. */
@@ -57,7 +57,7 @@ export function songKeys(track: Track): string[] {
     keys.push(`isrc:${track.isrc}`);
   }
   if (track.artist !== undefined && track.artist.trim().length > 0) {
-    keys.push(`sig:${trackSignature({ id: track.id, title: labelOf(track), artist: track.artist })}`);
+    keys.push(`sig:${trackSignature(toDedupTrack(track))}`);
   }
   return keys;
 }

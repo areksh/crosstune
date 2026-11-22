@@ -125,7 +125,7 @@ export function trackText(title: string, sub: string | undefined): HTMLElement {
 }
 
 /** A track's title with its version label, e.g. "Roads (Live)". */
-export function titleOf(track: Track): string {
+export function titleOf(track: Pick<Track, "title" | "version">): string {
   return track.version === undefined ? track.title : `${track.title} (${track.version})`;
 }
 

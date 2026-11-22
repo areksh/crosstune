@@ -6,7 +6,9 @@ import {
   entriesByPlaylist,
   enrichReleaseDates,
   findSongsAcrossPlaylists,
+  findOtherVersions,
   formatAcrossPlaylistsReport,
+  formatOtherVersions,
   findDuplicateGroups,
   formatResolutionReport,
   KEEP_STRATEGIES,
@@ -532,5 +534,68 @@ describe("titles outside the Latin alphabet", () => {
   it("keeps voiced kana and still folds Latin accents", () => {
     expect(normalise("がんばれ")).toBe("がんばれ");
     expect(normalise("Beyoncé")).toBe("beyonce");
+  });
+});
+
+describe("versions", () => {
+  const song = (id: number, version?: string, isrc?: string): DedupTrack => ({
+    id,
+    title: "Roads",
+    artist: "Portishead",
+    ...(version !== undefined && { version }),
+    ...(isrc !== undefined && { isrc }),
+  });
+
+  it("does not take a live, acoustic or remixed version for a duplicate", () => {
+    expect(findDuplicateGroups([song(1), song(2, "Live"), song(3, "Acoustic"), song(4, "Remix")])).toEqual([]);
+  });
+
+  it("still matches editions, the album version, the same label and the same recording", () => {
+    const ids = (tracks: DedupTrack[]) => findDuplicateGroups(tracks).map((g) => g.map((t) => t.id));
+    expect(ids([song(1), song(2, "2011 Remaster")])).toEqual([[1, 2]]);
+    expect(ids([song(1), song(2, "Album Version")])).toEqual([[1, 2]]);
+    expect(ids([song(1, "Live"), song(2, "live")])).toEqual([[1, 2]]);
+    expect(ids([song(1, undefined, "X"), song(2, "Live", "X")])).toEqual([[1, 2]]);
+    expect(ids([song(1, "Live"), { id: 2, title: "Roads (Live)", artist: "Portishead" }])).toEqual([[1, 2]]);
+  });
+
+  it("points out songs held in several versions, with all their copies", () => {
+    const groups = findOtherVersions([song(1), song(2, "Live"), song(3, "Remastered"), { ...song(4), title: "Glory Box" }]);
+    expect(groups.map((g) => g.map((t) => t.id))).toEqual([[1, 2, 3]]);
+  });
+
+  it("does not call duplicates other versions", () => {
+    expect(findOtherVersions([song(1), song(2, "2011 Remaster")])).toEqual([]);
+    expect(findOtherVersions([song(1, undefined, "X"), song(2, "Live", "X")])).toEqual([]);
+    expect(findOtherVersions([{ id: 1, title: "T", artist: "" }, { id: 2, title: "T", artist: "", version: "Live" }])).toEqual([]);
+  });
+
+  it("reports them for the CLI", () => {
+    expect(formatOtherVersions([])).toBe("");
+    expect(formatOtherVersions([[song(1), song(2, "Live")]])).toBe(
+      "1 song is here in different versions (live, acoustic, remix...). These are kept:\n   Portishead - Roads: no label, Live",
+    );
+  });
+});
+
+describe("scanAllPlaylists with versions", () => {
+  it("lists a playlist that only has other versions, with nothing to remove", async () => {
+    const scan = await scanAllPlaylists(
+      {
+        getUserPlaylists: async () => [{ id: 1, name: "Mix" }, { id: 2, name: "Plain" }],
+        getPlaylistTracks: async (id) =>
+          id === 1
+            ? [
+                { id: 1, title: "Roads", artist: "Portishead" },
+                { id: 2, title: "Roads", artist: "Portishead", version: "Live" },
+              ]
+            : [],
+        getAlbumReleaseDate: async () => undefined,
+      },
+      "first-added",
+    );
+    expect(scan.within).toHaveLength(1);
+    expect(scan.within[0]).toMatchObject({ playlist: { name: "Mix" }, groups: [] });
+    expect(scan.within[0]!.versions.map((g) => g.map((t) => t.id))).toEqual([[1, 2]]);
   });
 });
