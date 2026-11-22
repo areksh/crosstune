@@ -19,6 +19,7 @@ import {
   parseSimilarArgs,
   parseStatsArgs,
   parseUndoArgs,
+  parseRemoveArtistsArgs,
   parseUpgradeArgs,
   parseWordPlayArgs,
 } from "./args.js";
@@ -1262,5 +1263,43 @@ describe("driver commands' arguments", () => {
     expect(() => parseScheduleArgs(["print"])).toThrow(/one of/);
     expect(() => parseScheduleArgs(["print", "--cron", "--systemd"])).toThrow(/one of/);
     expect(() => parseScheduleArgs(["install", "--cron"])).toThrow(/schedule print/);
+  });
+});
+
+describe("parseRemoveArtistsArgs", () => {
+  it("takes playlists (ids or links, each once), artists and flags in any order", () => {
+    expect(
+      parseRemoveArtistsArgs([
+        "Portishead",
+        "--playlist",
+        "5",
+        "--playlist",
+        "https://play.qobuz.com/playlist/6",
+        "--playlist",
+        "5",
+        "/^the /",
+        "--include-guests",
+        "--apply",
+      ]),
+    ).toEqual({
+      playlists: { type: "some", ids: [5, 6] },
+      artists: ["Portishead", "/^the /"],
+      includeGuests: true,
+      apply: true,
+    });
+    expect(parseRemoveArtistsArgs(["--all-playlists"])).toEqual({
+      playlists: { type: "all" },
+      artists: [],
+      includeGuests: false,
+      apply: false,
+    });
+  });
+
+  it("refuses no playlists, both kinds, bad ids and unknown options", () => {
+    expect(() => parseRemoveArtistsArgs(["A"])).toThrow(/Playlists are required/);
+    expect(() => parseRemoveArtistsArgs(["--all-playlists", "--playlist", "5"])).toThrow(/not both/);
+    expect(() => parseRemoveArtistsArgs(["--playlist", "x"])).toThrow(/numeric id/);
+    expect(() => parseRemoveArtistsArgs(["--playlist"])).toThrow(/numeric id/);
+    expect(() => parseRemoveArtistsArgs(["--all-playlists", "--force"])).toThrow(/Unknown argument/);
   });
 });

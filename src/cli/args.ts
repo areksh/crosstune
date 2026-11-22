@@ -1653,6 +1653,76 @@ export function parseUpgradeArgs(argv: readonly string[]): UpgradeArgs {
   return { source: sources[0]!, allowSignatureMatch, removeUnplayable, apply };
 }
 
+export interface RemoveArtistsArgs {
+  playlists: { type: "all" } | { type: "some"; ids: number[] };
+  /** Names, links or /regexes/ given as arguments (more may come on stdin). */
+  artists: string[];
+  /** Also take songs where they are only a guest. */
+  includeGuests: boolean;
+  /** Whether to remove (otherwise report only). */
+  apply: boolean;
+}
+
+/**
+ * Parse the arguments for the `remove-artists` command: `--playlist <id or
+ * link>` (repeatable) or `--all-playlists`, `--include-guests`, `--apply`, and
+ * the artists.
+ *
+ * @throws {Error} on a missing or doubled source, a bad playlist id, or an
+ *   unknown option.
+ */
+export function parseRemoveArtistsArgs(argv: readonly string[]): RemoveArtistsArgs {
+  const ids: number[] = [];
+  const artists: string[] = [];
+  let all = false;
+  let includeGuests = false;
+  let apply = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    switch (arg) {
+      case "--playlist": {
+        const raw = argv[i + 1];
+        i += 1;
+        const id = playlistIdOf(raw);
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
+        }
+        if (!ids.includes(id)) {
+          ids.push(id);
+        }
+        break;
+      }
+      case "--all-playlists":
+        all = true;
+        break;
+      case "--include-guests":
+        includeGuests = true;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      default:
+        if (arg.startsWith("--")) {
+          throw new Error(`Unknown argument: ${arg}`);
+        }
+        artists.push(arg);
+    }
+  }
+  if (all === ids.length > 0) {
+    throw new Error(
+      all
+        ? "Give either --playlist or --all-playlists, not both"
+        : "Playlists are required: --playlist <id> (repeatable) or --all-playlists",
+    );
+  }
+  return {
+    playlists: all ? { type: "all" } : { type: "some", ids },
+    artists,
+    includeGuests,
+    apply,
+  };
+}
+
 export interface HistoryArgs {
   /** How many entries to list, newest first. */
   limit: number;

@@ -687,6 +687,7 @@ const TOOL_NAMES: Record<string, string> = {
   "new-releases": "New releases",
   managed: "Managed playlist",
   "playlist-manager": "Playlist manager",
+  "remove-artists": "Remove artists",
   import: "Import",
   restore: "Restore backup",
   undo: "Undo",

@@ -64,6 +64,13 @@
  *       --apply it only reports; with --apply it removes the tracks marked
  *       "drop".
  *
+ *   qobuz-helper remove-artists (--playlist <id>... | --all-playlists)
+ *                               [--include-guests] [--apply] <artist>...
+ *       Report the songs by these artists (names, Qobuz artist links or
+ *       /patterns/, also on stdin) in your playlists; with --apply, remove
+ *       them. Songs where they are only a guest are kept unless
+ *       --include-guests is given.
+ *
  *   qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists)
  *                        [--allow-signature-match] [--remove-unplayable] [--apply]
  *       Find tracks with a better-quality release of the same recording (same
@@ -194,8 +201,10 @@ import {
   parseStatsArgs,
   parseUndoArgs,
   parseWordPlayArgs,
+  parseRemoveArtistsArgs,
   parseUpgradeArgs,
   type DedupeSource,
+  type RemoveArtistsArgs,
   type ExportArgs,
   type ImportArgs,
   type ImportTargetArg,
@@ -338,6 +347,12 @@ import {
 } from "./features/new-releases.js";
 import { formatHistoryList, selectEntry, toSummary, type HistorySource } from "./features/history.js";
 import { Journal, recordingClient } from "./features/journal.js";
+import {
+  commitRemovals,
+  formatRemoveArtists,
+  removalsOf,
+  resolveRemoveArtists,
+} from "./features/playlist-manager.js";
 import {
   applyUndo,
   describeStep,
@@ -494,6 +509,15 @@ async function main(): Promise<void> {
     case "deduplicate": {
       const plan = planDeduplicate(args.slice(1));
       run = (client) => plan(client);
+      break;
+    }
+    case "remove-artists": {
+      const given = parseRemoveArtistsArgs(args.slice(1));
+      const parsed = { ...given, artists: given.artists.length > 0 ? given.artists : readLinesFromStdin() };
+      if (parsed.artists.length === 0) {
+        throw new Error("No artists given. Pass them as arguments or pipe them on stdin.");
+      }
+      run = (client, session) => runRemoveArtists(client, session, parsed);
       break;
     }
     case "upgrade": {
@@ -1498,6 +1522,67 @@ function planDeduplicateAllPlaylists(
   };
 }
 
+/** `remove-artists`: report (or, with --apply, remove) artists' songs from playlists. */
+async function runRemoveArtists(
+  client: QobuzClient,
+  session: UserSession,
+  args: RemoveArtistsArgs,
+): Promise<void> {
+  const { artists } = args;
+  const mine = await client.getUserPlaylists();
+  const isMine = (ownerId: number | undefined): boolean => ownerId === undefined || ownerId === session.userId;
+  let playlists: Array<{ id: number; name: string }>;
+  if (args.playlists.type === "all") {
+    playlists = mine.filter((p) => isMine(p.ownerId));
+    for (const other of mine.filter((p) => !isMine(p.ownerId))) {
+      logger.info(`Skipping "${other.name}": it belongs to someone else.`);
+    }
+  } else {
+    playlists = args.playlists.ids.map((id) => {
+      const known = mine.find((p) => p.id === id);
+      if (known === undefined || !isMine(known.ownerId)) {
+        throw new Error(`${known === undefined ? `Playlist ${id}` : `"${known.name}"`} is not one of your playlists`);
+      }
+      return known;
+    });
+  }
+  const refs = playlists.map(({ id, name }) => ({ id, name }));
+  logger.info(`Looking in ${count(refs.length, "playlist")}...\n`);
+  const plan = await resolveRemoveArtists(client, refs, artists);
+  logger.info(formatRemoveArtists(plan, args.includeGuests));
+  const removals = removalsOf(plan, args.includeGuests);
+  const total = removals.reduce((n, removal) => n + removal.entries.length, 0);
+  output.assign({ ...plan, includeGuests: args.includeGuests, toRemove: total, applied: false });
+  if (total === 0) {
+    logger.info("\nNothing to remove.");
+    return;
+  }
+  if (!args.apply) {
+    logger.info(`\n(dry run -- pass --apply to remove the ${total} 'drop' song${total === 1 ? "" : "s"})`);
+    return;
+  }
+  const lock = await acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS);
+  if (lock === undefined) {
+    throw new Error("A managed playlist is being refreshed, or another change is being saved. Try again in a moment.");
+  }
+  try {
+    const reports = await commitRemovals(client, removals);
+    const removed = reports.reduce((n, report) => n + report.removed, 0);
+    output.assign({ applied: true, removed, reports });
+    for (const { playlistId, error } of reports) {
+      if (error !== undefined) {
+        logger.warn(`Playlist ${playlistId}: ${error}`);
+      }
+    }
+    logger.info(`\nRemoved ${count(removed, "song")}. (qobuz-helper undo puts them back)`);
+    if (reports.some((report) => report.error !== undefined)) {
+      process.exitCode = 1;
+    }
+  } finally {
+    lock.release();
+  }
+}
+
 /** Execute the removals for an --apply run, using the id each source needs. */
 async function applyRemovals(
   client: QobuzClient,
@@ -2127,6 +2212,7 @@ function printUsage(): void {
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] [--apply]",
       "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--include-versions] [--apply]",
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
+      "  qobuz-helper remove-artists (--playlist <id>... | --all-playlists) [--include-guests] [--apply] <artist>...",
       "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  qobuz-helper export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]",
@@ -2165,7 +2251,8 @@ function printUsage(): void {
       "Plan options (playlist-from-artists, similar-artists, playlist-from-albums): --order by-artist|take-turns|shuffle (albums: as-listed|shuffle; default by-artist/as-listed), --skip-favourites (leave out tracks already in your favourites), --one-copy (one copy of each song, remasters included), --fit <minutes> (trim to at most about that length).",
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest; join several with commas to break ties (e.g. highest-quality,oldest).",
-      "deduplicate reports only unless --apply is given.",
+      "deduplicate reports only unless --apply is given; songs held in other versions (live, acoustic, remixes) are listed and kept, unless --include-versions counts them as duplicates.",
+      "remove-artists reports only unless --apply is given; it takes names, Qobuz artist links and /patterns/, also on stdin. Songs where they are only a guest are kept unless --include-guests is given.",
       "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
       "upgrade reports only unless --apply is given; it matches by ISRC unless --allow-signature-match is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup; --all-playlists writes one file per playlist into --out-dir.",
