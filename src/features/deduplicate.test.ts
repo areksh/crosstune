@@ -503,3 +503,34 @@ describe("formatAcrossPlaylistsReport", () => {
     expect(formatAcrossPlaylistsReport([])).toBe("No song is in more than one playlist.");
   });
 });
+
+describe("titles outside the Latin alphabet", () => {
+  const song = (id: number, artist: string, title: string, isrc: string) => ({ id, artist, title, isrc });
+
+  it("tells songs in different scripts apart", () => {
+    expect(
+      findDuplicateGroups([
+        song(1, "Кино", "Группа крови", "RU0000000001"),
+        song(2, "宇多田ヒカル", "初恋", "JP0000000001"),
+        song(3, "宇多田ヒカル", "光", "JP0000000002"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("tells punctuation-only titles apart", () => {
+    expect(findDuplicateGroups([song(1, "A", "?", "X1"), song(2, "A", "!!!", "X2")])).toEqual([]);
+  });
+
+  it("still matches the same song, whatever its script", () => {
+    const groups = findDuplicateGroups([
+      song(1, "Кино", "Группа крови", "RU1"),
+      song(2, "КИНО", "Группа крови (Remastered 2019)", "RU2"),
+    ]);
+    expect(groups.map((g) => g.map((t) => t.id))).toEqual([[1, 2]]);
+  });
+
+  it("keeps voiced kana and still folds Latin accents", () => {
+    expect(normalise("がんばれ")).toBe("がんばれ");
+    expect(normalise("Beyoncé")).toBe("beyonce");
+  });
+});

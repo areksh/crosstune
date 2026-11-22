@@ -61,14 +61,16 @@ const CONTEXTUAL_WORDS = new Set(["version", "edition"]);
  *
  * Lowercases, folds accents, drops bracketing, removes edition noise (and any
  * year or contextual word attached to it), strips remaining punctuation, and
- * collapses whitespace.
+ * collapses whitespace. Letters and digits of every script are kept; text that
+ * is all punctuation ("!!!") becomes empty.
  */
 export function normalise(text: string): string {
   const folded = text
     .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // strip combining diacritical marks
+    .replace(/[\u0300-\u036f]/g, "") // strip Latin combining diacritical marks
+    .normalize("NFC") // recompose what other scripts need (kana, Hangul)
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " "); // punctuation/brackets -> space
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " "); // punctuation/brackets -> space
 
   const tokens = folded.split(/\s+/).filter((t) => t.length > 0);
   const noiseFound = tokens.some((t) => NOISE_WORDS.has(t));
@@ -90,9 +92,18 @@ export function normalise(text: string): string {
   return kept.join(" ");
 }
 
-/** The normalised artist+title signature used to match textual duplicates. */
+/**
+ * The normalised artist+title signature used to match textual duplicates. A
+ * side that is nothing but punctuation ("!!!") or noise ("Remastered") is
+ * compared as written, so that such titles are not all the same song.
+ */
 export function trackSignature(track: DedupTrack): string {
-  return `${normalise(track.artist)}\u0000${normalise(track.title)}`;
+  return `${comparable(track.artist)}\u0000${comparable(track.title)}`;
+}
+
+function comparable(text: string): string {
+  const normalised = normalise(text);
+  return normalised.length > 0 ? normalised : text.trim().toLowerCase();
 }
 
 /**
