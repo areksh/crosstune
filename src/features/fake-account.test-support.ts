@@ -3,12 +3,12 @@
  * account with playlists and favourites, implementing the client's playlist
  * and favourite methods with the live API's semantics -- adding appends (a
  * track id repeated within one request lands once, as checked live in
- * November 2026), entries get fresh playlist-track ids, and a move goes in front of the entry
- * at the 1-based `insertBefore` counted before the move (0 or 1: the top).
- * Used to check that recording a change and undoing it restores the account.
+ * November 2026), entries get fresh playlist-track ids, adding an unplayable track answers
+ * normally but adds nothing, and a move is {@link applyMove}. Used to check that recording a change and undoing it restores the account.
  */
 
 import { QobuzError, type Playlist, type Track } from "../qobuz/index.js";
+import { applyMove } from "./playlist-order.js";
 
 interface FakeEntry {
   trackId: number;
@@ -18,6 +18,7 @@ interface FakeEntry {
 interface FakePlaylist {
   name: string;
   isPublic: boolean;
+  description?: string;
   entries: FakeEntry[];
 }
 
@@ -28,6 +29,8 @@ export class FakeAccount {
     albums: [] as string[],
     artists: [] as number[],
   };
+  /** Track ids Qobuz silently refuses to add (no longer playable). */
+  readonly unplayable = new Set<number>();
   /** Every call, as "method:arg0", in order. */
   readonly calls: string[] = [];
   #nextPlaylistId = 100;
@@ -100,7 +103,27 @@ export class FakeAccount {
   async getPlaylist(playlistId: number): Promise<Playlist> {
     this.#call("getPlaylist", playlistId);
     const playlist = this.#playlist(playlistId);
-    return { id: playlistId, name: playlist.name, trackCount: playlist.entries.length };
+    return {
+      id: playlistId,
+      name: playlist.name,
+      trackCount: playlist.entries.length,
+      isPublic: playlist.isPublic,
+      ...(playlist.description !== undefined && { description: playlist.description }),
+    };
+  }
+
+  async updatePlaylist(
+    playlistId: number,
+    changes: { name?: string; description?: string; isPublic?: boolean },
+  ): Promise<Playlist> {
+    this.#call("updatePlaylist", playlistId);
+    Object.assign(this.#playlist(playlistId), changes);
+    return this.getPlaylist(playlistId);
+  }
+
+  async getUserPlaylists(): Promise<Playlist[]> {
+    this.#call("getUserPlaylists", "");
+    return [...this.playlists].map(([id, p]) => ({ id, name: p.name, trackCount: p.entries.length }));
   }
 
   async getPlaylistTracks(playlistId: number): Promise<Track[]> {
@@ -118,6 +141,9 @@ export class FakeAccount {
     // Like Qobuz: a track repeated within one request is added once (a track
     // already in the playlist is added again).
     for (const trackId of new Set(trackIds)) {
+      if (this.unplayable.has(trackId)) {
+        continue;
+      }
       playlist.entries.push({ trackId, playlistTrackId: this.#nextEntryId++ });
     }
   }
@@ -139,22 +165,8 @@ export class FakeAccount {
   ): Promise<void> {
     this.#call("movePlaylistTracks", playlistId);
     const playlist = this.#playlist(playlistId);
-    const moving = new Set(playlistTrackIds);
-    const target = insertBefore >= 1 ? playlist.entries[insertBefore - 1] : undefined;
-    const moved = playlist.entries.filter((e) => moving.has(e.playlistTrackId));
-    const rest = playlist.entries.filter((e) => !moving.has(e.playlistTrackId));
-    let at: number;
-    if (insertBefore <= 1) {
-      at = 0;
-    } else if (target === undefined) {
-      at = rest.length;
-    } else if (moving.has(target.playlistTrackId)) {
-      throw new QobuzError("api-response", "cannot insert before a moved entry");
-    } else {
-      at = rest.indexOf(target);
-    }
-    rest.splice(at, 0, ...moved);
-    playlist.entries = rest;
+    const byId = new Map(playlist.entries.map((e) => [e.playlistTrackId, e]));
+    playlist.entries = applyMove([...byId.keys()], playlistTrackIds, insertBefore).map((id) => byId.get(id)!);
   }
 
   async addFavoriteTracks(ids: readonly number[]): Promise<void> {
