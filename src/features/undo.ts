@@ -99,6 +99,11 @@ export interface UndoPlan {
   notes: string[];
   /** Later entries that touched the same playlists or favourites. */
   warnings: string[];
+  /**
+   * Tracks that cannot be put back because the playlist they were in is gone:
+   * they are not taken out of where the same change put them.
+   */
+  unrestorable: number[];
   /** Set when the entry cannot be undone at all (e.g. already undone). */
   blocked?: string;
 }
@@ -173,7 +178,7 @@ export async function planUndo(
   item: HistoryItem,
   items: readonly HistoryItem[],
 ): Promise<UndoPlan> {
-  const plan: UndoPlan = { entryId: item.id, label: item.label, steps: [], notes: [], warnings: [] };
+  const plan: UndoPlan = { entryId: item.id, label: item.label, steps: [], notes: [], warnings: [], unrestorable: [] };
   if (item.undone !== undefined) {
     plan.blocked = `Already undone (${item.undone.at}).`;
     return plan;
@@ -200,7 +205,12 @@ export async function planUndo(
     if (id !== undefined && op.kind !== "delete-playlist" && !current.has(id)) {
       try {
         current.set(id, await client.getPlaylistTracks(id));
-      } catch {
+      } catch (error) {
+        if (!isGone(error)) {
+          // It may well exist: undoing the rest without it could lose songs.
+          plan.blocked = `${nameOf(id)} could not be read (${messageOf(error)}). Nothing was undone; try again.`;
+          return plan;
+        }
         current.set(id, undefined);
       }
     }
@@ -256,8 +266,13 @@ function planPlaylist(
     plan.notes.push(
       created
         ? `${name} no longer exists, so there is nothing to undo there.`
-        : `${name} no longer exists (or cannot be read), so its changes are not undone.`,
+        : `${name} no longer exists, so its changes are not undone.`,
     );
+    for (const op of mine) {
+      if (op.kind === "remove-tracks") {
+        plan.unrestorable.push(...op.entries.map((entry) => entry.trackId));
+      }
+    }
     return;
   }
   const present = new Set(tracks.map((t) => t.playlistTrackId));
@@ -380,11 +395,16 @@ function replayBackwards(
   return { order: list, removedTracks, unknownMoves };
 }
 
+/** Whether an error says the playlist does not exist (rather than a failure to read it). */
+function isGone(error: unknown): boolean {
+  return messageOf(error).includes("HTTP 404");
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Counts of the tracks that could not be put back, by track id. */
+/** Ids of the tracks that could not be put back. */
 type Unrestored = Set<number>;
 
 /**
@@ -393,12 +413,13 @@ type Unrestored = Set<number>;
  */
 export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<UndoResult> {
   const result: UndoResult = { done: [], failed: [], notes: [] };
-  const unrestored: Unrestored = new Set();
+  const unrestored: Unrestored = new Set(plan.unrestorable);
   for (const step of plan.steps) {
     const text = describeStep(step);
     try {
-      if (await runStep(client, step, result, unrestored)) {
-        result.done.push(text);
+      const done = await runStep(client, step, result, unrestored);
+      if (done !== false) {
+        result.done.push(done === true ? text : done);
       }
     } catch (error) {
       result.failed.push({ step: text, reason: messageOf(error) });
@@ -407,13 +428,16 @@ export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<Un
   return result;
 }
 
-/** Run a step; false when there was nothing left of it to do. */
+/**
+ * Run a step; false when there was nothing left of it to do, or what it did do
+ * when that is not all of it.
+ */
 async function runStep(
   client: UndoClient,
   step: UndoStep,
   result: UndoResult,
   unrestored: Unrestored,
-): Promise<boolean> {
+): Promise<boolean | string> {
   switch (step.kind) {
     case "delete-playlist":
       if (step.trackIds.some((id) => unrestored.has(id))) {
@@ -516,14 +540,15 @@ async function recreate(
 
 /**
  * Add removed tracks again (they land at the end), then put the playlist in the
- * order it was in. False when none came back.
+ * order it was in (a failure to is reported as a failed step of its own). False
+ * when none came back.
  */
 async function restoreTracks(
   client: UndoClient,
   step: Extract<UndoStep, { kind: "restore-tracks" }>,
   result: UndoResult,
   unrestored: Unrestored,
-): Promise<boolean> {
+): Promise<boolean | string> {
   let before: Track[];
   let after: Track[];
   try {
@@ -565,13 +590,16 @@ async function restoreTracks(
     const current = entryIds(after);
     const order = step.order.map((id) => newId.get(id) ?? id);
     await moveInto(client, step.playlistId, current, mergeOrder(current, order));
-  } catch {
+  } catch (error) {
     const count = newId.size;
-    if (count > 0) {
-      result.notes.push(
-        `${plural(count, "track")} ${count === 1 ? "was" : "were"} put back at the end of ${step.name}, not in ${count === 1 ? "its old place" : "their old places"}.`,
-      );
+    result.failed.push({ step: `Put ${step.name} back in its old order`, reason: messageOf(error) });
+    if (count === 0) {
+      return false;
     }
+    result.notes.push(
+      `${plural(count, "track")} ${count === 1 ? "was" : "were"} put back at the end of ${step.name}, not in ${count === 1 ? "its old place" : "their old places"}.`,
+    );
+    return `Put ${plural(count, "track")} back in ${step.name}`;
   }
   return newId.size > 0;
 }

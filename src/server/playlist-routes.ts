@@ -156,8 +156,11 @@ async function write(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     }
     case "favourite": {
       const ids = [...new Set(positiveIds(body["trackIds"], "trackIds"))];
-      await service.addFavoriteTracks(ids);
-      return { status: 200, body: { added: ids.length } };
+      // Only what is new: re-adding a favourite re-dates it, and undoing would remove it.
+      const known = new Set((await service.getFavoriteTracks()).map((track) => track.id));
+      const added = ids.filter((id) => !known.has(id));
+      await service.addFavoriteTracks(added);
+      return { status: 200, body: { added: added.length, already: ids.length - added.length } };
     }
     case "update": {
       const id = playlistId(body);

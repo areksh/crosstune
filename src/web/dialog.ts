@@ -81,7 +81,9 @@ export function openDialog(options: DialogOptions): Promise<boolean> {
     document.body.appendChild(dialog);
     dialog.showModal();
     const first = form.querySelector<HTMLElement>("input, select, textarea");
-    (first ?? confirm).focus();
+    // A destructive button is not a keypress away.
+    const cancelButton = actions.querySelector<HTMLElement>("button[type=button]");
+    (first ?? (options.danger === true ? cancelButton : null) ?? confirm).focus();
     if (first instanceof HTMLInputElement && first.type === "text") {
       first.select();
     }

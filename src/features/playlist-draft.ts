@@ -194,6 +194,20 @@ export function draftChanges(draft: Draft): DraftChanges {
   return { base: [...draft.base], order: [...draft.order], remove, moves: [...moves.values()] };
 }
 
+/** Send what was to be moved to `from` to `to` instead (a playlist made meanwhile). */
+export function retarget(draft: Draft, from: Destination, to: Destination): Draft {
+  const key = destinationKey(from);
+  return {
+    ...draft,
+    removed: new Map(
+      [...draft.removed].map(([id, destination]) => [
+        id,
+        destination !== undefined && destinationKey(destination) === key ? to : destination,
+      ]),
+    ),
+  };
+}
+
 /** How a playlist changed elsewhere since a draft was opened. */
 export interface Drift {
   added: number;
@@ -395,11 +409,18 @@ export function duplicateIds(
  */
 export function otherVersionIds(entries: readonly Entry[]): number[] {
   return findOtherVersions(dedupTracks(entries)).flatMap((group) => {
-    const main = group.find((track) => track.version === undefined) ?? group[0]!;
+    // The ordinary version: without a label, or with one that says no more.
+    const main = group.find((track) => trackSignature(track) === plainSignature(track)) ?? group[0]!;
     const same = (track: DedupTrack): boolean =>
       trackSignature(track) === trackSignature(main) || (track.isrc !== undefined && track.isrc === main.isrc);
     return group.filter((track) => !same(track)).map((track) => track.playlistTrackId!);
   });
+}
+
+/** A track's signature as if it had no version label. */
+function plainSignature(track: DedupTrack): string {
+  const { version: _version, ...plain } = track;
+  return trackSignature(plain);
 }
 
 function dedupTracks(entries: readonly Entry[]): DedupTrack[] {

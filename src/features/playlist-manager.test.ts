@@ -106,6 +106,28 @@ describe("savePlaylist", () => {
     expect(account.trackIds(id)).toEqual([1, 2, 3]);
   });
 
+  it("counts what went before a removal failed part-way", async () => {
+    const { account, save, draft } = setup(Array.from({ length: 120 }, (_, i) => i + 1));
+    account.failAfter("removeTracksFromPlaylist", 1);
+    const outcome = saved(await save(takeOut(draft, draft.base)));
+    expect(outcome).toMatchObject({ removed: 50, failed: { step: "Remove songs" } });
+  });
+
+  it("says when it does not know what went before a failure", async () => {
+    const { account, save, draft } = setup([1, 2]);
+    account.failAfter("removeTracksFromPlaylist", 0);
+    const read = account.getPlaylistTracks.bind(account);
+    let reads = 0;
+    account.getPlaylistTracks = async (id) => {
+      reads += 1;
+      if (reads > 2) {
+        throw new Error("offline");
+      }
+      return read(id);
+    };
+    expect(saved(await save(takeOut(draft, draft.base)))).toMatchObject({ unverified: true });
+  });
+
   it("reports a failed reorder after the removals that were made", async () => {
     const { account, id, save, draft } = setup([1, 2, 3]);
     account.failAfter("movePlaylistTracks", 0);
@@ -170,6 +192,18 @@ describe("savePlaylist moving songs", () => {
     await undo();
     expect(account.playlists.has(created.playlistId)).toBe(false);
     expect(account.trackIds(id)).toEqual([1, 2, 3]);
+  });
+
+  it("says which playlist it made when adding to it, or a later step, fails", async () => {
+    for (const method of ["addTracksToPlaylist", "removeTracksFromPlaylist"]) {
+      const { account, save, draft } = setup([1, 2]);
+      account.failAfter(method, 0);
+      const destination: Destination = { type: "new", name: "Split", isPublic: false };
+      const outcome = saved(await save(takeOut(draft, [draft.base[0]!], destination)));
+      expect(outcome.failed).toBeDefined();
+      const [made] = [...account.playlists].filter(([, p]) => p.name === "Split");
+      expect(outcome.created).toEqual([{ destination, playlistId: made![0] }]);
+    }
   });
 
   it("makes no new playlist for songs known not to play", async () => {
@@ -290,6 +324,20 @@ describe("removing artists", () => {
     expect(found.get("https://play.qobuz.com/album/abc")).toHaveProperty("problem");
     expect(found.size).toBe(2);
     expect(c.getArtist).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts what went from a playlist whose removal failed part-way", async () => {
+    const account = new FakeAccount();
+    const id = account.seedPlaylist("Mix", [1, 2, 3]);
+    const entries = account.entryIds(id);
+    const remove = account.removeTracksFromPlaylist.bind(account);
+    account.removeTracksFromPlaylist = async (p, ids) => {
+      await remove(p, ids.slice(0, 2));
+      throw new Error("HTTP 500");
+    };
+    expect(await commitRemovals(account, [{ playlistId: id, entries }])).toEqual([
+      { playlistId: id, removed: 2, error: "HTTP 500" },
+    ]);
   });
 
   it("removes what is still there, and carries on past a playlist that fails", async () => {

@@ -233,10 +233,13 @@ describe("the other writes", () => {
     expect(account.playlists.get(playlistId)).toMatchObject({ name: "Split", isPublic: true });
   });
 
-  it("favourites songs", async () => {
-    const { account, call } = setup();
-    expect((await call("POST", "favourite", { trackIds: [4, 4, 5] })).body).toEqual({ added: 2 });
+  it("favourites songs that are not favourites yet", async () => {
+    const { account, journal, call } = setup();
+    account.favourites.tracks = [4];
+    expect((await call("POST", "favourite", { trackIds: [4, 4, 5] })).body).toEqual({ added: 1, already: 1 });
     expect(account.favourites.tracks).toEqual([4, 5]);
+    // Only what was new is recorded, so undo leaves the older favourite alone.
+    expect(journal.items()[0]?.ops).toEqual([{ kind: "add-favourites", type: "tracks", ids: [5] }]);
   });
 
   it("renames and changes visibility, undoably", async () => {

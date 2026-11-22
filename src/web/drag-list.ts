@@ -115,6 +115,7 @@ function startDrag(options: DragListOptions, handle: HTMLElement, row: HTMLEleme
     handle.removeEventListener("pointermove", onMove);
     handle.removeEventListener("pointerup", onUp);
     handle.removeEventListener("pointercancel", onCancel);
+    handle.removeEventListener("lostpointercapture", onCancel);
     window.removeEventListener("keydown", onKey, true);
     marker.remove();
     ghost?.remove();
@@ -149,5 +150,7 @@ function startDrag(options: DragListOptions, handle: HTMLElement, row: HTMLEleme
   handle.addEventListener("pointermove", onMove);
   handle.addEventListener("pointerup", onUp);
   handle.addEventListener("pointercancel", onCancel);
+  // E.g. the row left the list; after a drop this comes too late to matter.
+  handle.addEventListener("lostpointercapture", onCancel);
   window.addEventListener("keydown", onKey, true);
 }

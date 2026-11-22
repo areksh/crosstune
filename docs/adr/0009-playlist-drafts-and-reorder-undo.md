@@ -38,7 +38,8 @@ The design is in
   from. From the playlist as it is now, undo un-adds, un-removes and un-moves
   in memory to get the order to return to; then re-adds, makes one planned
   reorder, and removes what the change added -- last, and never a song that
-  could not be put back. This replaces ADR-0006's "latest removal first, each
+  could not be put back (including when the playlist it came from is gone; one
+  that cannot be read for now blocks the undo). This replaces ADR-0006's "latest removal first, each
   moved into place", and covers every tool's moves. Records made before this
   still undo, reporting their moves as not restored.
 - **Playlist-manager writes hold the jobs lock**, so a managed playlist's

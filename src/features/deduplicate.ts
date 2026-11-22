@@ -277,12 +277,23 @@ export function deduplicateTracks(
   return findDuplicateGroups(tracks.map(toDedupTrack), options);
 }
 
-/** The other versions to point out: none when they count as duplicates anyway. */
+/**
+ * The other versions to point out: none when they count as duplicates anyway.
+ * Copies that `resolved` removes are left out, so that no copy is listed both
+ * as removed (among the duplicates) and as kept (among the versions).
+ */
 export function otherVersions(
   tracks: readonly Track[],
   options: SameSongOptions = {},
+  resolved: readonly ResolvedGroup[] = [],
 ): DedupTrack[][] {
-  return options.includeVersions === true ? [] : findOtherVersions(tracks.map(toDedupTrack));
+  if (options.includeVersions === true) {
+    return [];
+  }
+  const key = (track: DedupTrack): string =>
+    track.playlistTrackId === undefined ? `t:${track.id}` : `e:${track.playlistTrackId}`;
+  const going = new Set(tracksToRemove(resolved).map(key));
+  return findOtherVersions(tracks.map(toDedupTrack).filter((track) => !going.has(key(track))));
 }
 
 /** A strategy for choosing which track in a duplicate group to keep. */
@@ -623,10 +634,10 @@ export async function scanAllPlaylists(
   const found = lists
     .map((list) => ({
       playlist: list.playlist,
+      tracks: list.tracks,
       groups: deduplicateTracks(list.tracks, options),
-      versions: otherVersions(list.tracks, options),
     }))
-    .filter((entry) => entry.groups.length > 0 || entry.versions.length > 0);
+    .filter((entry) => entry.groups.length > 0 || otherVersions(entry.tracks, options).length > 0);
   // Enrich every playlist's groups in one pass, so each album is looked up once.
   let allGroups = found.flatMap((entry) => entry.groups);
   if (strategyNeedsReleaseDates(keep) && allGroups.length > 0) {
@@ -638,7 +649,8 @@ export async function scanAllPlaylists(
   const within = found.map((entry) => {
     const groups = allGroups.slice(offset, offset + entry.groups.length);
     offset += entry.groups.length;
-    return { playlist: entry.playlist, groups: resolveDuplicateGroups(groups, keep), versions: entry.versions };
+    const resolved = resolveDuplicateGroups(groups, keep);
+    return { playlist: entry.playlist, groups: resolved, versions: otherVersions(entry.tracks, options, resolved) };
   });
 
   return { within, across: findSongsAcrossPlaylists(lists, options), playlistCount: lists.length };

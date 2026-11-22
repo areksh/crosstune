@@ -74,18 +74,21 @@ export interface ConfirmedAdd {
 
 /**
  * Add tracks to a destination, each once and not if it is there already, and
- * read it back to see what arrived.
+ * read it back to see what arrived. `onCreated` hears of a new playlist as soon
+ * as it is made, in case adding to it fails.
  */
 export async function addConfirmed(
   client: ConfirmedAddClient,
   destination: Destination,
   trackIds: readonly number[],
+  onCreated: (playlistId: number) => void = () => {},
 ): Promise<ConfirmedAdd> {
   const wanted = [...new Set(trackIds)];
   let playlistId: number;
   let before = new Set<number>();
   if (destination.type === "new") {
     playlistId = (await client.createPlaylist(destination.name, { isPublic: destination.isPublic })).id;
+    onCreated(playlistId);
   } else {
     playlistId = destination.playlistId;
     before = new Set((await client.getPlaylistTracks(playlistId)).map((track) => track.id));

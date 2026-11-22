@@ -114,10 +114,14 @@ export type SaveOutcome =
       removed: number;
       reordered: boolean;
       moved: ConfirmedAdd[];
+      /** Playlists made for moves, even when a later step failed. */
+      created: Array<{ destination: Destination; playlistId: number }>;
       /** Songs to be moved that stay, as they did not arrive. */
       kept: TrackRef[];
       /** The step that failed (those after it were not done), and why. */
       failed?: { step: string; reason: string };
+      /** After a failure: the playlist could not be read to see what was done. */
+      unverified?: true;
     };
 
 /**
@@ -145,6 +149,7 @@ export async function savePlaylist(client: SaveClient, request: SaveRequest): Pr
     removed: 0,
     reordered: false,
     moved: [],
+    created: [],
     kept: [],
   };
   const going = [...request.remove];
@@ -152,7 +157,7 @@ export async function savePlaylist(client: SaveClient, request: SaveRequest): Pr
   try {
     for (const { destination, entries } of request.moves) {
       step = `Add to ${destination.name}`;
-      const { add, arrived } = await moveOut(client, destination, entries.map((id) => tracks.get(id)!));
+      const { add, arrived } = await moveOut(client, destination, entries.map((id) => tracks.get(id)!), outcome.created);
       if (add !== undefined) {
         outcome.moved.push(add);
       }
@@ -189,6 +194,17 @@ export async function savePlaylist(client: SaveClient, request: SaveRequest): Pr
     }
   } catch (error) {
     outcome.failed = { step, reason: messageOf(error) };
+    // A bulk change may have gone through in part: look.
+    try {
+      const after = toEntries(await client.getPlaylistTracks(playlistId)).map((entry) => entry.playlistTrackId);
+      const here = new Set(after);
+      const left = fresh.filter((id) => here.has(id));
+      const leftNow = after.filter((id) => tracks.has(id));
+      outcome.removed = fresh.length - left.length;
+      outcome.reordered = left.some((id, i) => id !== leftNow[i]);
+    } catch {
+      outcome.unverified = true;
+    }
   }
   return outcome;
 }
@@ -198,6 +214,7 @@ async function moveOut(
   client: SaveClient,
   destination: Destination,
   entries: readonly Entry[],
+  created: Array<{ destination: Destination; playlistId: number }>,
 ): Promise<{ add?: ConfirmedAdd; arrived: Set<number> }> {
   // No playlist is made for songs that will not arrive.
   if (destination.type === "new" && entries.every((entry) => entry.streamable === false)) {
@@ -207,6 +224,7 @@ async function moveOut(
     client,
     destination,
     entries.map((entry) => entry.id),
+    (playlistId) => created.push({ destination, playlistId }),
   );
   return { add, arrived: new Set([...add.added, ...add.already]) };
 }
@@ -359,13 +377,19 @@ export async function commitRemovals(
 ): Promise<RemovalReport[]> {
   const reports: RemovalReport[] = [];
   for (const { playlistId, entries } of removals) {
-    try {
+    const present = async (): Promise<number[]> => {
       const here = new Set(toEntries(await client.getPlaylistTracks(playlistId)).map((e) => e.playlistTrackId));
-      const going = entries.filter((id) => here.has(id));
+      return entries.filter((id) => here.has(id));
+    };
+    let going: number[] = [];
+    try {
+      going = await present();
       await client.removeTracksFromPlaylist(playlistId, going);
       reports.push({ playlistId, removed: going.length });
     } catch (error) {
-      reports.push({ playlistId, removed: 0, error: messageOf(error) });
+      // Some of it may have gone through: look.
+      const left = going.length === 0 ? [] : await present().catch(() => going);
+      reports.push({ playlistId, removed: going.length - left.length, error: messageOf(error) });
     }
   }
   return reports;

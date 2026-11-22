@@ -43,6 +43,9 @@ export function initPlaylistsView(): void {
 function route(): void {
   const [view, id] = location.hash.replace(/^#\/?/, "").split("/");
   if (view !== "playlists") {
+    // Read it afresh next time: it may change meanwhile (an undo, another tool).
+    // Unsaved edits have been asked about (guardUnsavedPlaylist).
+    closeEditor();
     return;
   }
   const open = id !== undefined && /^[1-9]\d*$/.test(id) ? Number(id) : undefined;
@@ -433,7 +436,7 @@ async function removeArtists(): Promise<void> {
     closeArtists();
     ticked.clear();
     await load();
-    say(`Removed ${songCount(removed)}. You can undo this in History.`);
+    say(removed === 0 ? "Nothing was removed." : `Removed ${songCount(removed)}. You can undo this in History.`);
     if (failed.length > 0) {
       const nameOf = (id: number): string => playlists.find((p) => p.id === id)?.name ?? `playlist ${id}`;
       showError(el("pl-error"), failed.map((f) => `${nameOf(f.playlistId)}: ${f.error}`).join(" "));

@@ -16,6 +16,7 @@ import {
   rangeBetween,
   rebase,
   reorder,
+  retarget,
   searchIds,
   shuffleIds,
   sortIds,
@@ -145,6 +146,14 @@ describe("changes made elsewhere", () => {
   });
 });
 
+describe("retarget", () => {
+  it("points moves at the playlist that was made for them", () => {
+    const draft = takeOut(takeOut(startDraft([1, 2, 3]), [1], NEW), [2], OTHER);
+    const made: Destination = { type: "existing", playlistId: 9, name: "Split" };
+    expect([...retarget(draft, NEW, made).removed]).toEqual([[1, made], [2, OTHER]]);
+  });
+});
+
 describe("rangeBetween", () => {
   it("is inclusive in either direction, over what is shown", () => {
     expect(rangeBetween([4, 8, 15, 16], 15, 8)).toEqual([8, 15]);
@@ -244,6 +253,8 @@ describe("picking entries", () => {
     const entries = [song(1, { version: "Live" }), song(2), song(3, { version: "Remaster" }), song(4, { version: "Remix" })];
     expect(otherVersionIds(entries)).toEqual([1, 4]);
     expect(otherVersionIds([song(1, { version: "Live" }), song(2, { version: "Remix" })])).toEqual([2]);
+    expect(otherVersionIds([song(1, { version: "Live" }), song(2, { version: "2011 Remaster" })])).toEqual([1]);
+    expect(otherVersionIds([song(1, { version: "Live" }), song(2, { version: "Album Version" })])).toEqual([1]);
   });
 
   it("picks unplayable, not hi-res and live entries", () => {

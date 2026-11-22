@@ -583,6 +583,12 @@ describe("versions", () => {
     expect(findDuplicateGroups(tracks, { includeVersions: true })).toEqual([]);
   });
 
+  it("leaves out copies the plan removes, so nothing is listed as both kept and removed", () => {
+    const tracks: Track[] = [song(1), song(2, "2011 Remaster"), song(3, "Live")];
+    const resolved = resolveDuplicateGroups(deduplicateTracks(tracks), "last-added");
+    expect(otherVersions(tracks, {}, resolved).map((g) => g.map((t) => t.id))).toEqual([[2, 3]]);
+  });
+
   it("reports them for the CLI", () => {
     expect(formatOtherVersions([])).toBe("");
     expect(formatOtherVersions([[song(1), song(2, "Live")]])).toBe(

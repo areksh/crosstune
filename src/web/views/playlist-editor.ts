@@ -33,6 +33,7 @@ import {
   rangeBetween,
   rebase,
   reorder,
+  retarget,
   searchIds,
   shuffleIds,
   sortIds,
@@ -94,12 +95,13 @@ function hashFor(id: number): string {
  */
 export function guardUnsavedPlaylist(): void {
   window.addEventListener("beforeunload", (event) => {
-    if (isDirty()) {
+    if (isDirty() || busy) {
       event.preventDefault();
     }
   });
   window.addEventListener("hashchange", (event) => {
-    if (editor === undefined || !isDirty()) {
+    if (editor === undefined) {
+      closeDialogs();
       return;
     }
     const here = hashFor(editor.playlist.id);
@@ -107,9 +109,19 @@ export function guardUnsavedPlaylist(): void {
     if (target === here) {
       return;
     }
+    if (!busy && !isDirty()) {
+      // What a dialog was about is no longer on the page.
+      closeDialogs();
+      return;
+    }
     // Back to this playlist before any view reacts, then ask.
     event.stopImmediatePropagation();
     history.pushState(null, "", here);
+    if (busy) {
+      announce("Please wait: still working on this playlist.");
+      el("pl-editor-status").scrollIntoView({ block: "nearest" });
+      return;
+    }
     if (document.querySelector("dialog[open]") !== null) {
       return;
     }
@@ -120,6 +132,10 @@ export function guardUnsavedPlaylist(): void {
       }
     });
   });
+}
+
+function closeDialogs(): void {
+  document.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach((dialog) => dialog.close());
 }
 
 function confirmLeaving(): Promise<boolean> {
@@ -210,6 +226,11 @@ function summariseNow(): DraftSummary {
   return summarise(current().edits.now);
 }
 
+/** Whether `mine` is still the playlist being edited (an action may outlast it). */
+function isStill(mine: Editor): boolean {
+  return editor === mine;
+}
+
 function canEdit(): boolean {
   return editor !== undefined && editor.playlist.owned && !busy;
 }
@@ -263,6 +284,10 @@ function removeSelected(): void {
 }
 
 function describeDraft(summary: DraftSummary): string {
+  return draftParts(summary).join(", ");
+}
+
+function draftParts(summary: DraftSummary): string[] {
   const parts: string[] = [];
   if (summary.removed > 0) {
     parts.push(`remove ${songCount(summary.removed)}`);
@@ -273,7 +298,7 @@ function describeDraft(summary: DraftSummary): string {
   if (summary.reordered > 0) {
     parts.push(`reorder ${songCount(summary.reordered)}`);
   }
-  return parts.join(", ");
+  return parts;
 }
 
 // ---- Rendering --------------------------------------------------------------
@@ -573,8 +598,13 @@ function focusRow(index: number, extend: boolean): void {
   state.rows.get(id)?.scrollIntoView({ block: "nearest" });
 }
 
+/** While rows are dragged, keys must not change the list under them. */
+function isDragging(): boolean {
+  return document.body.classList.contains("is-dragging");
+}
+
 function onListKey(event: KeyboardEvent): void {
-  if (editor === undefined) {
+  if (editor === undefined || isDragging()) {
     return;
   }
   const state = current();
@@ -620,6 +650,7 @@ function onPageKey(event: KeyboardEvent): void {
   const target = event.target as Element | null;
   if (
     editor === undefined ||
+    isDragging() ||
     el("view-playlists").hidden ||
     document.querySelector("dialog[open]") !== null ||
     target?.closest("input, textarea, select") != null
@@ -633,7 +664,7 @@ function onPageKey(event: KeyboardEvent): void {
   } else if (event.ctrlKey && key === "y") {
     event.preventDefault();
     step("redo");
-  } else if (event.key === "Escape" && editor.selected.size > 0 && !document.body.classList.contains("is-dragging")) {
+  } else if (event.key === "Escape" && editor.selected.size > 0) {
     selectOnly([]);
   }
 }
@@ -701,6 +732,7 @@ function moveSelected(index: number, where: string): void {
 }
 
 async function moveToPlace(): Promise<void> {
+  const mine = current();
   const ids = selectedInOrder();
   const total = current().edits.now.order.length;
   const input = document.createElement("input");
@@ -715,7 +747,7 @@ async function moveToPlace(): Promise<void> {
     confirm: "Move",
     validate: () => (valid() ? undefined : `Enter a whole number from 1 to ${total}.`),
   });
-  if (!ok || editor === undefined) {
+  if (!ok || !isStill(mine)) {
     return;
   }
   // The place counts the list as it ends up: that many songs stay ahead of them.
@@ -731,12 +763,18 @@ async function moveToPlace(): Promise<void> {
 
 /** Ask for one of the user's playlists songs can be put in. */
 async function pickPlaylist(title: string, confirm: string, forSongs: boolean): Promise<ManagerPlaylist | undefined> {
-  const here = current().playlist.id;
+  const mine = current();
+  const here = mine.playlist.id;
   let playlists: ManagerPlaylist[];
   try {
     ({ playlists } = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists"));
   } catch (error) {
-    showError(el("pl-editor-error"), (error as Error).message);
+    if (isStill(mine)) {
+      showError(el("pl-editor-error"), (error as Error).message);
+    }
+    return undefined;
+  }
+  if (!isStill(mine)) {
     return undefined;
   }
   const others = playlists
@@ -761,7 +799,7 @@ async function pickPlaylist(title: string, confirm: string, forSongs: boolean): 
     confirm,
     validate: () => (select.value === "" || select.selectedOptions[0]?.disabled === true ? "Choose a playlist." : undefined),
   });
-  return ok ? others.find((p) => String(p.id) === select.value) : undefined;
+  return ok && isStill(mine) ? others.find((p) => String(p.id) === select.value) : undefined;
 }
 
 async function sendSelected(how: "copy" | "move"): Promise<void> {
@@ -771,7 +809,7 @@ async function sendSelected(how: "copy" | "move"): Promise<void> {
     how === "copy" ? "Copy" : "Move on save",
     true,
   );
-  if (playlist === undefined || editor === undefined) {
+  if (playlist === undefined) {
     return;
   }
   const destination: Destination = { type: "existing", playlistId: playlist.id, name: playlist.name };
@@ -783,6 +821,7 @@ async function sendSelected(how: "copy" | "move"): Promise<void> {
 }
 
 async function splitSelected(): Promise<void> {
+  const mine = current();
   const ids = selectedInOrder();
   const { owned, name: from } = current().playlist;
   const name = textInput(`${from} (part)`);
@@ -795,7 +834,7 @@ async function splitSelected(): Promise<void> {
     confirm: "Create",
     validate: () => (name.value.trim() === "" ? "Give it a name." : undefined),
   });
-  if (!ok || editor === undefined) {
+  if (!ok || !isStill(mine)) {
     return;
   }
   const destination: Destination = { type: "new", name: name.value.trim(), isPublic: isPublic.input.checked };
@@ -837,8 +876,11 @@ function trackIdsOf(ids: readonly number[]): number[] {
 async function favouriteSelected(): Promise<void> {
   const ids = trackIdsOf(selectedInOrder());
   await working("Adding to Favourites...", async () => {
-    const { added } = await api<{ added: number }>("POST", "/api/manager/favourite", { trackIds: ids });
-    say(`Added ${songCount(added)} to your Favourites.`);
+    const { added, already } = await api<{ added: number; already: number }>("POST", "/api/manager/favourite", {
+      trackIds: ids,
+    });
+    const there = already === 0 ? "" : ` ${already} ${already === 1 ? "was" : "were"} there already.`;
+    say(`Added ${songCount(added)} to your Favourites.${there}`);
   });
 }
 
@@ -849,7 +891,9 @@ async function working(text: string, task: () => Promise<void>): Promise<void> {
   }
   busy = true;
   const body = el("pl-editor-body");
-  body.inert = true;
+  // The header's links and menus too: nothing may start meanwhile.
+  const parts = [body, ...document.querySelectorAll<HTMLElement>(".pl-editor-head")];
+  parts.forEach((part) => (part.inert = true));
   body.setAttribute("aria-busy", "true");
   el("pl-editor-status").textContent = text;
   showError(el("pl-editor-error"), undefined);
@@ -861,7 +905,7 @@ async function working(text: string, task: () => Promise<void>): Promise<void> {
     el("pl-editor-error").scrollIntoView({ block: "nearest" });
   } finally {
     busy = false;
-    body.inert = false;
+    parts.forEach((part) => (part.inert = false));
     body.removeAttribute("aria-busy");
     el("pl-editor-status").textContent = "";
   }
@@ -885,7 +929,7 @@ function renderSelectMenu(): void {
   const keep = document.createElement("select");
   keep.setAttribute("aria-label", "Copy to keep");
   for (const strategy of KEEP_STRATEGIES) {
-    keep.append(new Option(`keep the ${strategy.replace("-", " ")}${strategy === "oldest" || strategy === "newest" ? " release" : ""}`, strategy));
+    keep.append(new Option(KEEP_LABELS[strategy], strategy));
   }
   const versions = dialogChoice("checkbox", "also other versions (live, acoustic, remix)");
   const duplicates = document.createElement("div");
@@ -932,12 +976,22 @@ function renderSelectMenu(): void {
   );
 }
 
+/** Which copy of a duplicate stays; "first" and "last" go by the list as it stands. */
+const KEEP_LABELS: Record<KeepStrategy, string> = {
+  "first-added": "keep the first in the list",
+  "last-added": "keep the last in the list",
+  "highest-quality": "keep the highest quality",
+  oldest: "keep the oldest release",
+  newest: "keep the newest release",
+};
+
 async function selectAlreadyIn(where: "favourites" | "playlist"): Promise<void> {
+  const mine = current();
   let body: unknown = { favourites: true };
   let name = "your Favourites";
   if (where === "playlist") {
     const playlist = await pickPlaylist("Select songs already in", "Select", false);
-    if (playlist === undefined || editor === undefined) {
+    if (playlist === undefined) {
       return;
     }
     body = { playlistId: playlist.id };
@@ -947,7 +1001,7 @@ async function selectAlreadyIn(where: "favourites" | "playlist"): Promise<void> 
   await working(`Reading ${name}...`, async () => {
     ({ tracks: found } = await api<{ tracks: Track[] }>("POST", "/api/manager/compare", body));
   });
-  if (found !== undefined && editor !== undefined) {
+  if (found !== undefined && isStill(mine)) {
     selectPicked(alreadyInIds(kept(), found), `songs already in ${name}`);
   }
 }
@@ -964,6 +1018,13 @@ const SORTS: ReadonlyArray<{ key: SortKey; up: string; down: string }> = [
 
 function renderSortMenu(): void {
   const only = dialogChoice("checkbox", "Just the selected songs");
+  const menu = el<HTMLDetailsElement>("pl-sort-menu");
+  menu.ontoggle = () => {
+    // With fewer than two there is nothing to arrange among them.
+    const enough = editor !== undefined && editor.selected.size > 1;
+    only.input.disabled = !enough;
+    only.input.checked = only.input.checked && enough;
+  };
   /** The songs to arrange: the selected ones, if asked and there are several. */
   const scope = (): Entry[] => {
     const { selected } = current();
@@ -1061,7 +1122,7 @@ async function lookUpLinks(lines: readonly string[]): Promise<void> {
 }
 
 /** The songs the typed artists pick: theirs, or (to keep only them) all others. */
-function byPicked(): { ids: number[]; matched: number } {
+function byPicked(): { ids: number[]; keepOnly: boolean } {
   const entries = kept();
   const { terms } = parseArtistTerms(byLines(), links);
   const guests = el<HTMLInputElement>("pl-by-guests").checked;
@@ -1069,7 +1130,7 @@ function byPicked(): { ids: number[]; matched: number } {
   const keepOnly = document.querySelector<HTMLInputElement>('input[name="pl-by-mode"]:checked')?.value === "keep";
   const ids = entries.flatMap((entry, i) => (matched.has(i) !== keepOnly ? [entry.playlistTrackId] : []));
   // Keeping only artists that match nothing would empty the playlist.
-  return { ids: keepOnly && matched.size === 0 ? [] : ids, matched: matched.size };
+  return { ids: keepOnly && matched.size === 0 ? [] : ids, keepOnly };
 }
 
 function renderByArtist(): void {
@@ -1112,12 +1173,18 @@ function renderByArtist(): void {
   const guests = matchedIndexes(results, true).length - matchedIndexes(results, false).length;
   el("pl-by-guests-label").textContent =
     `Include songs where they are only a guest${guests > 0 ? ` (${guests})` : ""}`;
-  const { ids } = byPicked();
+  const { ids, keepOnly } = byPicked();
   const apply = el<HTMLButtonElement>("pl-by-apply");
   apply.hidden = !current().playlist.owned;
-  apply.disabled = ids.length === 0;
-  apply.textContent = ids.length === 0 ? "Nothing to remove" : `Remove ${songCount(ids.length)}`;
-  el<HTMLButtonElement>("pl-by-select").disabled = ids.length === 0;
+  // Keeping only the listed artists needs every line understood.
+  const unclear = keepOnly && problems.length > 0;
+  apply.disabled = ids.length === 0 || unclear;
+  apply.textContent = unclear
+    ? "Fix the lines above first"
+    : ids.length === 0
+      ? "Nothing to remove"
+      : `Remove ${songCount(ids.length)}`;
+  el<HTMLButtonElement>("pl-by-select").disabled = ids.length === 0 || unclear;
 }
 
 function togglePanel(buttonId: string, panelId: string): void {
@@ -1161,7 +1228,8 @@ function renderOpenIn(): void {
     ...tools.map(({ label, prefill }) =>
       menuItem(label, () => {
         void (async () => {
-          if (isDirty() && !(await confirmLeaving())) {
+          const mine = current();
+          if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
             return;
           }
           closeEditor();
@@ -1174,14 +1242,18 @@ function renderOpenIn(): void {
 }
 
 function renderMore(): void {
-  const { playlist } = current();
+  const mine = current();
+  const { playlist } = mine;
   const update = (changes: Record<string, unknown>, text: string): void =>
     void working("Saving...", async () => {
       const result = await api<{ playlist: ManagerPlaylist }>("POST", "/api/manager/update", {
         playlistId: playlist.id,
         ...changes,
       });
-      current().playlist = result.playlist;
+      if (!isStill(mine)) {
+        return;
+      }
+      mine.playlist = result.playlist;
       renderHead();
       renderMeta();
       renderMore();
@@ -1192,7 +1264,7 @@ function renderMore(): void {
     items.push(
       menuItem("Rename and describe...", () => {
         void editDetails(playlist).then((changes) => {
-          if (changes !== undefined && editor !== undefined) {
+          if (changes !== undefined && isStill(mine)) {
             update(changes, "Saved its details.");
           }
         });
@@ -1209,10 +1281,11 @@ function renderMore(): void {
   items.push(
     menuItem("Reload from Qobuz", () => {
       void (async () => {
-        if (isDirty() && !(await confirmLeaving())) {
+        const mine = current();
+        if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
           return;
         }
-        const { id } = current().playlist;
+        const { id } = mine.playlist;
         closeEditor();
         await openEditor(id);
       })();
@@ -1222,7 +1295,8 @@ function renderMore(): void {
 }
 
 async function duplicateHere(): Promise<void> {
-  const { playlist } = current();
+  const mine = current();
+  const { playlist } = mine;
   const name = textInput(`${playlist.name} (copy)`);
   const ok = await openDialog({
     title: "Duplicate this playlist",
@@ -1233,7 +1307,7 @@ async function duplicateHere(): Promise<void> {
     confirm: "Duplicate",
     validate: () => (name.value.trim() === "" ? "Give it a name." : undefined),
   });
-  if (!ok || editor === undefined) {
+  if (!ok || !isStill(mine)) {
     return;
   }
   await working("Copying...", async () => {
@@ -1250,8 +1324,9 @@ async function duplicateHere(): Promise<void> {
 }
 
 async function deleteHere(): Promise<void> {
-  const { playlist } = current();
-  if (!(await confirmDelete({ ...playlist, trackCount: current().edits.now.base.length })) || editor === undefined) {
+  const mine = current();
+  const { playlist } = mine;
+  if (!(await confirmDelete({ ...playlist, trackCount: mine.edits.now.base.length })) || !isStill(mine)) {
     return;
   }
   let deleted = false;
@@ -1278,13 +1353,14 @@ async function save(): Promise<void> {
   if (!canEdit() || !isDirty()) {
     return;
   }
-  const { playlist, edits, entries } = current();
+  const mine = current();
+  const { playlist, edits, entries } = mine;
   const draft = edits.now;
   const summary = summarise(draft);
   const gone = [...draft.removed].map(([id, destination]) => ({ entry: entries.get(id), destination }));
   const body: Array<string | Node> = [];
   const list = document.createElement("ul");
-  for (const part of describeDraft(summary).split(", ")) {
+  for (const part of draftParts(summary)) {
     const item = document.createElement("li");
     item.textContent = part.charAt(0).toUpperCase() + part.slice(1);
     list.append(item);
@@ -1322,29 +1398,43 @@ async function save(): Promise<void> {
     confirm: "Save changes",
     danger: draft.order.length === 0,
   });
-  if (!ok || editor === undefined) {
+  if (!ok || !isStill(mine)) {
     return;
   }
+  let drift: Extract<SaveOutcome, { status: "changed" }> | undefined;
   await working(`Saving: ${describeDraft(summary)}...`, async () => {
     const outcome = await api<SaveOutcome>("POST", "/api/manager/save", {
       playlistId: playlist.id,
       ...draftChanges(draft),
     });
     if (outcome.status === "changed") {
-      await offerRebase(outcome, draft);
+      drift = outcome;
       return;
     }
-    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: playlist.id });
+    const report = describeSaved(outcome);
+    let opened: Opened;
+    try {
+      opened = await api<Opened>("POST", "/api/manager/open", { playlistId: playlist.id });
+    } catch (error) {
+      // The draft no longer matches the playlist: do not leave it up as unsaved.
+      closeEditor();
+      el("pl-editor-body").hidden = true;
+      say(report);
+      throw new Error(`The playlist could not be read again (${(error as Error).message}). Go back to Playlists and open it again.`);
+    }
     const scroll = window.scrollY;
-    // What was not done stays as the draft.
-    show(
-      opened,
-      outcome.failed === undefined
-        ? undefined
-        : rebase(draft, opened.entries.map((entry) => entry.playlistTrackId)),
-    );
+    if (outcome.failed === undefined) {
+      show(opened);
+    } else {
+      // What was not done stays as the draft; a playlist already made is used, not made again.
+      let rest = rebase(draft, opened.entries.map((entry) => entry.playlistTrackId));
+      for (const { destination, playlistId } of outcome.created) {
+        rest = retarget(rest, destination, { type: "existing", playlistId, name: destination.name });
+      }
+      show(opened, rest);
+    }
     window.scrollTo(0, scroll);
-    say(describeSaved(outcome));
+    say(report);
     if (outcome.failed !== undefined) {
       showError(
         el("pl-editor-error"),
@@ -1352,6 +1442,9 @@ async function save(): Promise<void> {
       );
     }
   });
+  if (drift !== undefined && isStill(mine)) {
+    await offerRebase(drift, draft);
+  }
 }
 
 function describeSaved(outcome: Extract<SaveOutcome, { status: "saved" }>): string {
@@ -1371,10 +1464,19 @@ function describeSaved(outcome: Extract<SaveOutcome, { status: "saved" }>): stri
   if (outcome.kept.length > 0) {
     parts.push(`${songCount(outcome.kept.length)} stayed here, as Qobuz no longer offers ${outcome.kept.length === 1 ? "it" : "them"}`);
   }
+  if (outcome.unverified === true) {
+    parts.push("How much of the rest went through could not be checked");
+  }
+  if (outcome.failed !== undefined) {
+    return parts.length === 0
+      ? "Nothing was taken out of this playlist or reordered."
+      : `Saved in part. ${parts.join(". ")}. You can undo this in History.`;
+  }
   return parts.length === 0 ? "Nothing was changed." : `Saved. ${parts.join(". ")}. You can undo this in History.`;
 }
 
 async function offerRebase(outcome: Extract<SaveOutcome, { status: "changed" }>, draft: Draft): Promise<void> {
+  const mine = current();
   const { added, gone, reordered } = outcome.drift;
   const what = [
     added > 0 ? `${added} added` : undefined,
@@ -1390,12 +1492,14 @@ async function offerRebase(outcome: Extract<SaveOutcome, { status: "changed" }>,
     confirm: "Bring in the changes",
     cancel: "Not now",
   });
-  if (!ok) {
+  if (!ok || !isStill(mine)) {
     return;
   }
-  const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: current().playlist.id });
-  show(opened, rebase(draft, opened.entries.map((entry) => entry.playlistTrackId)));
-  say("Brought in the changes made elsewhere. Check the list, then save.");
+  await working("Reading it again...", async () => {
+    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: mine.playlist.id });
+    show(opened, rebase(draft, opened.entries.map((entry) => entry.playlistTrackId)));
+    say("Brought in the changes made elsewhere. Check the list, then save.");
+  });
 }
 
 // ---- Wiring -------------------------------------------------------------------

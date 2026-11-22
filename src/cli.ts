@@ -1438,7 +1438,7 @@ function planDeduplicate(
     const resolved = resolveDuplicateGroups(groups, keep);
     logger.info(`  keeping the ${keep.join(", then ")} copy of each duplicate\n`);
     logger.info(formatResolutionReport(resolved));
-    const versions = otherVersions(tracks, { includeVersions });
+    const versions = otherVersions(tracks, { includeVersions }, resolved);
     if (versions.length > 0) {
       logger.info(`\n${formatOtherVersions(versions)}`);
     }
@@ -1553,6 +1553,10 @@ async function runRemoveArtists(
   const removals = removalsOf(plan, args.includeGuests);
   const total = removals.reduce((n, removal) => n + removal.entries.length, 0);
   output.assign({ ...plan, includeGuests: args.includeGuests, toRemove: total, applied: false });
+  // A playlist that could not be read may well hold some of their songs.
+  if (plan.playlists.some((entry) => entry.error !== undefined)) {
+    process.exitCode = 1;
+  }
   if (total === 0) {
     logger.info("\nNothing to remove.");
     return;

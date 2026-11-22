@@ -344,6 +344,7 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
       box.disabled = keepAll.checked;
       if (keepAll.checked) {
         box.checked = true;
+        syncEntry(box);
       }
     }
     updateGroupStyling(wrapper);
@@ -356,7 +357,14 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
   // the kept id is the keeper (as the server's plan counts it).
   const keep = group.tracks.findIndex((track) => track.id === group.keepId);
   group.tracks.forEach((track, position) => {
-    wrapper.appendChild(renderGroupTrack(track, position, group.keepId === undefined || position === keep));
+    wrapper.appendChild(
+      renderGroupTrack(
+        track,
+        position,
+        group.keepId === undefined || position === keep,
+        scannedGroups[index]?.playlistId,
+      ),
+    );
   });
   if (group.keepId !== undefined) {
     wrapper.appendChild(keepAllLabel);
@@ -365,9 +373,35 @@ function renderGroup(group: ResolvedGroup, index: number): HTMLElement {
   return wrapper;
 }
 
-function renderGroupTrack(track: DedupTrack, position: number, keep: boolean): HTMLElement {
+/**
+ * A copy can be listed among the duplicates and among the versions: its boxes
+ * go together, so it is never shown as both kept and removed.
+ */
+function syncEntry(box: HTMLInputElement): void {
+  const entry = box.closest<HTMLElement>(".dedup-track")?.dataset["entry"];
+  if (entry === undefined) {
+    return;
+  }
+  for (const row of document.querySelectorAll<HTMLElement>("#dedup-groups .dedup-track")) {
+    const other = row.querySelector<HTMLInputElement>(".dedup-keep-box");
+    const group = row.closest<HTMLElement>(".dedup-group");
+    if (row.dataset["entry"] !== entry || other === null || other === box || group === null) {
+      continue;
+    }
+    other.checked = box.checked;
+    const keepAll = group.querySelector<HTMLInputElement>(".dedup-keep-all");
+    if (!box.checked && keepAll !== null && keepAll.checked) {
+      keepAll.checked = false;
+      group.querySelectorAll<HTMLInputElement>(".dedup-keep-box").forEach((item) => (item.disabled = false));
+    }
+    updateGroupStyling(group);
+  }
+}
+
+function renderGroupTrack(track: DedupTrack, position: number, keep: boolean, playlistId?: number): HTMLElement {
   const row = document.createElement("label");
   row.className = "track dedup-track";
+  row.dataset["entry"] = `${playlistId ?? ""}:${track.playlistTrackId ?? `t${track.id}`}`;
   row.dataset["trackId"] = String(track.id);
   row.dataset["position"] = String(position);
 
@@ -376,6 +410,7 @@ function renderGroupTrack(track: DedupTrack, position: number, keep: boolean): H
   checkbox.className = "dedup-keep-box";
   checkbox.checked = keep;
   checkbox.addEventListener("change", () => {
+    syncEntry(checkbox);
     updateGroupStyling(row.closest(".dedup-group") as HTMLElement);
     updateApplyButton();
   });

@@ -183,7 +183,7 @@ describe("undo of playlist changes", () => {
     const { plan } = await undo();
 
     expect(plan.steps).toEqual([]);
-    expect(plan.notes).toEqual(["Late Night no longer exists (or cannot be read), so its changes are not undone."]);
+    expect(plan.notes).toEqual(["Late Night no longer exists, so its changes are not undone."]);
   });
 
   it("puts a reordered playlist back in its old order, and can redo it", async () => {
@@ -333,6 +333,37 @@ describe("undo of a move between playlists", () => {
     expect(outcome.failed).toHaveLength(1);
   });
 
+  it("leaves the song where it went when the playlist it came from is gone", async () => {
+    const { account, undo, from, to } = await moved();
+    account.playlists.delete(from);
+    const { outcome } = await undo();
+    expect(account.trackIds(to)).toEqual([9, 2]);
+    expect(outcome.notes).toContain("1 track stays in To, as it could not be put back where it was.");
+  });
+
+  it("keeps a new playlist whose songs' old playlist is gone", async () => {
+    const { journal, account, client, undo } = setup();
+    const from = account.seedPlaylist("From", [1, 2]);
+    let to = 0;
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      to = (await createPlaylistWithTracks(client, { name: "Split", trackIds: [2] })).id;
+      await client.removeTracksFromPlaylist(from, [account.entryIds(from)[1]!]);
+    });
+    account.playlists.delete(from);
+    await undo();
+    expect(account.trackIds(to)).toEqual([2]);
+  });
+
+  it("does nothing when a playlist cannot be read for now", async () => {
+    const { account, journal, client, from, to } = await moved();
+    account.failAfter("getPlaylistTracks", 0);
+    const items = journal.items();
+    const plan = await planUndo(client, items[0]!, items);
+    expect(plan.blocked).toMatch(/could not be read/);
+    await expect(applyUndo(journal, client, items[0]!, plan)).rejects.toThrow();
+    expect([account.trackIds(from), account.trackIds(to)]).toEqual([[1, 3], [9, 2]]);
+  });
+
   it("does not delete a new playlist holding a song that could not be put back", async () => {
     const { journal, account, client, undo } = setup();
     const from = account.seedPlaylist("From", [1, 2]);
@@ -378,6 +409,10 @@ describe("undo when moving back fails", () => {
 
     expect(account.trackIds(id)).toEqual([2, 3, 1]);
     expect(outcome.notes).toEqual(["1 track was put back at the end of Mix, not in its old place."]);
+    expect(outcome.done).toEqual(["Put 1 track back in Mix"]);
+    expect(outcome.failed).toEqual([
+      { step: "Put Mix back in its old order", reason: "movePlaylistTracks failed with HTTP 500" },
+    ]);
     expect(outcome.undone).toBe(true);
   });
 });
