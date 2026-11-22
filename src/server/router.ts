@@ -24,8 +24,7 @@ import {
 } from "../qobuz/index.js";
 import {
   deduplicateTracks,
-  findOtherVersions,
-  toDedupTrack,
+  otherVersions,
   enrichReleaseDates,
   removePlaylistEntries,
   resolveDuplicateGroups,
@@ -722,24 +721,24 @@ async function scan(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (!input.ok) {
     return { status: 400, body: { error: input.error } };
   }
-  const { source, keep } = input.value;
+  const { source, keep, includeVersions } = input.value;
   if (source.type === "all-playlists") {
     // { within: [{ playlist, groups }], across: [...], playlistCount }
-    return { status: 200, body: await scanAllPlaylists(deps.service, keep) };
+    return { status: 200, body: await scanAllPlaylists(deps.service, keep, { includeVersions }) };
   }
   const tracks =
     source.type === "playlist"
       ? await deps.service.getPlaylistTracks(source.playlistId)
       : await deps.service.getFavoriteTracks();
 
-  let groups = deduplicateTracks(tracks);
+  let groups = deduplicateTracks(tracks, { includeVersions });
   if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
     groups = await enrichReleaseDates(groups, (albumId) =>
       deps.service.getAlbumReleaseDate(albumId),
     );
   }
   const resolved = resolveDuplicateGroups(groups, keep);
-  return { status: 200, body: { groups: resolved, versions: findOtherVersions(tracks.map(toDedupTrack)) } };
+  return { status: 200, body: { groups: resolved, versions: otherVersions(tracks, { includeVersions }) } };
 }
 
 async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
@@ -1295,6 +1294,8 @@ interface ScanInput {
   source: DedupeSource;
   /** Keep strategies in order; later ones break the earlier ones' ties. */
   keep: KeepStrategy[];
+  /** Count other versions (live, acoustic...) as the same song. */
+  includeVersions: boolean;
 }
 
 function parseScanInput(body: unknown): Parsed<ScanInput> {
@@ -1319,7 +1320,11 @@ function parseScanInput(body: unknown): Parsed<ScanInput> {
       error: `keep must be one of: ${KEEP_STRATEGIES.join(", ")}, or a list of them`,
     };
   }
-  return { ok: true, value: { source: source.value, keep: parts } };
+  const includeVersions = body["includeVersions"] ?? false;
+  if (typeof includeVersions !== "boolean") {
+    return { ok: false, error: "includeVersions must be a boolean" };
+  }
+  return { ok: true, value: { source: source.value, keep: parts, includeVersions } };
 }
 
 interface Removal {

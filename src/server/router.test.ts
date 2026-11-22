@@ -2344,3 +2344,22 @@ describe("job routes", () => {
     expect(journal.items()[0]).toMatchObject({ tool: "managed" });
   });
 });
+
+describe("POST /api/deduplicate/scan with versions", () => {
+  const tracks = [
+    { id: 1, title: "Roads", artist: "Portishead" },
+    { id: 2, title: "Roads", artist: "Portishead", version: "Live" },
+  ];
+  const scan = (body: unknown) =>
+    handleApi(request("POST", "/api/deduplicate/scan", body), deps({ service: service({ getFavoriteTracks: vi.fn(async () => tracks) }) }));
+
+  it("points versions out, or counts them as duplicates when asked", async () => {
+    const source = { type: "favourites" };
+    expect((await scan({ source })).body).toMatchObject({ groups: [], versions: [[{ id: 1 }, { id: 2, version: "Live" }]] });
+    expect((await scan({ source, includeVersions: true })).body).toMatchObject({
+      groups: [{ tracks: [{ id: 1 }, { id: 2 }], keepId: 1 }],
+      versions: [],
+    });
+    expect((await scan({ source, includeVersions: "yes" })).status).toBe(400);
+  });
+});

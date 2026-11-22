@@ -274,7 +274,9 @@ describe("parseDedupeArgs", () => {
       source: { type: "playlist", playlistId: 555 },
       keep: ["first-added"],
       apply: false,
+      includeVersions: false,
     });
+    expect(parseDedupeArgs(["--favourites", "--include-versions"]).includeVersions).toBe(true);
   });
 
   it("parses a favourites source (both spellings)", () => {

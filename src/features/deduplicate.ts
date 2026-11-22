@@ -125,13 +125,25 @@ function comparable(text: string): string {
   return normalised.length > 0 ? normalised : text.trim().toLowerCase();
 }
 
+/** What counts as the same song. */
+export interface SameSongOptions {
+  /**
+   * Also count other versions (live, acoustic, remixes: copies differing only
+   * by their version label) as the same song. Default off.
+   */
+  includeVersions?: boolean;
+}
+
 /**
  * Group tracks into sets of duplicates.
  *
  * Returns only groups of two or more tracks, ordered by the first appearance of
  * each group; within a group, tracks keep their input order.
  */
-export function findDuplicateGroups(tracks: readonly DedupTrack[]): DedupTrack[][] {
+export function findDuplicateGroups(
+  tracks: readonly DedupTrack[],
+  options: SameSongOptions = {},
+): DedupTrack[][] {
   const parent = tracks.map((_, i) => i);
 
   const find = (i: number): number => {
@@ -175,6 +187,9 @@ export function findDuplicateGroups(tracks: readonly DedupTrack[]): DedupTrack[]
   tracks.forEach((track, index) => {
     linkOn(track.isrc === undefined ? undefined : `isrc:${track.isrc}`, index);
     linkOn(`sig:${trackSignature(track)}`, index);
+    if (options.includeVersions === true) {
+      linkOn(songKey(track), index);
+    }
   });
 
   // Collect members by root, preserving input order.
@@ -190,6 +205,13 @@ export function findDuplicateGroups(tracks: readonly DedupTrack[]): DedupTrack[]
   });
 
   return [...groupsByRoot.values()].filter((group) => group.length > 1);
+}
+
+/** The artist and title without the version label; undefined without an artist. */
+function songKey(track: DedupTrack): string | undefined {
+  return track.artist.trim().length === 0
+    ? undefined
+    : `song:${comparable(track.artist)}\u0000${comparable(track.title)}`;
 }
 
 /**
@@ -210,10 +232,10 @@ export function findOtherVersions(tracks: readonly DedupTrack[]): DedupTrack[][]
   }
   const byTitle = new Map<string, DedupTrack[]>();
   for (const track of tracks) {
-    if (track.artist.trim().length === 0) {
+    const key = songKey(track);
+    if (key === undefined) {
       continue;
     }
-    const key = `${comparable(track.artist)}\u0000${comparable(track.title)}`;
     const members = byTitle.get(key);
     if (members === undefined) {
       byTitle.set(key, [track]);
@@ -248,8 +270,19 @@ export function toDedupTrack(track: Track): DedupTrack {
 }
 
 /** Find duplicate groups among Qobuz tracks. */
-export function deduplicateTracks(tracks: readonly Track[]): DedupTrack[][] {
-  return findDuplicateGroups(tracks.map(toDedupTrack));
+export function deduplicateTracks(
+  tracks: readonly Track[],
+  options: SameSongOptions = {},
+): DedupTrack[][] {
+  return findDuplicateGroups(tracks.map(toDedupTrack), options);
+}
+
+/** The other versions to point out: none when they count as duplicates anyway. */
+export function otherVersions(
+  tracks: readonly Track[],
+  options: SameSongOptions = {},
+): DedupTrack[][] {
+  return options.includeVersions === true ? [] : findOtherVersions(tracks.map(toDedupTrack));
 }
 
 /** A strategy for choosing which track in a duplicate group to keep. */
@@ -477,7 +510,7 @@ export function formatOtherVersions(groups: readonly DedupTrack[][]): string {
     return "";
   }
   const lines = [
-    `${groups.length} song${groups.length === 1 ? " is" : "s are"} here in different versions (live, acoustic, remix...). These are kept:`,
+    `${groups.length} song${groups.length === 1 ? " is" : "s are"} here in different versions (live, acoustic, remix...). These are kept (--include-versions counts them as duplicates):`,
   ];
   for (const group of groups) {
     lines.push(`   ${group[0]!.artist} - ${group[0]!.title}: ${group.map((t) => t.version ?? "no label").join(", ")}`);
@@ -513,6 +546,7 @@ export interface SongAcrossPlaylists {
  */
 export function findSongsAcrossPlaylists(
   lists: readonly PlaylistTracks[],
+  options: SameSongOptions = {},
 ): SongAcrossPlaylists[] {
   const all: DedupTrack[] = [];
   const owner = new Map<DedupTrack, number>();
@@ -525,7 +559,7 @@ export function findSongsAcrossPlaylists(
   });
 
   const songs: SongAcrossPlaylists[] = [];
-  for (const group of findDuplicateGroups(all)) {
+  for (const group of findDuplicateGroups(all, options)) {
     const byList = new Map<number, DedupTrack[]>();
     for (const track of group) {
       const listIndex = owner.get(track)!;
@@ -574,12 +608,12 @@ export interface AllPlaylistsScan {
 export async function scanAllPlaylists(
   client: AllPlaylistsClient,
   keep: KeepStrategy | KeepChain,
-  concurrency: number = DEFAULT_CONCURRENCY,
+  options: SameSongOptions & { concurrency?: number } = {},
 ): Promise<AllPlaylistsScan> {
   const playlists = await client.getUserPlaylists();
   const lists: PlaylistTracks[] = await mapWithConcurrency(
     playlists,
-    concurrency,
+    options.concurrency ?? DEFAULT_CONCURRENCY,
     async (playlist) => ({
       playlist: { id: playlist.id, name: playlist.name },
       tracks: await client.getPlaylistTracks(playlist.id),
@@ -589,8 +623,8 @@ export async function scanAllPlaylists(
   const found = lists
     .map((list) => ({
       playlist: list.playlist,
-      groups: deduplicateTracks(list.tracks),
-      versions: findOtherVersions(list.tracks.map(toDedupTrack)),
+      groups: deduplicateTracks(list.tracks, options),
+      versions: otherVersions(list.tracks, options),
     }))
     .filter((entry) => entry.groups.length > 0 || entry.versions.length > 0);
   // Enrich every playlist's groups in one pass, so each album is looked up once.
@@ -607,7 +641,7 @@ export async function scanAllPlaylists(
     return { playlist: entry.playlist, groups: resolveDuplicateGroups(groups, keep), versions: entry.versions };
   });
 
-  return { within, across: findSongsAcrossPlaylists(lists), playlistCount: lists.length };
+  return { within, across: findSongsAcrossPlaylists(lists, options), playlistCount: lists.length };
 }
 
 /** An entry to remove from a playlist. */

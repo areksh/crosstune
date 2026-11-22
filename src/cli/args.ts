@@ -313,6 +313,8 @@ export interface DedupeOptions {
   keep: KeepStrategy[];
   /** Whether to actually remove duplicates (otherwise report only). */
   apply: boolean;
+  /** Count other versions (live, acoustic, remixes) as the same song. */
+  includeVersions: boolean;
 }
 
 const DEFAULT_KEEP: KeepStrategy = "first-added";
@@ -344,8 +346,9 @@ export function parseKeepChain(raw: string | undefined): KeepStrategy[] {
  * Exactly one source must be given: `--playlist <id>`, `--favourites`
  * (`--favorites` is accepted too) or `--all-playlists`. `--keep <strategy>`
  * chooses which copy to keep (default `first-added`); a comma-separated chain
- * breaks ties in order. `--apply` performs the removal; without it the command
- * only reports.
+ * breaks ties in order. `--include-versions` counts other versions of a song as
+ * duplicates. `--apply` performs the removal; without it the command only
+ * reports.
  *
  * @throws {Error} if the source or the keep strategy is missing/invalid.
  */
@@ -355,6 +358,7 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
   let allPlaylists = false;
   let keep: KeepStrategy[] = [DEFAULT_KEEP];
   let apply = false;
+  let includeVersions = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -373,6 +377,8 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
     } else if (arg === "--keep") {
       keep = parseKeepChain(argv[i + 1]);
       i += 1;
+    } else if (arg === "--include-versions") {
+      includeVersions = true;
     } else if (arg === "--apply") {
       apply = true;
     } else {
@@ -392,7 +398,7 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
   if (source === undefined) {
     throw new Error("A source is required: --playlist <id>, --favourites or --all-playlists");
   }
-  return { source, keep, apply };
+  return { source, keep, apply, includeVersions };
 }
 
 function isKeepStrategy(value: string | undefined): value is KeepStrategy {

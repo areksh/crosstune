@@ -165,6 +165,7 @@ async function onScan(): Promise<void> {
     const scan = await api<ScanResponse>("POST", "/api/deduplicate/scan", {
       source,
       keep: keepChain(),
+      includeVersions: el<HTMLInputElement>("dedup-versions").checked,
     });
     scannedSource = source;
     if (source.type === "all-playlists") {
@@ -197,7 +198,7 @@ function renderVersions(groups: ResolvedGroup[], firstIndex: number): HTMLElemen
   section.className = "dedup-section";
   section.appendChild(
     groupHead("h3", "Other versions", {
-      note: "The same song, but live, acoustic, remixed and so on. All kept; untick any you do not want.",
+      note: "The same song, but live, acoustic, remixed and so on. Not counted as duplicates: all kept, untick any you do not want.",
       count: String(groups.length),
     }),
   );

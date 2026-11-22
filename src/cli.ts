@@ -53,7 +53,8 @@
  *       version of each album (chosen by --prefer) unless --all-versions.
  *
  *   qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists)
- *                            [--keep <strategy>[,<strategy>...]] [--apply]
+ *                            [--keep <strategy>[,<strategy>...]]
+ *                            [--include-versions] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
  *       album) in a playlist, in your favourites, or in each of your playlists,
  *       marking which copy to keep. --keep: first-added (default), last-added,
@@ -242,9 +243,8 @@ import { startServer } from "./server/http.js";
 import type { ApiDeps } from "./server/router.js";
 import {
   deduplicateTracks,
-  findOtherVersions,
   formatOtherVersions,
-  toDedupTrack,
+  otherVersions,
   enrichReleaseDates,
   formatAcrossPlaylistsReport,
   formatResolutionReport,
@@ -1374,9 +1374,9 @@ function excludedNote(count: number): string {
 function planDeduplicate(
   argv: string[],
 ): (client: QobuzClient) => Promise<void> {
-  const { source, keep, apply } = parseDedupeArgs(argv);
+  const { source, keep, apply, includeVersions } = parseDedupeArgs(argv);
   if (source.type === "all-playlists") {
-    return planDeduplicateAllPlaylists(keep, apply);
+    return planDeduplicateAllPlaylists(keep, apply, includeVersions);
   }
 
   return async (client: QobuzClient): Promise<void> => {
@@ -1391,7 +1391,7 @@ function planDeduplicate(
         : await client.getFavoriteTracks();
     logger.info(`  ${count(tracks.length, "track")} fetched`);
 
-    let groups = deduplicateTracks(tracks);
+    let groups = deduplicateTracks(tracks, { includeVersions });
     if (strategyNeedsReleaseDates(keep) && groups.length > 0) {
       logger.info("  looking up release dates...");
       groups = await enrichReleaseDates(groups, (albumId) =>
@@ -1402,7 +1402,7 @@ function planDeduplicate(
     const resolved = resolveDuplicateGroups(groups, keep);
     logger.info(`  keeping the ${keep.join(", then ")} copy of each duplicate\n`);
     logger.info(formatResolutionReport(resolved));
-    const versions = findOtherVersions(tracks.map(toDedupTrack));
+    const versions = otherVersions(tracks, { includeVersions });
     if (versions.length > 0) {
       logger.info(`\n${formatOtherVersions(versions)}`);
     }
@@ -1429,10 +1429,11 @@ function planDeduplicate(
 function planDeduplicateAllPlaylists(
   keep: readonly KeepStrategy[],
   apply: boolean,
+  includeVersions: boolean,
 ): (client: QobuzClient) => Promise<void> {
   return async (client: QobuzClient): Promise<void> => {
     logger.info("Fetching all your playlists...");
-    const scan = await scanAllPlaylists(client, keep);
+    const scan = await scanAllPlaylists(client, keep, { includeVersions });
     output.assign({
       source: { type: "all-playlists" },
       keep,
@@ -2112,7 +2113,7 @@ function printUsage(): void {
       '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options]',
       '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
       "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] [--apply]",
-      "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--apply]",
+      "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--include-versions] [--apply]",
       '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
       "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",

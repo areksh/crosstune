@@ -9,6 +9,7 @@ import {
   findOtherVersions,
   formatAcrossPlaylistsReport,
   formatOtherVersions,
+  otherVersions,
   findDuplicateGroups,
   formatResolutionReport,
   KEEP_STRATEGIES,
@@ -570,10 +571,22 @@ describe("versions", () => {
     expect(findOtherVersions([{ id: 1, title: "T", artist: "" }, { id: 2, title: "T", artist: "", version: "Live" }])).toEqual([]);
   });
 
+  it("counts versions as the same song when asked, and then has none to point out", () => {
+    const tracks = [song(1), song(2, "Live"), song(3, "Acoustic"), { ...song(4, "Live"), title: "Glory Box" }];
+    expect(findDuplicateGroups(tracks, { includeVersions: true }).map((g) => g.map((t) => t.id))).toEqual([[1, 2, 3]]);
+    expect(otherVersions(tracks, { includeVersions: true })).toEqual([]);
+    expect(otherVersions(tracks)).toHaveLength(1);
+  });
+
+  it("does not join songs without an artist when counting versions", () => {
+    const tracks = [{ id: 1, title: "T", artist: "" }, { id: 2, title: "T", artist: "", version: "Live" }];
+    expect(findDuplicateGroups(tracks, { includeVersions: true })).toEqual([]);
+  });
+
   it("reports them for the CLI", () => {
     expect(formatOtherVersions([])).toBe("");
     expect(formatOtherVersions([[song(1), song(2, "Live")]])).toBe(
-      "1 song is here in different versions (live, acoustic, remix...). These are kept:\n   Portishead - Roads: no label, Live",
+      "1 song is here in different versions (live, acoustic, remix...). These are kept (--include-versions counts them as duplicates):\n   Portishead - Roads: no label, Live",
     );
   });
 });
