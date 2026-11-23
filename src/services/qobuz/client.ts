@@ -275,12 +275,7 @@ export class QobuzClient {
     if (response.status === 401) {
       throw new QobuzError("authentication", "Auth token rejected");
     }
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `Login failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "Login");
 
     const session = parseLoginResponse(await response.json());
     this.#session = session;
@@ -321,12 +316,7 @@ export class QobuzClient {
       },
     });
 
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `getUserFavorites failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "getUserFavorites");
     return response.json();
   }
 
@@ -358,12 +348,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist search");
     return parseArtists(await response.json());
   }
 
@@ -399,12 +384,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album search");
     return parseAlbums(await response.json());
   }
 
@@ -439,12 +419,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `track search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "track search");
     return parseTracks(await response.json());
   }
 
@@ -468,12 +443,7 @@ export class QobuzClient {
         ["offset", "0"],
       ],
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist/getSimilarArtists failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist/getSimilarArtists");
     return parseArtists(await response.json());
   }
 
@@ -498,12 +468,7 @@ export class QobuzClient {
     const response = await this.#signedGet("artistpage", paths.artistPage, [
       ["artist_id", String(artistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist/page failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist/page");
     const tracks = parseArtistPageTracks(await response.json());
     const ownTracks = tracks.filter(
       (track) => track.artistId === undefined || track.artistId === artistId,
@@ -542,12 +507,7 @@ export class QobuzClient {
           ["offset", String(offset)],
         ],
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `artist/getReleasesList failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "artist/getReleasesList");
       const page = parseReleasesPage(await response.json());
       releases.push(...page.releases.slice(0, maxReleases - releases.length));
       if (!page.hasMore || page.releases.length === 0) {
@@ -582,12 +542,7 @@ export class QobuzClient {
       kvPairs,
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/create failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/create");
     return parsePlaylist(await response.json());
   }
 
@@ -613,12 +568,7 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/addTracks failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/addTracks");
     }
   }
 
@@ -654,12 +604,7 @@ export class QobuzClient {
           },
         },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `getUserFavorites failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "getUserFavorites");
       return parseTracksPage(await response.json());
     });
   }
@@ -734,12 +679,7 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/getUserPlaylists failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/getUserPlaylists");
       const page = parsePlaylistsPage(await response.json());
       all.push(...page.playlists);
       offset += page.playlists.length;
@@ -758,12 +698,7 @@ export class QobuzClient {
         ["offset", String(offset)],
         ["extra", "tracks"],
       ]);
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/get failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/get");
       return parseTracksPage(await response.json());
     });
   }
@@ -777,9 +712,7 @@ export class QobuzClient {
     const response = await this.#signedGet("artistpage", paths.artistPage, [
       ["artist_id", String(artistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `artist/page failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "artist/page");
     const artist = parseArtistPage(await response.json());
     if (artist === undefined) {
       throw new QobuzError("api-response", `artist/page returned no artist for ${artistId}`);
@@ -794,9 +727,7 @@ export class QobuzClient {
    */
   async getTrack(trackId: number): Promise<Track> {
     const response = await this.#signedGet("trackget", paths.trackGet, [["track_id", String(trackId)]]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `track/get failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "track/get");
     const track = parseTrackDetails(await response.json());
     if (track === undefined) {
       throw new QobuzError("api-response", `track/get returned no track for ${trackId}`);
@@ -812,9 +743,7 @@ export class QobuzClient {
    */
   async getAlbum(albumId: string): Promise<Album> {
     const response = await this.#signedGet("albumget", paths.albumGet, [["album_id", albumId]]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `album/get failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "album/get");
     const album = parseAlbumDetails(await response.json());
     if (album === undefined) {
       throw new QobuzError("api-response", `album/get returned no album for ${albumId}`);
@@ -827,12 +756,7 @@ export class QobuzClient {
     const response = await this.#signedGet("albumget", paths.albumGet, [
       ["album_id", albumId],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album/get");
     return parseAlbumReleaseDate(await response.json());
   }
 
@@ -846,12 +770,7 @@ export class QobuzClient {
     const response = await this.#signedGet("albumget", paths.albumGet, [
       ["album_id", albumId],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album/get");
     return parseAlbumTracks(await response.json());
   }
 
@@ -875,12 +794,7 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/deleteTracks failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/deleteTracks");
     }
   }
 
@@ -919,12 +833,7 @@ export class QobuzClient {
       ],
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/updateTracksPosition failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/updateTracksPosition");
   }
 
   /**
@@ -970,12 +879,7 @@ export class QobuzClient {
       [["playlist_id", String(playlistId)]],
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/delete failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/delete");
   }
 
   /**
@@ -1003,9 +907,7 @@ export class QobuzClient {
     const response = await this.#signedGet("playlistupdate", paths.playlistUpdate, kvPairs, {
       requireAuth: true,
     });
-    if (!response.ok) {
-      throw new QobuzError("api-response", `playlist/update failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "playlist/update");
     return parsePlaylist(await response.json());
   }
 
@@ -1019,12 +921,7 @@ export class QobuzClient {
     const response = await this.#signedGet("playlistget", paths.playlistGet, [
       ["playlist_id", String(playlistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/get");
     return parsePlaylist(await response.json());
   }
 
@@ -1066,12 +963,7 @@ export class QobuzClient {
           },
         },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `getUserFavorites failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "getUserFavorites");
       const page = parse(await response.json());
       all.push(...page.items);
       offset += page.items.length;
@@ -1097,12 +989,7 @@ export class QobuzClient {
         [[key, batch.join(",")]],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `favorite/create failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "favorite/create");
     }
   }
 
@@ -1121,12 +1008,7 @@ export class QobuzClient {
         [[key, batch.join(",")]],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `favorite/delete failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "favorite/delete");
     }
   }
 
@@ -1180,6 +1062,28 @@ export class QobuzClient {
       : this.#headers();
 
     return this.#request("GET", path, { query, headers });
+  }
+
+  /**
+   * Throw unless Qobuz accepted the request, `what` naming it in the message.
+   *
+   * A 401 means Qobuz no longer accepts the user's token (revoked, or signed
+   * out elsewhere), so it is an `authentication` error -- what tells the
+   * server to ask for a sign-in again, scheduled jobs to flag the service and
+   * matching to stop -- wherever it comes; any other refusal is
+   * `api-response` ("<what> failed with HTTP <status>").
+   */
+  #ensureOk(response: Response, what: string): void {
+    if (response.ok) {
+      return;
+    }
+    if (response.status === 401) {
+      throw new QobuzError(
+        "authentication",
+        `Qobuz did not accept the sign-in; connect Qobuz again (${what} failed with HTTP 401)`,
+      );
+    }
+    throw new QobuzError("api-response", `${what} failed with HTTP ${response.status}`);
   }
 
   /** App id header, plus the user token when signed in (optional auth). */

@@ -468,6 +468,52 @@ describe("QobuzClient secret probe", () => {
   });
 });
 
+describe("QobuzClient sign-in refused mid-session (HTTP 401)", () => {
+  /** A signed-in client to which Qobuz then answers every request with `status`. */
+  async function refusedWith(status: number) {
+    const base = makeFetch({ recorded: [], loginBody: validSessionBody() });
+    let signedIn = false;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (signedIn && !path.endsWith("/user/login")) {
+        return new Response("{}", { status });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.loginWithOAuthCode("code");
+    signedIn = true;
+    return client;
+  }
+
+  const calls: Array<[string, (client: QobuzClient) => Promise<unknown>]> = [
+    ["getUserPlaylists", (c) => c.getUserPlaylists()],
+    ["getPlaylistTracks", (c) => c.getPlaylistTracks(1)],
+    ["getFavoriteTracks", (c) => c.getFavoriteTracks()],
+    ["getFavoriteAlbums", (c) => c.getFavoriteAlbums()],
+    ["getUserFavorites", (c) => c.getUserFavorites("tracks")],
+    ["searchTracks", (c) => c.searchTracks("x")],
+    ["getArtistReleases", (c) => c.getArtistReleases(1)],
+    ["addTracksToPlaylist", (c) => c.addTracksToPlaylist(1, [2])],
+    ["removeFavoriteTracks", (c) => c.removeFavoriteTracks([2])],
+    ["updatePlaylist", (c) => c.updatePlaylist(1, { name: "x" })],
+  ];
+
+  it.each(calls)("%s reports it as an authentication error", async (_, call) => {
+    const client = await refusedWith(401);
+    await expect(call(client)).rejects.toMatchObject({ kind: "authentication", service: "qobuz" });
+  });
+
+  it("keeps other refusals as api-response, with their messages", async () => {
+    const client = await refusedWith(403);
+    await expect(client.getUserPlaylists()).rejects.toMatchObject({
+      kind: "api-response",
+      message: "playlist/getUserPlaylists failed with HTTP 403",
+    });
+  });
+});
+
 describe("QobuzClient network failures", () => {
   it("reports a request Qobuz never answers as a network error", async () => {
     const recorded: RecordedRequest[] = [];
