@@ -32,10 +32,10 @@ import type { Account } from "../service.js";
  * values, and these two are only its examples. Any other tag says nothing, so
  * that a tag TIDAL adds is never taken for a quality.
  */
-const TIER_OF_TAG: Record<string, QualityTier> = {
-  HIRES_LOSSLESS: "hires",
-  LOSSLESS: "lossless",
-};
+const TIER_OF_TAG = new Map<string, QualityTier>([
+  ["HIRES_LOSSLESS", "hires"],
+  ["LOSSLESS", "lossless"],
+]);
 const TIERS: readonly QualityTier[] = ["hires", "lossless", "lossy"];
 
 /** Covers are shown at about this size (pixels). */
@@ -208,7 +208,7 @@ const isHttps = (value: unknown): value is string => typeof value === "string" &
 function tierOf(attributes: Fields): QualityTier | undefined {
   const tags = attributes["mediaTags"];
   const named = (Array.isArray(tags) ? tags : []).flatMap((tag: unknown) =>
-    typeof tag === "string" ? tag.split(",").map((part) => TIER_OF_TAG[part.trim()]) : [],
+    typeof tag === "string" ? tag.split(",").map((part) => TIER_OF_TAG.get(part.trim())) : [],
   );
   return TIERS.find((tier) => named.includes(tier));
 }
@@ -417,24 +417,38 @@ export function toArtist(item: ResourceRef, index: Index): Artist {
   );
 }
 
-/** What parse makes of the included resources, in the list's order; the rest left out. */
-export function pick<T>(items: readonly ResourceRef[], index: Index, parse: (resource: unknown, index: Index) => T | undefined): T[] {
+/** What `parse` makes of the included resources, in the list's order; the rest left out. */
+export function pick<T>(
+  items: readonly ResourceRef[],
+  index: Index,
+  parse: (resource: unknown, index: Index) => T | undefined,
+): T[] {
   return items.flatMap((item) => parse(index.get(keyOf(item)), index) ?? []);
 }
 
-const VISIBILITY: Record<string, boolean> = { PUBLIC: true, UNLISTED: false, PRIVATE: false };
+const VISIBILITY = new Map<unknown, boolean>([
+  ["PUBLIC", true],
+  ["UNLISTED", false],
+  ["PRIVATE", false],
+]);
 
-export function parsePlaylist(resource: unknown): Playlist | undefined {
+/**
+ * A playlist. One without a name is still one: left out of a list, it would
+ * seem to be gone.
+ *
+ * @throws {ServiceError} if it has no id.
+ */
+export function parsePlaylist(resource: unknown): Playlist {
   const ref = refIn(resource);
-  const attributes = attributesOf(resource);
-  const name = textOf(attributes["name"]);
-  if (ref === undefined || name === undefined) {
-    return undefined;
+  if (ref === undefined) {
+    throw unreadable("a playlist without an id");
   }
+  const attributes = attributesOf(resource);
+  const name = textOf(attributes["name"]) ?? "Untitled playlist";
   // The tools list videos too, so every item counts.
   const trackCount = countOf(attributes["numberOfItems"]) ?? countOf(attributes["numberOfTrackItems"]);
   const description = textOf(attributes["description"]);
-  const isPublic = VISIBILITY[String(attributes["accessType"])];
+  const isPublic = VISIBILITY.get(attributes["accessType"]);
   const duration = parseDuration(attributes["duration"]);
   const updatedAt = momentOf(attributes["lastModifiedAt"]);
   const [owner] = relatedOf(resource, "owners");

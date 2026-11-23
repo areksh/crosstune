@@ -286,7 +286,7 @@ describe("parseAlbum and parseRelease", () => {
   });
 
   it("keeps the place of one TIDAL tells nothing about", () => {
-    expect(toAlbum({ type: "albums", id: "404", meta: {} }, index)).toEqual({
+    expect(toAlbum({ type: "albums", id: "404" }, index)).toEqual({
       id: "tidal:404",
       title: "Unavailable album",
       artist: "",
@@ -309,12 +309,12 @@ describe("parseAlbum and parseRelease", () => {
 
 describe("parseArtist", () => {
   it("reads the name", () => {
-    expect(parseArtist(INCLUDED[0], index)).toEqual({ id: "tidal:1", name: "Portishead" });
-    expect(parseArtist({ type: "artists", id: "1", attributes: {} }, index)).toBeUndefined();
+    expect(parseArtist(INCLUDED[0])).toEqual({ id: "tidal:1", name: "Portishead" });
+    expect(parseArtist({ type: "artists", id: "1", attributes: {} })).toBeUndefined();
   });
 
   it("keeps the place of one TIDAL tells nothing about", () => {
-    expect(toArtist({ type: "artists", id: "404", meta: {} }, index)).toEqual({
+    expect(toArtist({ type: "artists", id: "404" }, index)).toEqual({
       id: "tidal:404",
       name: "Unavailable artist",
     });
@@ -354,18 +354,20 @@ describe("parsePlaylist", () => {
   });
 
   it("takes unlisted and private for not public, and an unknown access for unknown", () => {
-    expect(playlist({ name: "x", accessType: "UNLISTED" })!.isPublic).toBe(false);
-    expect(playlist({ name: "x", accessType: "PRIVATE" })!.isPublic).toBe(false);
-    expect(playlist({ name: "x", accessType: "SECRET" })!).not.toHaveProperty("isPublic");
+    expect(playlist({ name: "x", accessType: "UNLISTED" }).isPublic).toBe(false);
+    expect(playlist({ name: "x", accessType: "PRIVATE" }).isPublic).toBe(false);
+    expect(playlist({ name: "x", accessType: "SECRET" })).not.toHaveProperty("isPublic");
   });
 
   it("counts the tracks when the items are not counted", () => {
-    expect(playlist({ name: "x", numberOfTrackItems: 3 })!.trackCount).toBe(3);
+    expect(playlist({ name: "x", numberOfTrackItems: 3 }).trackCount).toBe(3);
   });
 
   it("reads one with nothing but a name", () => {
     expect(playlist({ name: "Mix" })).toEqual({ id: "tidal:550e-84", name: "Mix" });
-    expect(playlist({})).toBeUndefined();
+    // Never dropped from a list, where it would seem to be gone.
+    expect(playlist({}).name).toBe("Untitled playlist");
+    expect(() => parsePlaylist({ attributes: { name: "x" } })).toThrow(expect.objectContaining({ kind: "api-response" }));
   });
 });
 
