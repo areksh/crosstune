@@ -250,7 +250,7 @@ import {
 } from "./cli/output.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
 import { createInterface } from "node:readline/promises";
-import { startServer } from "./server/http.js";
+import { startServer, type RunningServer } from "./server/http.js";
 import type { ApiDeps } from "./server/router.js";
 import {
   deduplicateTracks,
@@ -363,6 +363,15 @@ import {
   planUndo,
 } from "./features/undo.js";
 import { QobuzClient, QobuzError } from "./services/qobuz/index.js";
+import { Accounts, type AccountStore, type Connector } from "./accounts/accounts.js";
+import { fileAccountStore } from "./cli/account-store.js";
+import { qobuzConnector } from "./cli/qobuz-connector.js";
+import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
+import { homeService } from "./jobs/model.js";
+import { unflag } from "./jobs/stores.js";
+import { labelOf, ServiceError } from "./services/errors.js";
+import { ServiceHub } from "./services/hub.js";
+import { SERVICES, type ServiceName } from "./services/names.js";
 import { QobuzService } from "./services/qobuz/service.js";
 import type { Account, MusicService } from "./services/service.js";
 
@@ -456,6 +465,23 @@ async function main(): Promise<void> {
     return;
   }
 
+  // The web UI opens whatever is connected: accounts are signed in to from it.
+  if (command === "ui") {
+    await runUi();
+    return;
+  }
+  if (command === "serve") {
+    await runServe(parseServeArgs(args.slice(1)));
+    return;
+  }
+
+  // `accounts` only reads what is saved.
+  if (command === "accounts") {
+    showAccounts();
+    output.flush();
+    return;
+  }
+
   // Most `jobs` actions only touch the local job files.
   let jobsArgs: JobsArgs | undefined;
   if (command === "jobs") {
@@ -476,11 +502,6 @@ async function main(): Promise<void> {
       printLoginUrl = parseLoginArgs(args.slice(1)).printUrl;
       run = async () => clearSignInFlag();
       break;
-    case "serve": {
-      const serveArgs = parseServeArgs(args.slice(1));
-      run = (client, signedIn) => runServe(client, signedIn, serveArgs);
-      break;
-    }
     case "jobs": {
       const parsed = jobsArgs;
       if (parsed === undefined) {
@@ -491,9 +512,6 @@ async function main(): Promise<void> {
     }
     case "check":
       run = (_client, { qobuz }) => runCheck(qobuz);
-      break;
-    case "ui":
-      run = runUi;
       break;
     case "playlist-from-artists": {
       const plan = planPlaylistFromArtists(args.slice(1));
@@ -598,17 +616,14 @@ async function main(): Promise<void> {
     throw new Error("unreachable: not signed in");
   }
   const signedIn: SignedIn = { account, qobuz: client };
-  if (command === "ui" || command === "serve") {
-    // The server records each web commit into a journal of its own.
-    await run(service, signedIn);
-  } else {
-    // The command sees a client that records every change it makes, all of it
-    // one history entry (an undo records its own "Undid: ..." entry).
-    const recorded = recordingClient<MusicService>(service, journal);
-    await (command === "undo"
-      ? run(recorded, signedIn)
-      : journal.run({ tool: command === "jobs" ? "managed" : command }, () => run(recorded, signedIn)));
-  }
+  // The command sees a client that records every change it makes, all of it
+  // one history entry (an undo records its own "Undid: ..." entry).
+  const hub = new ServiceHub();
+  hub.connect(recordingClient<MusicService>(service, journal));
+  const recorded = hub.scoped("qobuz");
+  await (command === "undo"
+    ? run(recorded, signedIn)
+    : journal.run({ tool: command === "jobs" ? "managed" : command }, () => run(recorded, signedIn)));
   output.flush();
 }
 
@@ -676,28 +691,105 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
   }
 }
 
-/**
- * Serve the web UI locally and open it in the browser. The client (already
- * signed in) is the API's Qobuz backend; the server runs until interrupted.
- * Every change the UI commits is recorded in the history, as web entries.
- */
-async function runUi(client: MusicService, { account }: SignedIn): Promise<void> {
-  const journal = openJournal("web");
-  const recorded = recordingClient(client, journal);
-  const server = await startServer({
-    service: recorded,
-    history: { journal },
-    jobs: jobsApi(journal, recorded),
-    ownerId: account.id,
-    acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
-    session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "" },
+/** The connected services and the sign-ins to them, for the web UI and jobs. */
+interface Connections {
+  hub: ServiceHub;
+  accounts: Accounts;
+  listener: SignInListener;
+}
+
+function openConnections(journal: Journal): Connections {
+  const hub = new ServiceHub();
+  const store = fileAccountStore();
+  const accounts = new Accounts({
+    hub,
+    store,
+    connectors: connectors(store),
+    wrap: (service) => recordingClient<MusicService>(service, journal),
+    onChange: (service) => {
+      // A service that works again lets the jobs it stopped run.
+      if (hub.connected().includes(service)) {
+        const global = fileGlobalStore();
+        global.save(unflag(global.load(), [service]));
+      }
+    },
   });
+  const listener = signInListener({
+    complete: async (target) => {
+      try {
+        const { service, displayName } = await accounts.complete(target);
+        return { ok: true, message: `${labelOf(service)} is connected as ${displayName}.` };
+      } catch (error) {
+        return { ok: false, message: errorMessage(error) };
+      }
+    },
+  });
+  return { hub, accounts, listener };
+}
+
+/** How each service is signed in to. */
+function connectors(_store: AccountStore): Connector[] {
+  return [
+    qobuzConnector({
+      newClient: () => new QobuzClient({ logger }),
+      credentials: fileCredentialStore(),
+      tokens: fileTokenStore(),
+      port: DEFAULT_SIGN_IN_PORT,
+    }),
+  ];
+}
+
+/** Start the web server over the connected services. */
+async function startUi(
+  { hub, accounts, listener }: Connections,
+  journal: Journal,
+  jobs: RunDueDeps,
+  options: { port?: number } = {},
+): Promise<RunningServer> {
+  return startServer({
+    accounts: { accounts, hub, listen: () => listener.listen(), forget: (service) => forgetService(service) },
+    history: { journal },
+    jobs: jobsApi(jobs, hub),
+    acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
+    ...(options.port !== undefined && { port: options.port }),
+  });
+}
+
+/** What is connected, one line each; or how to connect something. */
+function logConnected(accounts: Accounts): void {
+  for (const account of accounts.view()) {
+    if (account.status === "connected") {
+      logger.info(`  ${account.label}: signed in as ${account.displayName}${account.plan === undefined ? "" : ` (${account.plan})`}`);
+    } else if (account.problem !== undefined) {
+      logger.warn(`${account.label}: ${account.problem}`);
+    }
+  }
+}
+
+/** Forget a service's data (src/accounts/forget.ts). */
+function forgetService(service: ServiceName): void {
+  logger.info(`Forgot ${labelOf(service)}.`);
+}
+
+/**
+ * Serve the web UI locally and open it in the browser, with the accounts that
+ * are saved; others are connected from its Accounts page. The server runs until
+ * interrupted, recording every change the UI commits as web entries.
+ */
+async function runUi(): Promise<void> {
+  const journal = openJournal("web");
+  const connections = openConnections(journal);
+  const jobs = jobRunnerDeps(journal, connectThrough(connections));
+  await connections.accounts.resume();
+  const server = await startUi(connections, journal, jobs);
   logger.info(`\nWeb UI running at ${server.url}`);
+  logConnected(connections.accounts);
   logger.info("Open it in your browser (it should open automatically).");
   logger.info("Press Ctrl-C to stop.");
   openInBrowser(server.url);
   await waitForInterrupt();
   logger.info("\nStopping...");
+  connections.listener.close();
   await server.close();
 }
 
@@ -767,28 +859,30 @@ function jobRunnerDeps(journal: Journal, connect: RunDueDeps["connect"]): RunDue
 }
 
 /**
- * Connect for unattended runs: cached bundle credentials (else a fresh
- * extraction) and the saved session -- never a browser sign-in.
+ * Connect for unattended runs, from what is saved -- never a browser sign-in.
+ * A service that was not connected, or stopped working, is tried again, so that
+ * a sign-in made elsewhere is picked up.
  */
-async function connectUnattended(journal: Journal): Promise<ConnectResult> {
-  const client = new QobuzClient({ logger });
-  try {
-    await initClientWithCache(client, fileCredentialStore());
-  } catch (error) {
-    clearCredentials();
-    return { ok: false, reason: "bundle-broken", message: errorMessage(error) };
-  }
-  try {
-    await restoreOrLogin(client, fileTokenStore(), async () => {
-      throw new QobuzError("authentication", "not signed in; run qobuz-helper login");
-    });
-  } catch (error) {
-    if (error instanceof QobuzError && error.kind === "authentication") {
-      return { ok: false, reason: "needs-sign-in", message: error.message };
+function connectThrough({ hub, accounts }: Connections): RunDueDeps["connect"] {
+  return async (services) => {
+    for (const service of services) {
+      if (!hub.connected().includes(service)) {
+        await accounts.resumeOne(service);
+      }
+      const view = accounts.view().find((account) => account.service === service);
+      if (view?.problemKind === "bundle-extraction") {
+        return { ok: false, reason: "bundle-broken", message: view.problem ?? "", service };
+      }
+      if (view?.status === "unreachable") {
+        throw new ServiceError(service, view.problemKind ?? "network", view.problem ?? `${labelOf(service)} could not be reached`);
+      }
+      if (view?.status !== "connected") {
+        const message = view?.problem ?? `${labelOf(service)} is not signed in; run qobuz-helper login${service === "qobuz" ? "" : ` ${service}`}`;
+        return { ok: false, reason: "needs-sign-in", message, service };
+      }
     }
-    throw error;
-  }
-  return { ok: true, client: recordingClient<MusicService>(new QobuzService(client), journal) };
+    return { ok: true, client: hub.scoped(services[0] ?? "qobuz") };
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -798,7 +892,7 @@ function errorMessage(error: unknown): string {
 /** Executor for `run-due`: run the jobs that are due, then exit. */
 async function runDueCommand(journal: Journal, dryRun: boolean): Promise<void> {
   const summary = await runDue(
-    jobRunnerDeps(journal, () => connectUnattended(journal)),
+    jobRunnerDeps(journal, connectThrough(openConnections(journal))),
     new Date(),
     { dryRun },
   );
@@ -967,15 +1061,14 @@ async function runJobsOnline(client: MusicService, journal: Journal, args: JobsA
 }
 
 /** The web UI's job routes, run with the UI's (recording) client. */
-function jobsApi(journal: Journal, client: RefreshClient): NonNullable<ApiDeps["jobs"]> {
-  const deps = jobRunnerDeps(journal, async () => ({ ok: true, client }));
+function jobsApi(deps: RunDueDeps, hub: ServiceHub): NonNullable<ApiDeps["jobs"]> {
   return {
     service: openJobsService(),
     runNow: (id, dryRun) => runDue(deps, new Date(), { onlyJobId: id, dryRun }),
     preview: async (input) => {
       const now = new Date();
       const job = validateJob({ ...(input as object), id: "00000000", createdAt: now.toISOString() });
-      return (await runPass(client, job, emptyJobState(), { now, dryRun: true })).preview;
+      return (await runPass(hub.scoped(homeService(job)), job, emptyJobState(), { now, dryRun: true })).preview;
     },
     accept: (id, keys) => acceptNow(deps, id, keys, new Date()),
   };
@@ -985,44 +1078,18 @@ function jobsApi(journal: Journal, client: RefreshClient): NonNullable<ApiDeps["
  * `serve`: the web UI plus a ticker that runs due jobs every minute, until
  * interrupted. Meant to stay up on an always-on machine.
  */
-async function runServe(
-  client: MusicService,
-  { account, qobuz }: SignedIn,
-  options: { open: boolean; port?: number },
-): Promise<void> {
+async function runServe(options: { open: boolean; port?: number }): Promise<void> {
   const journal = openJournal("web");
-  const recorded = recordingClient(client, journal);
-  const server = await startServer({
-    service: recorded,
-    history: { journal },
-    jobs: jobsApi(journal, recorded),
-    ownerId: account.id,
-    acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
-    session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "" },
-    ...(options.port !== undefined && { port: options.port }),
-  });
+  const connections = openConnections(journal);
+  const deps = jobRunnerDeps(journal, connectThrough(connections));
+  await connections.accounts.resume();
+  const server = await startUi(connections, journal, deps, options);
   logger.info(`\nWeb UI running at ${server.url}`);
+  logConnected(connections.accounts);
   logger.info("Running due jobs every minute. Press Ctrl-C to stop.");
   if (options.open) {
     openInBrowser(server.url);
   }
-  // After the session expired, pick up a sign-in made elsewhere (qobuz-helper
-  // login in another terminal) before running again.
-  const deps = jobRunnerDeps(journal, async () => {
-    if (fileGlobalStore().load().needsSignIn !== undefined) {
-      try {
-        await restoreOrLogin(qobuz, fileTokenStore(), async () => {
-          throw new QobuzError("authentication", "not signed in; run qobuz-helper login");
-        });
-      } catch (error) {
-        if (error instanceof QobuzError && error.kind === "authentication") {
-          return { ok: false, reason: "needs-sign-in", message: error.message };
-        }
-        throw error;
-      }
-    }
-    return { ok: true, client: recorded };
-  });
   let running = false;
   const tick = async (): Promise<void> => {
     if (running) {
@@ -1045,7 +1112,21 @@ async function runServe(
   await waitForInterrupt();
   clearInterval(timer);
   logger.info("\nStopping...");
+  connections.listener.close();
   await server.close();
+}
+
+/** `accounts`: who is signed in to what, from what is saved (nothing is asked of the services). */
+function showAccounts(): void {
+  const store = fileAccountStore();
+  const list = SERVICES.map((service) => {
+    const account = store.account(service);
+    return { service, label: labelOf(service), ...(account !== undefined && { displayName: account.displayName }) };
+  });
+  output.set("accounts", list);
+  for (const { label, displayName } of list) {
+    logger.info(`${label}: ${displayName ?? "not connected"}`);
+  }
 }
 
 async function runCheck(client: QobuzClient): Promise<void> {

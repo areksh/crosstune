@@ -131,6 +131,18 @@ describe("Accounts", () => {
     ]);
   });
 
+  it("takes any failure but a rejection as temporary, so a lost network never looks signed out", async () => {
+    const { accounts } = setup([
+      connector("qobuz", {
+        resume: async () => {
+          throw new TypeError("fetch failed");
+        },
+      }),
+    ]);
+    await accounts.resume();
+    expect(accounts.view()[0]).toMatchObject({ status: "unreachable", problem: "fetch failed" });
+  });
+
   it("does not resume a session of another account", async () => {
     const { accounts, hub, saved } = setup([connector("qobuz", { resume: async () => music("qobuz", 2) })]);
     saved.accounts.set("qobuz", { id: tagId<UserId>("qobuz", 1), displayName: "User 1", since: 0 });

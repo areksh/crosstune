@@ -64,6 +64,8 @@ export interface AccountView {
   /** Who was signed in, when nobody is now. */
   knownAs?: string;
   problem?: string;
+  /** The kind of error behind it. */
+  problemKind?: string;
   needsClientId: boolean;
   clientId?: string;
   endsAt?: number;
@@ -88,7 +90,7 @@ export class Accounts {
   readonly #options: AccountsOptions;
   readonly #connectors: Map<ServiceName, Connector>;
   readonly #signIns: SignIns;
-  readonly #problems = new Map<ServiceName, { status: "expired" | "unreachable"; message: string }>();
+  readonly #problems = new Map<ServiceName, { status: "expired" | "unreachable"; message: string; kind?: string }>();
   readonly #now: () => number;
 
   constructor(options: AccountsOptions) {
@@ -112,8 +114,12 @@ export class Accounts {
       this.#accept(music);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const temporary = error instanceof ServiceError && error.kind !== "authentication";
-      this.#problems.set(service, { status: temporary ? "unreachable" : "expired", message });
+      const rejected = error instanceof ServiceError && error.kind === "authentication";
+      this.#problems.set(service, {
+        status: rejected ? "expired" : "unreachable",
+        message,
+        ...(error instanceof ServiceError && { kind: error.kind }),
+      });
       this.#options.hub.disconnect(service);
     }
   }
@@ -194,6 +200,7 @@ export class Accounts {
       ...(account?.plan !== undefined && account.plan.length > 0 && { plan: account.plan }),
       ...(account === undefined && known !== undefined && { knownAs: known.displayName }),
       ...(account === undefined && problem !== undefined && { problem: problem.message }),
+      ...(account === undefined && problem?.kind !== undefined && { problemKind: problem.kind }),
       ...(needsClientId && clientId !== undefined && { clientId }),
       ...(endsAt !== undefined && { endsAt }),
     };
