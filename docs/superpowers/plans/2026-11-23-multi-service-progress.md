@@ -43,6 +43,13 @@ names over 250 characters. A live TIDAL<->Spotify two-way sync then worked:
 each side's edit reached the other, a second run changed nothing, and renames
 on both sides were a conflict that wrote nothing.
 
-Open: whether a Spotify playlist made "private" shows as such in the app
-(reads always say public); library and favourites writes, playlist size limits
-and unavailable or relinked tracks are not yet probed.
+Then, with leave to use all three accounts: a Spotify playlist made private
+stayed off the user's profile (reads say public regardless, so visibility is
+no longer read); library and favourites writes behave on both; Spotify's
+is_playable is read (removals on Spotify sync), with repairs gated on claimed
+playability; a live three-way sync (add on Qobuz, reorder on TIDAL, removal on
+Spotify, a repeated song) and the web UI (Accounts, Playlists across services,
+the conflict marks and side-by-side, settling, Combine's "Add these to") ran
+against the real services, driven in headless Chromium.
+
+Still not probed: playlist size limits; unavailable or relinked tracks.
