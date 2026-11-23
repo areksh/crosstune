@@ -20,21 +20,21 @@
       <a class="brand" href="#/">crosstune</a>
       <div id="tabs" class="tabs" role="group" aria-label="Show playlists from"></div>
       <span class="topbar-gap"></span>
-      <a id="nav-jobs" class="top-link" href="#/managed">Jobs</a>
+      <a id="nav-jobs" class="top-link" href="#/jobs">Jobs</a>
       <a id="nav-history" class="top-link" href="#/history">History</a>
       <a id="nav-settings" class="top-link" href="#/settings">Settings</a>
       <details id="new-menu" class="menu new-menu">
         <summary>+ New</summary>
         <div class="menu-items new-menu-items">
           <p class="menu-label">New playlist from&hellip;</p>
-          <a class="new-item" href="#/playlist"><b>Artists</b><span>Each artist's most popular tracks</span></a>
-          <a class="new-item" href="#/albums"><b>Albums</b><span>"Artist - Album" lines or a discography</span></a>
-          <a class="new-item" href="#/similar"><b>Similar artists</b><span>Grow a list through artists like them</span></a>
-          <a class="new-item" href="#/word-play"><b>Word play</b><span>A sentence, an acrostic, A to Z in song titles</span></a>
-          <a class="new-item" href="#/combine"><b>Combine playlists</b><span>Merge several into one, each song once</span></a>
-          <a class="new-item" href="#/import-export"><b>Import a file</b><span>Spotify/Exportify CSV, a crosstune backup</span></a>
+          <a class="new-item" href="#/new/artists"><b>Artists</b><span>Each artist's most popular tracks</span></a>
+          <a class="new-item" href="#/new/albums"><b>Albums</b><span>"Artist - Album" lines or a discography</span></a>
+          <a class="new-item" href="#/new/similar"><b>Similar artists</b><span>Grow a list through artists like them</span></a>
+          <a class="new-item" href="#/new/word-play"><b>Word play</b><span>A sentence, an acrostic, A to Z in song titles</span></a>
+          <a class="new-item" href="#/new/combine"><b>Combine playlists</b><span>Merge several into one, each song once</span></a>
+          <a class="new-item" href="#/new/import"><b>Import a file</b><span>Spotify/Exportify CSV, a crosstune backup</span></a>
           <p class="menu-label">Keep it fresh</p>
-          <a class="new-item" href="#/managed"><b>Managed playlist</b><span>Rebuilt on a schedule (lives under Jobs)</span></a>
+          <a class="new-item" href="#/jobs"><b>Managed playlist</b><span>Rebuilt on a schedule (lives under Jobs)</span></a>
         </div>
       </details>
     </header>
@@ -51,6 +51,14 @@
       <main class="content">
         <!-- What needs the user's attention on any page (src/web/notices.ts). -->
         <div id="notices" class="notices" role="status" hidden></div>
+        <!-- Over a tool opened on a source: where it came from (src/web/main.ts). -->
+        <nav id="context-bar" class="context-bar" aria-label="Where this tool works" hidden>
+          <span id="context-cover" class="gen-cover context-cover" aria-hidden="true"></span>
+          <div class="context-text">
+            <a id="context-back" href="#/">&larr; <span id="context-name"></span></a>
+            <h1 id="context-title"></h1>
+          </div>
+        </nav>
         <!-- Home -->
         <section id="view-home" class="view">
           <section class="paste-hero" aria-labelledby="home-title">
@@ -81,104 +89,6 @@
             <span id="home-last-text" class="last-change-text"></span>
             <a id="home-last-undo" href="#/history">Undo</a>
             <a href="#/history">History</a>
-          </div>
-          <!-- Each tool is one tool-link block in its group. -->
-          <div class="tool-groups">
-            <section class="tool-group">
-              <h2>Build</h2>
-              <a class="tool-link" href="#/playlist">
-                <span class="tool-name">Playlist from artists</span>
-                <span class="tool-desc">
-                  Each artist's most popular tracks, reviewed before you save.
-                </span>
-              </a>
-              <a class="tool-link" href="#/albums">
-                <span class="tool-name">Playlist from albums</span>
-                <span class="tool-desc">
-                  Whole albums from "Artist - Album" lines or an artist's
-                  discography, choosing which version of each to use.
-                </span>
-              </a>
-              <a class="tool-link" href="#/similar">
-                <span class="tool-name">Similar artists</span>
-                <span class="tool-desc">
-                  Grow a list of artists or a playlist through the artists like
-                  them.
-                </span>
-              </a>
-              <a class="tool-link" href="#/word-play">
-                <span class="tool-name">Word play</span>
-                <span class="tool-desc">
-                  A playlist out of song titles: a sentence told in titles, an
-                  acrostic, A to Z, or every song called "Home".
-                </span>
-              </a>
-            </section>
-            <section class="tool-group">
-              <h2>Tidy up</h2>
-              <a class="tool-link" href="#/playlists">
-                <span class="tool-name">Playlists</span>
-                <span class="tool-desc">
-                  Open a playlist to select, remove, move and reorder its songs,
-                  or remove whole artists at once.
-                </span>
-              </a>
-              <a class="tool-link" href="#/deduplicate">
-                <span class="tool-name">Deduplicator</span>
-                <span class="tool-desc">
-                  Find repeats in a playlist or your favourites, remasters
-                  included, and choose which copy to keep.
-                </span>
-              </a>
-              <a class="tool-link" href="#/combine">
-                <span class="tool-name">Combine playlists</span>
-                <span class="tool-desc">
-                  Merge playlists into one, each song once, or see what they
-                  share and what only one has.
-                </span>
-              </a>
-              <a class="tool-link" href="#/upgrade">
-                <span class="tool-name">Upgrade &amp; repair</span>
-                <span class="tool-desc">
-                  Swap tracks for a hi-res release of the same recording, and
-                  replace the ones the service no longer plays.
-                </span>
-              </a>
-            </section>
-            <section class="tool-group">
-              <h2>Explore</h2>
-              <a class="tool-link" href="#/stats">
-                <span class="tool-name">Library stats</span>
-                <span class="tool-desc">
-                  Your favourites or a playlist by quality, decade and artist,
-                  with a playlist of any decade a click away.
-                </span>
-              </a>
-              <a class="tool-link" href="#/new-releases">
-                <span class="tool-name">New releases</span>
-                <span class="tool-desc">
-                  What your favourite artists, or a playlist's, have released
-                  lately, into a playlist or your favourite albums.
-                </span>
-              </a>
-            </section>
-            <section class="tool-group">
-              <h2>Your data</h2>
-              <a class="tool-link" href="#/import-export">
-                <span class="tool-name">Import &amp; export</span>
-                <span class="tool-desc">
-                  Favourites and playlists in and out as JSON, CSV, text or M3U,
-                  and whole-account backups.
-                </span>
-              </a>
-              <a class="tool-link" href="#/history">
-                <span class="tool-name">History</span>
-                <span class="tool-desc">
-                  Every change crosstune made to your account, each one a
-                  click from undone.
-                </span>
-              </a>
-            </section>
           </div>
         </section>
 
@@ -586,7 +496,7 @@
           </header>
 
           <section class="panel">
-            <div class="segmented source-toggle" role="radiogroup" aria-label="Start from">
+            <div class="segmented source-toggle" role="radiogroup" aria-label="Start from" data-source-controls>
               <label>
                 <input type="radio" name="similar-source" value="artists" checked />
                 Start from artists
@@ -611,13 +521,13 @@
               </label>
             </div>
             <div id="similar-playlist-fields" hidden>
-              <label class="field">
+              <label class="field" data-source-controls>
                 <span>Playlist</span>
                 <select id="similar-source-playlist">
                   <option value="">Loading...</option>
                 </select>
               </label>
-              <label class="field">
+              <label class="field" data-source-controls>
                 <span>Or paste a playlist link (any playlist, not only yours)</span>
                 <input
                   id="similar-source-link"
@@ -1215,19 +1125,19 @@
 
           <section class="panel">
             <div class="destination">
-              <label class="radio">
+              <label class="radio" data-source-controls>
                 <input type="radio" name="dedup-source" value="favourites" checked />
                 Your favourite tracks
               </label>
-              <label class="radio">
+              <label class="radio" data-source-controls>
                 <input type="radio" name="dedup-source" value="playlist" />
                 A playlist
               </label>
-              <label class="radio">
+              <label class="radio" data-source-controls>
                 <input type="radio" name="dedup-source" value="all-playlists" />
                 All my playlists
               </label>
-              <div id="dedup-playlist-fields" class="target-fields" hidden>
+              <div id="dedup-playlist-fields" class="target-fields" data-source-controls hidden>
                 <label class="field">
                   <span>Playlist</span>
                   <select id="dedup-playlist-select">
@@ -1441,7 +1351,7 @@
 
           <section class="panel">
             <div class="upgrade-controls">
-              <label class="field">
+              <label class="field" data-source-controls>
                 <span>Check</span>
                 <select id="upgrade-source">
                   <option value="favourites">Your favourite tracks</option>
@@ -1509,7 +1419,7 @@
                 What your favourites or a playlist are made of.
               </p>
             </div>
-            <label class="field stats-source">
+            <label class="field stats-source" data-source-controls>
               <span>Showing</span>
               <select id="stats-source">
                 <option value="favourites">Favourites</option>
@@ -1702,12 +1612,13 @@
         <section id="view-managed" class="view" hidden>
           <header class="view-header">
             <div class="view-title">
-              <h1>Managed playlists</h1>
+              <h1>Jobs</h1>
               <p class="lede">
-                Playlists crosstune looks after on a schedule: filled from a
+                What crosstune does on a schedule: managed playlists, filled from a
                 source (new releases, other playlists, rules over your library, a
-                discovery radio) and kept tidy (duplicates, better copies,
-                tracks that stopped playing).
+                discovery radio) and kept tidy (duplicates, better copies, tracks
+                that stopped playing), and linked playlists kept the same on
+                several services.
               </p>
             </div>
           </header>
@@ -2140,9 +2051,9 @@
             </div>
           </header>
 
-          <section class="panel">
+          <section class="panel" data-part="export">
             <h2>Export</h2>
-            <div class="destination">
+            <div class="destination" data-source-controls>
               <label class="radio">
                 <input type="radio" name="ie-source" value="favourite-tracks" checked />
                 Favourite tracks
@@ -2194,7 +2105,7 @@
             <p id="ie-export-result" class="result" hidden></p>
           </section>
 
-          <section class="panel">
+          <section class="panel" data-part="import">
             <div class="panel-head">
               <h2>Import</h2>
               <ol id="import-steps" class="steps" aria-label="Import steps">

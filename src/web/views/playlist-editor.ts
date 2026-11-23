@@ -72,8 +72,10 @@ import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
 import { refreshLibrary } from "../library.js";
-import { actionButton, openTool, renderPlaylistHeader } from "../playlist-page.js";
-import { knownLinks, LINKS_CHANGED } from "./links.js";
+import { actionButton, actionLink, renderPlaylistHeader } from "../playlist-page.js";
+import { routeHash } from "../../ui/routes.js";
+import { toolLabel, type SourceTool } from "../../ui/tools.js";
+import { createLink, knownLinks, LINKS_CHANGED } from "./links.js";
 import { linkMark } from "../../sync/wording.js";
 
 interface Editor {
@@ -341,8 +343,8 @@ function renderHead(): void {
   if (mark !== undefined) {
     // A linked copy: its edits reach the other copies on the next sync.
     const link = document.createElement("a");
-    link.href = "#/managed";
-    link.textContent = mark.conflict ? "Choose in Managed playlists" : "Managed playlists";
+    link.href = "#/jobs";
+    link.textContent = mark.conflict ? "Choose in Jobs" : "Jobs";
     node.append(
       `${mark.text}.`,
       mark.conflict ? " Nothing is synced until you choose. " : " Changes saved here reach the other copies on the next sync. ",
@@ -353,8 +355,8 @@ function renderHead(): void {
   } else if (notice !== undefined) {
     node.append(notice, " ");
     const link = document.createElement("a");
-    link.href = "#/managed";
-    link.textContent = "Managed playlists";
+    link.href = "#/jobs";
+    link.textContent = "Jobs";
     node.append(link);
   }
 }
@@ -1340,43 +1342,18 @@ function togglePanel(buttonId: string, panelId: string): void {
 
 // ---- Other tools, and the playlist itself --------------------------------------
 
-/** Leave for a tool filled in for this playlist, asking first about a draft. */
-function leaveFor(prefill: Prefill): void {
-  void (async () => {
-    const mine = current();
-    if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
-      return;
-    }
-    closeEditor();
-    openTool(prefill, serviceOf(mine.playlist.id));
-  })();
-}
-
-/** The prefills of the tools this playlist opens in. */
-function toolsFor(id: PlaylistId): Record<"repeats" | "upgrade" | "stats" | "export" | "similar" | "combine", Prefill> {
-  const text = String(id);
-  return {
-    repeats: { view: "deduplicate", radios: { "dedup-source": "playlist" }, fields: { "dedup-playlist-select": text } },
-    upgrade: { view: "upgrade", fields: { "upgrade-source": `playlist:${text}` } },
-    stats: { view: "stats", fields: { "stats-source": text } },
-    export: { view: "import-export", radios: { "ie-source": "playlist" }, fields: { "ie-export-playlist-select": text } },
-    similar: { view: "similar", radios: { "similar-source": "playlist" }, fields: { "similar-source-link": playlistLink(id) } },
-    combine: { view: "combine", fields: { "combine-source-first": text } },
-  };
-}
-
 /** The action row: the tools for this playlist (the songs below are edited in place). */
 function renderActions(): void {
-  const tools = toolsFor(current().playlist.id);
+  const { id } = current().playlist;
+  // Links: leaving with a draft is asked about by guardUnsavedPlaylist, as for any address.
+  const tool = (name: SourceTool): HTMLAnchorElement => actionLink(toolLabel(name), routeHash({ kind: "playlist", id, tool: name }));
   el("pl-actions").replaceChildren(
-    actionButton("Find repeats", () => leaveFor(tools.repeats)),
-    actionButton("Upgrade", () => leaveFor(tools.upgrade)),
+    tool("repeats"),
+    tool("upgrade"),
     actionButton("Copy to...", () => void copyToService()),
-    actionButton("Link", () => {
-      location.hash = "#/managed";
-    }),
-    actionButton("Stats", () => leaveFor(tools.stats)),
-    actionButton("Export", () => leaveFor(tools.export)),
+    actionButton("Link...", () => void createLink(id)),
+    tool("stats"),
+    tool("export"),
   );
 }
 
@@ -1399,10 +1376,12 @@ function renderMore(): void {
       say(text);
       void refreshLibrary();
     });
-  const tools = toolsFor(playlist.id);
+  const goTo = (tool: SourceTool): void => {
+    location.hash = routeHash({ kind: "playlist", id: playlist.id, tool });
+  };
   const items: HTMLElement[] = [
-    menuItem("Similar artists", () => leaveFor(tools.similar)),
-    menuItem("Combine with other playlists", () => leaveFor(tools.combine)),
+    menuItem("Similar artists", () => goTo("similar")),
+    menuItem("Combine with other playlists", () => goTo("combine")),
   ];
   if (playlist.owned) {
     items.push(

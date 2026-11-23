@@ -13,6 +13,7 @@ import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
 import { Destination, type TransferTrack } from "../transfer.js";
+import { isViewShown } from "../route-state.js";
 
 interface Bucket {
   key: string;
@@ -56,7 +57,7 @@ export function initStatsView(): void {
 
 /** Load the stats the first time the view is shown (not on every page load). */
 function loadIfShown(): void {
-  if (location.hash.replace(/^#\/?/, "") === "stats" && loadedFor === undefined) {
+  if (isViewShown("stats") && loadedFor === undefined) {
     void load();
   }
 }

@@ -28,6 +28,7 @@ import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
 import { storePrefill } from "../prefill.js";
 import { readTerms } from "../tracks.js";
+import { isViewShown } from "../route-state.js";
 
 interface JobsList {
   jobs: JobView[];
@@ -118,11 +119,11 @@ export function keepUpdated(
     "managed-prefill-inputs": (options.inputs ?? []).map(inputKey).join(","),
   };
   storePrefill({ view: "managed", fields: { ...fields, "managed-prefilled": String(Date.now()) } });
-  location.hash = "#/managed";
+  location.hash = "#/jobs";
 }
 
 function isShown(): boolean {
-  return location.hash.replace(/^#\/?/, "") === "managed";
+  return isViewShown("managed");
 }
 
 function inputKey(input: PlaylistInput): string {

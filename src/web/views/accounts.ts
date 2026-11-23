@@ -15,7 +15,7 @@ import { openDialog } from "../dialog.js";
 import { el, showError } from "../dom.js";
 import { chosenService, rememberService } from "../service.js";
 import { SETUP } from "./account-setup.js";
-import { parseRoute } from "../../ui/routes.js";
+import { isViewShown } from "../route-state.js";
 
 const POLL_MS = 1500;
 
@@ -27,7 +27,7 @@ let polling = false;
 /** Wire up the accounts view. Call once on load. */
 /** Whether the page shows Settings, where the accounts are. */
 function onSettings(): boolean {
-  return parseRoute(location.hash).kind === "settings";
+  return isViewShown("accounts");
 }
 
 export function initAccountsView(): void {

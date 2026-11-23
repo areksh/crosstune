@@ -11,10 +11,14 @@
 import { classifyPaste, type PasteSummary } from "../../features/music-links.js";
 import { el } from "../dom.js";
 import { storePrefill, type Prefill } from "../prefill.js";
+import { routeHash } from "../../ui/routes.js";
 
 interface Suggestion {
   label: string;
-  prefill: Prefill;
+  /** Where the tool opens. */
+  hash: string;
+  /** What to fill in it, when the address does not say. */
+  prefill?: Prefill;
   /** The main suggestion is drawn as the primary button. */
   primary?: boolean;
 }
@@ -38,8 +42,10 @@ function render(found: PasteSummary): void {
       button.className = "secondary";
     }
     button.addEventListener("click", () => {
-      storePrefill(suggestion.prefill);
-      location.hash = `#/${suggestion.prefill.view}`;
+      if (suggestion.prefill !== undefined) {
+        storePrefill(suggestion.prefill);
+      }
+      location.hash = suggestion.hash;
     });
     tools.appendChild(button);
   }
@@ -69,11 +75,13 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
     suggestions.push(
       {
         label: "Build a playlist from these artists",
+        hash: routeHash({ kind: "new", tool: "artists" }),
         prefill: { view: "playlist", fields: { artists } },
         primary: true,
       },
       {
         label: "Find similar artists",
+        hash: routeHash({ kind: "new", tool: "similar" }),
         prefill: {
           view: "similar",
           radios: { "similar-source": "artists" },
@@ -85,6 +93,7 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
   if (found.albums.length > 0) {
     suggestions.push({
       label: "Build a playlist from these albums",
+      hash: routeHash({ kind: "new", tool: "albums" }),
       prefill: {
         view: "albums",
         radios: { "album-source": "list" },
@@ -99,6 +108,7 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
     suggestions.push(
       {
         label: "Similar artists from this playlist",
+        hash: routeHash({ kind: "new", tool: "similar" }),
         prefill: {
           view: "similar",
           radios: { "similar-source": "playlist" },
@@ -106,19 +116,10 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
         },
         primary: suggestions.length === 0,
       },
-      {
-        label: "Upgrade & repair",
-        prefill: { view: "upgrade", fields: { "upgrade-source": `playlist:${id}` } },
-      },
-      { label: "Library stats", prefill: { view: "stats", fields: { "stats-source": id } } },
-      {
-        label: "Find duplicates",
-        prefill: {
-          view: "deduplicate",
-          radios: { "dedup-source": "playlist" },
-          fields: { "dedup-playlist-select": id },
-        },
-      },
+      // Any playlist can be read; these three open on it as one of the user's.
+      { label: "Upgrade & repair", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "upgrade" }) },
+      { label: "Library stats", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "stats" }) },
+      { label: "Find duplicates", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "repeats" }) },
     );
   }
   return suggestions;

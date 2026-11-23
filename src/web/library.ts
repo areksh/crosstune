@@ -17,6 +17,9 @@ import { el } from "./dom.js";
 import { currentTab, TAB_CHANGED } from "./shell.js";
 import { knownLinks, LINKS_CHANGED } from "./views/links.js";
 
+/** Fired on `window` each time the playlists have been read. */
+export const LIBRARY_LOADED = "crosstune:library-loaded";
+
 let connected: readonly ServiceName[] = [];
 let playlists: ManagerPlaylist[] = [];
 let loaded = false;
@@ -46,6 +49,7 @@ export async function refreshLibrary(): Promise<void> {
       playlists = result.playlists;
       loaded = true;
       render();
+      window.dispatchEvent(new Event(LIBRARY_LOADED));
     }
   } catch (error) {
     if (mine === request) {

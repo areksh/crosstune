@@ -68,7 +68,7 @@ export function accountNotices(accounts: readonly AccountView[]): Notice[] {
   });
 }
 
-const MANAGED = { href: "#/managed", text: "Open Jobs" };
+const MANAGED = { href: "#/jobs", text: "Open Jobs" };
 
 /** What the linked playlists need: conflicts loudly, waiting questions less. */
 export function linkNotices(attention: LinkAttention): Notice[] {

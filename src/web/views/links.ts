@@ -29,6 +29,7 @@ import { dialogField, openDialog, textInput } from "../dialog.js";
 import { el, showError } from "../dom.js";
 import { connectedServices } from "../service.js";
 import { playlistHash } from "./playlist-actions.js";
+import { isViewShown } from "../route-state.js";
 
 export interface LinksList {
   links: LinkView[];
@@ -84,7 +85,7 @@ export function servicesKnown(): void {
 }
 
 function isShown(): boolean {
-  return location.hash.replace(/^#\/?/, "") === "managed";
+  return isViewShown("managed");
 }
 
 /** Every service's playlists, to name the copies and choose new ones. */
@@ -573,9 +574,19 @@ function renderQuestion(view: LinkView, card: HTMLElement, question: Question): 
 
 // --- linking --------------------------------------------------------------------
 
-async function createLink(): Promise<void> {
+/**
+ * Ask for the playlists to link, and link them. With `preset` (from a
+ * playlist's page), that playlist is chosen already and names the link.
+ */
+export async function createLink(preset?: PlaylistId): Promise<void> {
   const services = connectedServices();
   if (services.length < 2) {
+    await openDialog({
+      title: "Link playlists",
+      body: ["Linking keeps a playlist the same on two or more services. Connect another music service in Settings first."],
+      confirm: "Close",
+      cancel: null,
+    });
     return;
   }
   playlistsLoad = undefined; // afresh: playlists made since are offered too
@@ -612,6 +623,10 @@ async function createLink(): Promise<void> {
         name.value = playlistName(select.value as PlaylistId);
       }
     });
+    if (preset !== undefined && serviceOf(preset) === service && !linked.has(String(preset))) {
+      select.value = String(preset);
+      name.value = playlistName(preset);
+    }
     selects.set(service, select);
     fields.push(dialogField(`${label(service)} playlist`, select));
   }
@@ -646,6 +661,10 @@ async function createLink(): Promise<void> {
       "all",
     );
     await reloadSaying(`Linked ${created.link.name}. ${describeLinksSummary(created.summary)}`);
+    if (!isShown()) {
+      // Linked from a playlist's page: say so there too.
+      await openDialog({ title: `Linked ${created.link.name}`, body: [describeLinksSummary(created.summary)], confirm: "Close", cancel: null });
+    }
   } catch (error) {
     await reloadSaying((error as Error).message, true);
   } finally {

@@ -374,6 +374,70 @@ button.tab[aria-pressed="true"] {
   color: var(--muted);
 }
 
+/* A tool opened on a source: a context bar over it, its own title and source
+   picker hidden (src/web/hosting.ts). */
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 980px;
+  margin-bottom: 22px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: var(--surface-1);
+}
+
+.context-cover {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.context-text a {
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.context-text a:hover {
+  color: var(--text);
+}
+
+.context-text h1 {
+  font-size: 30px;
+}
+
+body.hosted .view:not([hidden]) > .view-header .view-title,
+body.hosted [data-source-controls],
+body.hosted[data-hosted-part="export"] [data-part="import"],
+body.hosted[data-hosted-part="import"] [data-part="export"] {
+  display: none !important;
+}
+
+body.hosted .view:not([hidden]) > .view-header {
+  justify-content: flex-end;
+}
+
+/* An action row's links look like its buttons. */
+a.action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+a.action:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
 .settings-head {
   margin: 28px 0 10px;
   font-size: 20px;
@@ -464,55 +528,6 @@ button.tab[aria-pressed="true"] {
   border-color: transparent;
   color: var(--step-on-text);
   font-weight: 650;
-}
-
-/* Home: tools grouped as lists, rows separated by hairlines. */
-
-.tool-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 36px 40px;
-}
-
-.tool-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.tool-group h2 {
-  font-size: 26px;
-  padding-bottom: 8px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--line);
-}
-
-.tool-link {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--text);
-  text-decoration: none;
-}
-
-.tool-link:hover {
-  color: var(--text);
-}
-
-.tool-name {
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.tool-link:hover .tool-name {
-  color: var(--accent-hover);
-}
-
-.tool-desc {
-  font-size: 14px;
-  color: var(--muted);
-  line-height: 1.45;
 }
 
 /* Panels and forms */
@@ -1901,9 +1916,9 @@ button.remove-row {
 
 button.small {
   min-height: 32px;
-  padding: 0 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
 }
 
 .artist-ranking {

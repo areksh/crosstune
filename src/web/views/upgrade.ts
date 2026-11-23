@@ -13,6 +13,7 @@ import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, setStep, showError } from "../dom.js";
 import { qualityPill, titleOf, trackText } from "../tracks.js";
+import { isViewShown } from "../route-state.js";
 
 type Source =
   | { type: "favourites" }
@@ -66,7 +67,7 @@ export function initUpgradeView(): void {
   el("upgrade-check").addEventListener("click", () => void onCheck());
   el("upgrade-apply").addEventListener("click", () => void onApply());
   const loadWhenShown = (): void => {
-    if (location.hash.replace(/^#\/?/, "") === "upgrade") {
+    if (isViewShown("upgrade")) {
       void loadPlaylists();
     }
   };

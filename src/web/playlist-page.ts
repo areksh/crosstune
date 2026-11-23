@@ -10,26 +10,16 @@ import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
 import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art.js";
 import { parseRoute } from "../ui/routes.js";
 import { el } from "./dom.js";
-import { storePrefill, type Prefill } from "./prefill.js";
-import { chosenService, connectedServices, rememberService } from "./service.js";
+import { routeHash } from "../ui/routes.js";
+import { toolLabel, toolsFor } from "../ui/tools.js";
 
-/**
- * Open a tool view filled in for a source on `service`. The tool views load
- * their lists for the page's service once, so when it differs the page loads
- * afresh on `service`, the fill kept in sessionStorage across the reload.
- */
-export function openTool(prefill: Prefill, service: ServiceName): void {
-  storePrefill(prefill);
-  const now = chosenService() ?? connectedServices()[0];
-  if (now !== service) {
-    rememberService(service);
-    // Not `location.hash =`: its hashchange would run this page's router,
-    // which applies (and so uses up) the fill before the reload.
-    history.pushState(null, "", `#/${prefill.view}`);
-    location.reload();
-    return;
-  }
-  location.hash = `#/${prefill.view}`;
+/** A link in an action row (to a tool on this page's source). */
+export function actionLink(text: string, href: string): HTMLAnchorElement {
+  const node = document.createElement("a");
+  node.className = "action";
+  node.href = href;
+  node.textContent = text;
+  return node;
 }
 
 /** A button in an action row. */
@@ -60,7 +50,7 @@ export function renderPlaylistHeader(playlist: { id: PlaylistId; name: string },
 export function initFavouritesView(): void {
   const show = (): void => {
     const where = parseRoute(location.hash);
-    if (where.kind === "favourites") {
+    if (where.kind === "favourites" && where.tool === undefined) {
       showFavourites(where.service);
     }
   };
@@ -68,27 +58,18 @@ export function initFavouritesView(): void {
   show();
 }
 
+/** Links to the tools a collection offers ("#/favourites/<service>/<tool>"). */
+function collectionActions(kind: "favourites" | "all", service: ServiceName): HTMLAnchorElement[] {
+  return toolsFor(kind).map((tool) => actionLink(toolLabel(tool, kind), routeHash({ kind, service, tool })));
+}
+
 function showFavourites(service: ServiceName): void {
   paintHero("fav", `Favourites ${service}`, `${SERVICE_LABELS[service]} favourites`);
-  el("fav-actions").replaceChildren(
-    actionButton("Find repeats", () =>
-      openTool({ view: "deduplicate", radios: { "dedup-source": "favourites" } }, service),
-    ),
-    actionButton("Upgrade", () => openTool({ view: "upgrade", fields: { "upgrade-source": "favourites" } }, service)),
-    actionButton("Stats", () => openTool({ view: "stats", fields: { "stats-source": "favourites" } }, service)),
-    actionButton("Export", () => openTool({ view: "import-export", radios: { "ie-source": "favourite-tracks" } }, service)),
-  );
+  el("fav-actions").replaceChildren(...collectionActions("favourites", service));
 }
 
 /** The header and action row over a service's list of playlists ("#/all/<service>"). */
 export function showAllActions(service: ServiceName): void {
   paintHero("all", `All playlists ${service}`, SERVICE_LABELS[service]);
-  el("all-actions").replaceChildren(
-    actionButton("Find repeats across them", () =>
-      openTool({ view: "deduplicate", radios: { "dedup-source": "all-playlists" } }, service),
-    ),
-    actionButton("Upgrade all", () => openTool({ view: "upgrade", fields: { "upgrade-source": "all-playlists" } }, service)),
-    actionButton("Stats", () => openTool({ view: "stats", fields: { "stats-source": "everything" } }, service)),
-    actionButton("Export all", () => openTool({ view: "import-export", radios: { "ie-source": "all-playlists" } }, service)),
-  );
+  el("all-actions").replaceChildren(...collectionActions("all", service));
 }

@@ -59,7 +59,7 @@ export function initPlaylistsView(): void {
 /** Show a playlist ("#/p/<id>") or a service's list ("#/all/<service>"), by the hash. */
 function route(): void {
   const where = parseRoute(location.hash);
-  if (where.kind !== "playlist" && where.kind !== "all") {
+  if ((where.kind !== "playlist" && where.kind !== "all") || where.tool !== undefined) {
     // Read it afresh next time: it may change meanwhile (an undo, another tool).
     // Unsaved edits have been asked about (guardUnsavedPlaylist).
     closeEditor();

@@ -16,7 +16,8 @@ import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
 import { parseRoute, redirectFor, viewOf, type Route } from "../ui/routes.js";
 import { initLibrary, markActive, refreshLibrary } from "./library.js";
-import { initShell } from "./shell.js";
+import { currentTab, initShell, TAB_CHANGED } from "./shell.js";
+import { prepareHosting, showHosting } from "./hosting.js";
 import { initFavouritesView } from "./playlist-page.js";
 import { attentionBadge, linkAttention } from "../sync/wording.js";
 import { accountNotices, linkNotices, showNotices, type Notice } from "./notices.js";
@@ -87,6 +88,9 @@ function route(): void {
     return;
   }
   const where = parseRoute(location.hash);
+  if (prepareHosting(where) === "reload") {
+    return;
+  }
   const active = viewFor(where);
   // A tool (or History's undo) may have written: read the library again on leaving it.
   if (shown !== undefined && shown !== active && !LIBRARY_VIEWS.includes(shown)) {
@@ -97,6 +101,7 @@ function route(): void {
     el(`view-${view}`).hidden = view !== active;
   }
   markActive(where);
+  showHosting(where);
   // Fill in what another view handed over, if it was for this one.
   applyPrefill(active);
   renderNotices();
@@ -135,7 +140,12 @@ let notices: Notice[] = [];
 let linksNeed: Notice[] = [];
 
 function renderNotices(): void {
-  const working = workingNotice(chosenService(), connectedServices(), ALL_VIEWS.includes(currentView()));
+  // A tool on a source works on the source's service, and a new playlist on the tab's when it is one.
+  const where = parseRoute(location.hash);
+  const decided =
+    ((where.kind === "playlist" || where.kind === "favourites" || where.kind === "all") && where.tool !== undefined) ||
+    (where.kind === "new" && currentTab() !== "all");
+  const working = workingNotice(chosenService(), connectedServices(), decided || ALL_VIEWS.includes(currentView()));
   const one: Notice[] =
     working === undefined
       ? []
@@ -200,6 +210,14 @@ initLinksView();
 initHistoryView();
 initAccountsView();
 initLastChange();
+// A new playlist is made on the tab's service: a tab change moves the tool there.
+window.addEventListener(TAB_CHANGED, () => {
+  if (parseRoute(location.hash).kind === "new") {
+    route();
+  } else {
+    renderNotices();
+  }
+});
 window.addEventListener(LINKS_CHANGED, (event) => showLinks((event as CustomEvent<LinksList>).detail));
 // Not available, or failing: no notices from links, and nothing else changes.
 void fetchLinks().then(showLinks, () => undefined);

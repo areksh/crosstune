@@ -12,6 +12,7 @@
 import { clockTime, dayLabel, timeAgo, type HistorySummary } from "../../features/history.js";
 import { api } from "../api.js";
 import { el, showError } from "../dom.js";
+import { isViewShown } from "../route-state.js";
 
 interface UndoPlanResponse {
   entry: HistorySummary;
@@ -64,8 +65,7 @@ export function initLastChange(): void {
 }
 
 function isShown(view: string): boolean {
-  const name = location.hash.replace(/^#\/?/, "");
-  return name === view || (view === "home" && name === "");
+  return isViewShown(view);
 }
 
 async function loadLastChange(): Promise<void> {
