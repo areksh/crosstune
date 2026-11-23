@@ -42,6 +42,18 @@ describe("hostingDecision", () => {
     });
   });
 
+  it("can ask for the page to be on all services (Combine under All)", () => {
+    expect(hostingDecision({ ...base, target: "all", remembered: "qobuz" })).toEqual({ kind: "switch", to: "all" });
+    expect(hostingDecision({ ...base, target: "all", remembered: "all" })).toEqual({ kind: "show", fill: true });
+  });
+
+  it("does not switch to all with fewer than two services", () => {
+    expect(hostingDecision({ connected: ["qobuz"], hash: "#/new/combine", target: "all", remembered: "qobuz" })).toEqual({
+      kind: "show",
+      fill: true,
+    });
+  });
+
   it("leaves the page's service alone when the tool names none", () => {
     expect(hostingDecision({ ...base, remembered: "all" })).toEqual({ kind: "show", fill: true });
   });

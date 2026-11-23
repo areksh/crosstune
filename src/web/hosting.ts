@@ -28,7 +28,16 @@ import { currentTab } from "./shell.js";
  */
 const hostedHere = new Map<string, string>();
 
-type Hosted = { source?: Source; service: ServiceName | undefined; back: string; name: string; title: string; part?: "export" | "import" };
+type Hosted = {
+  source?: Source;
+  service: ServiceName | "all" | undefined;
+  back: string;
+  name: string;
+  title: string;
+  part?: "export" | "import";
+  /** A page of its own tracked like a hosted tool (results cleared between sources), with no context bar. */
+  bare?: boolean;
+};
 
 /** What a route hosts, or undefined when it shows no tool. */
 function hostedBy(route: Route): Hosted | undefined {
@@ -64,14 +73,19 @@ function hostedBy(route: Route): Hosted | undefined {
     case "new": {
       const tab = currentTab();
       return {
-        // Under "All", the page's own choice stands (Combine can work on all of them).
-        service: tab === "all" ? undefined : tab,
+        // Under "All", Combine works on all of them; other tools on the page's own choice.
+        service: tab !== "all" ? tab : route.tool === "combine" ? "all" : undefined,
         back: "#/",
         name: "New playlist",
         title: toolLabel(route.tool),
         ...(route.tool === "import" && { part: "import" as const }),
       };
     }
+    case "view":
+      // Import & export's own page shares its section with Export on a source.
+      return route.view === "import-export"
+        ? { service: undefined, back: "#/", name: "", title: "", bare: true }
+        : undefined;
     default:
       return undefined;
   }
@@ -80,10 +94,23 @@ function hostedBy(route: Route): Hosted | undefined {
 /** The tools whose preview is up and not saved (by their titles). */
 function unsavedPreviews(): string[] {
   const titles = new Set<string>();
+  const shown = (node: Element): boolean => !(node as HTMLElement).hidden && node.closest("[hidden]") === null;
+  // A preview counts while it can still be saved: its save bar is up with a button to press.
+  const savable = (node: HTMLElement): boolean =>
+    node.querySelector(".result:not([hidden])") === null &&
+    [...node.querySelectorAll<HTMLElement>(".commit-bar")].some(
+      (bar) => shown(bar) && bar.querySelector("button:not(:disabled)") !== null,
+    );
+  const importBox = document.getElementById("ie-import-content") as HTMLTextAreaElement | null;
+  const importFile = document.getElementById("ie-import-file") as HTMLInputElement | null;
   const pending = [
-    ...document.querySelectorAll<HTMLElement>(".view .review:not([hidden])"),
-    ...document.querySelectorAll<HTMLElement>("#ie-import-preview:not([hidden]), #pl-artists-bar:not([hidden])"),
-  ].filter((node) => node.querySelector(".result:not([hidden])") === null);
+    ...[...document.querySelectorAll<HTMLElement>(".view .review, #ie-import-preview")].filter((node) => shown(node) && savable(node)),
+    ...[...document.querySelectorAll<HTMLElement>("#pl-artists-bar, #managed-form-panel")].filter(shown),
+    // An import typed or chosen but not yet previewed.
+    ...((importBox?.value.trim() ?? "") !== "" || (importFile?.files?.length ?? 0) > 0
+      ? [document.getElementById("ie-import-content")!]
+      : []),
+  ];
   for (const node of pending) {
     const view = node.closest<HTMLElement>(".view");
     titles.add(view?.querySelector("h1")?.textContent?.trim() || "a tool");
@@ -99,6 +126,7 @@ function unsavedPreviews(): string[] {
 export async function reloadHere(before: () => boolean | void, stay: () => void = () => {}): Promise<void> {
   const unsaved = unsavedPreviews();
   if (unsaved.length > 0) {
+    const asked = location.hash;
     const leave = await openDialog({
       title: "Leave without saving?",
       body: [
@@ -109,7 +137,10 @@ export async function reloadHere(before: () => boolean | void, stay: () => void 
       danger: true,
     });
     if (!leave) {
-      stay();
+      // Closed by moving on (browser Back closes dialogs): that move stands.
+      if (location.hash === asked) {
+        stay();
+      }
       return;
     }
   }
@@ -153,7 +184,7 @@ export function prepareHosting(route: Route, stay: () => void = () => history.ba
         rememberService(decision.to);
         if (chosenService() !== decision.to) {
           // This browser keeps no settings: switching could never stick.
-          problem = `This browser does not let crosstune remember a music service, so it cannot switch to ${SERVICE_LABELS[decision.to]} here.`;
+          problem = `This browser does not let crosstune remember a music service, so it cannot switch to ${decision.to === "all" ? "all services" : SERVICE_LABELS[decision.to]} here.`;
           showHosting(route);
           return false;
         }
@@ -187,7 +218,8 @@ function paintContext(name: string): void {
 
 /** Show the context bar and hide the tool's own title and source picker, for a hosted route. */
 export function showHosting(route: Route): void {
-  const hosted = hostedBy(route);
+  const found = hostedBy(route);
+  const hosted = found?.bare === true ? undefined : found;
   const body = document.body;
   body.classList.toggle("hosted", hosted !== undefined);
   el("context-bar").hidden = hosted === undefined;

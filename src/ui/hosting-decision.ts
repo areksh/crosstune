@@ -10,13 +10,13 @@ import type { ServiceName } from "../services/names.js";
 export type HostingDecision =
   /** `fill`: put the route's source in the tool (not again on coming back to it). */
   | { kind: "show"; fill: boolean }
-  | { kind: "switch"; to: ServiceName }
+  | { kind: "switch"; to: ServiceName | "all" }
   | { kind: "fresh" }
   | { kind: "not-connected"; service: ServiceName };
 
 export function hostingDecision(input: {
-  /** The service the tool must work on; undefined when the page's own stands. */
-  target?: ServiceName;
+  /** The service the tool must work on ("all": every one); undefined when the page's own stands. */
+  target?: ServiceName | "all";
   /** The page's remembered service (or "all"), as stored. */
   remembered?: string;
   connected: readonly ServiceName[];
@@ -25,7 +25,12 @@ export function hostingDecision(input: {
   hash: string;
 }): HostingDecision {
   const { target, remembered, connected, lastHere, hash } = input;
-  if (target !== undefined) {
+  if (target === "all") {
+    // Only worth it with two services or more; with one, that one is all of them.
+    if (connected.length > 1 && remembered !== "all") {
+      return { kind: "switch", to: "all" };
+    }
+  } else if (target !== undefined) {
     if (!connected.includes(target)) {
       return { kind: "not-connected", service: target };
     }
