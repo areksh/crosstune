@@ -7,6 +7,7 @@
  */
 
 import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { chosenService } from "./service.js";
 
 export interface Artist {
   id: ArtistId;
@@ -86,13 +87,19 @@ const nonce =
   document.querySelector('meta[name="qobuz-nonce"]')?.getAttribute("content") ??
   "";
 
+/** What every request carries: the page's nonce, and the service it is on. */
+function baseHeaders(): Record<string, string> {
+  const service = chosenService();
+  return { "X-Qobuz-Nonce": nonce, ...(service !== undefined && { "X-Music-Service": service }) };
+}
+
 /** Call a local API route, returning the parsed JSON or throwing on error. */
 export async function api<T>(
   method: string,
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const headers: Record<string, string> = { "X-Qobuz-Nonce": nonce };
+  const headers = baseHeaders();
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -125,7 +132,7 @@ export async function apiDownload(
 ): Promise<{ filename: string; blob: Blob }> {
   const response = await fetch(path, {
     method,
-    headers: { "X-Qobuz-Nonce": nonce, "Content-Type": "application/json" },
+    headers: { ...baseHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!response.ok) {

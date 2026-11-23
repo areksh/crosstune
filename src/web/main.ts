@@ -7,10 +7,15 @@
  * it drives lives in the tested server modules.
  */
 
+import type { AccountView } from "../accounts/accounts.js";
+import { isServiceName } from "../services/names.js";
 import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
+import { accountNotices, showNotices } from "./notices.js";
+import { chosenService, rememberService } from "./service.js";
+import { initAccountsView } from "./views/accounts.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
 import { initDeduplicateView } from "./views/deduplicate.js";
@@ -42,6 +47,7 @@ const VIEWS = [
   "managed",
   "import-export",
   "history",
+  "accounts",
 ] as const;
 type View = (typeof VIEWS)[number];
 
@@ -67,18 +73,45 @@ function route(): void {
   applyPrefill(active);
 }
 
-/** Show who is signed in, or that the session could not be read. */
-async function loadSession(): Promise<void> {
+/** Show the accounts: whose session this is, the service picker, and what needs attention. */
+async function loadAccounts(): Promise<void> {
   const target = el("session");
+  let accounts: AccountView[];
   try {
-    const session = await api<{ displayName: string; subscriptionLabel: string }>(
-      "GET",
-      "/api/session",
-    );
-    target.textContent = `${session.displayName} (${session.subscriptionLabel})`;
+    ({ accounts } = await api<{ accounts: AccountView[] }>("GET", "/api/accounts"));
   } catch {
     target.textContent = "Session unavailable";
+    return;
   }
+  const connected = accounts.filter((account) => account.status === "connected");
+  const chosen = connected.find((account) => account.service === chosenService()) ?? connected[0];
+  if (chosen?.service !== chosenService()) {
+    // The remembered service is not connected: say so by falling back visibly.
+    rememberService(chosen?.service);
+  }
+  showNotices(accountNotices(accounts));
+  el("session-label").hidden = chosen === undefined;
+  target.textContent =
+    chosen === undefined
+      ? "Not connected"
+      : `${chosen.displayName ?? ""}${chosen.plan === undefined ? "" : ` (${chosen.plan})`}`;
+  fillServicePicker(connected, chosen);
+  if (connected.length === 0 && (location.hash === "" || location.hash === "#/home")) {
+    location.hash = "#/accounts";
+  }
+}
+
+function fillServicePicker(connected: readonly AccountView[], chosen: AccountView | undefined): void {
+  el("service-picker").hidden = connected.length < 2;
+  const select = el<HTMLSelectElement>("service-select");
+  select.textContent = "";
+  for (const account of connected) {
+    select.appendChild(new Option(account.label, account.service, false, account.service === chosen?.service));
+  }
+  select.addEventListener("change", () => {
+    rememberService(isServiceName(select.value) ? select.value : undefined);
+    location.reload();
+  });
 }
 
 // First, so that it can keep the user on an unsaved playlist before any view reacts.
@@ -98,7 +131,8 @@ initImportExportView();
 initNewReleasesView();
 initManagedView();
 initHistoryView();
+initAccountsView();
 initLastChange();
 window.addEventListener("hashchange", route);
 route();
-void loadSession();
+void loadAccounts();

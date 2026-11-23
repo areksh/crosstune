@@ -56,6 +56,7 @@ export function oauthConnector(options: OAuthConnectorOptions): Connector {
   return {
     service,
     needsClientId: true,
+    redirectUri: options.redirectUri,
     startUrl: async (request) => authorizeUrl(config(), request),
     finish: async ({ code, verifier }) => {
       // Held apart from the saved tokens until the account is accepted.

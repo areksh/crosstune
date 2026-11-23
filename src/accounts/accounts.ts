@@ -34,6 +34,8 @@ export interface AccountStore {
 export interface Connector {
   readonly service: ServiceName;
   readonly needsClientId: boolean;
+  /** The address to register with the service, where the user must. */
+  readonly redirectUri?: string;
   /** The service's page to open. */
   startUrl(request: { state: string; challenge: string }): Promise<string>;
   /** Trade the code; the sign-in is kept only when `keep` is called. */
@@ -68,6 +70,7 @@ export interface AccountView {
   problemKind?: string;
   needsClientId: boolean;
   clientId?: string;
+  redirectUri?: string;
   endsAt?: number;
   endsSoon: boolean;
 }
@@ -202,6 +205,7 @@ export class Accounts {
       ...(account === undefined && problem !== undefined && { problem: problem.message }),
       ...(account === undefined && problem?.kind !== undefined && { problemKind: problem.kind }),
       ...(needsClientId && clientId !== undefined && { clientId }),
+      ...(connector.redirectUri !== undefined && { redirectUri: connector.redirectUri }),
       ...(endsAt !== undefined && { endsAt }),
     };
   }

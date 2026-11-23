@@ -47,23 +47,30 @@
             <span class="nav-label">Your data</span>
             <a class="nav-link" data-view="import-export" href="#/import-export">Import &amp; export</a>
             <a class="nav-link" data-view="history" href="#/history">History</a>
+            <a class="nav-link" data-view="accounts" href="#/accounts">Accounts</a>
           </div>
         </nav>
         <div class="sidebar-footer">
-          <span class="session-label">Signed in as</span>
-          <span id="session" class="session">Connecting...</span>
+          <label id="service-picker" class="service-picker" hidden>
+            <span class="session-label">Music service</span>
+            <select id="service-select"></select>
+          </label>
+          <span id="session-label" class="session-label">Signed in as</span>
+          <a id="session" class="session" href="#/accounts">Connecting...</a>
           <label
             class="checkbox artwork-toggle"
-            title="Covers load straight from Qobuz's image server; no sign-in details are sent."
+            title="Covers load straight from the music service's image server; no sign-in details are sent."
           >
             <input id="show-artwork" type="checkbox" aria-describedby="artwork-hint" />
             Show artwork
           </label>
-          <span id="artwork-hint" class="artwork-hint">Covers load from Qobuz's image server.</span>
+          <span id="artwork-hint" class="artwork-hint">Covers load from the service's image server.</span>
         </div>
       </aside>
 
       <main class="content">
+        <!-- What needs the user's attention on any page (src/web/notices.ts). -->
+        <div id="notices" class="notices" role="status" hidden></div>
         <!-- Home -->
         <section id="view-home" class="view">
           <section class="paste-hero" aria-labelledby="home-title">
@@ -2241,6 +2248,20 @@
         </section>
 
         <!-- History -->
+        <section id="view-accounts" class="view" hidden>
+          <header class="view-header">
+            <div class="view-title">
+              <h1>Accounts</h1>
+              <p class="lede">
+                The music services qobuz-helper works with. You sign in on each
+                service's own page; the sign-in is kept on this computer only.
+              </p>
+            </div>
+          </header>
+          <p id="accounts-error" class="error" hidden></p>
+          <div id="accounts-list" class="accounts-list"></div>
+        </section>
+
         <section id="view-history" class="view" hidden>
           <header class="view-header">
             <div class="view-title">

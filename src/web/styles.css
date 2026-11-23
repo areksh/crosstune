@@ -3086,3 +3086,121 @@ button.menu-item:hover:not(:disabled) {
     max-width: calc(100vw - 32px);
   }
 }
+
+/* Notices above every view */
+
+.notices {
+  max-width: 980px;
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notice {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--notice-line);
+  border-radius: 8px;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+}
+
+.notice.urgent {
+  border-color: var(--error);
+  color: var(--text);
+}
+
+/* Accounts */
+
+.service-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.service-picker select {
+  width: 100%;
+}
+
+a.session {
+  text-decoration: none;
+}
+
+a.session:hover {
+  color: var(--accent-hover);
+}
+
+.accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.account > * + * {
+  margin-top: 14px;
+}
+
+.account p {
+  margin-bottom: 0;
+}
+
+.account-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-status {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-status.is-connected {
+  color: var(--ok);
+}
+
+.account-status.is-expired,
+.account-problem {
+  color: var(--error);
+}
+
+.account-soon {
+  color: var(--notice-text);
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.account-setup summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.account-setup ol {
+  margin: 12px 0 16px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-setup code {
+  overflow-wrap: anywhere;
+}
+
+.account-waiting {
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--inset);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
