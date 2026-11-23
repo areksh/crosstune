@@ -144,9 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   All playlists) under a bar naming it, with the tool's own source picker out
   of the way; *Link...* links the playlist from its page. **Favourites** lists
   its songs. **Tick playlists** in the sidebar to combine them (across services
-  too), remove artists from them, or delete them together. Home keeps the paste
-  box and drops its list of tools, which are under *+ New* and on each
-  playlist. When the page has to load afresh (a tool on another service, or on
+  too), remove artists from them, or delete them together (an open page of one
+  of them goes to its service's list). Home drops its list of tools, which are
+  under *+ New* and on each playlist; its paste box became the ask box. When the page has to load afresh (a tool on another service, or on
   another playlist than it last showed), it asks first if a tool has a preview
   you have not saved. It no longer asks after a scan that found nothing to
   save, and does ask about a half-filled managed playlist or an import not yet

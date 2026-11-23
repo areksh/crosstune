@@ -106,7 +106,8 @@ function close(): void {
 function pick(suggestion: AskSuggestion): void {
   const box = el<HTMLTextAreaElement>("ask");
   if (suggestion.fill !== undefined) {
-    storePrefill(suggestion.fill);
+    // For that address only: if the user stays (a draft, a preview), it is dropped.
+    storePrefill({ ...suggestion.fill, hash: suggestion.hash });
   }
   box.value = "";
   grow(box);

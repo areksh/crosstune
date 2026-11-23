@@ -95,7 +95,9 @@ function hostedBy(route: Route): Hosted | undefined {
 /** The tools whose preview is up and not saved (by their titles). */
 function unsavedPreviews(): string[] {
   const titles = new Set<string>();
-  const shown = (node: Element): boolean => !(node as HTMLElement).hidden && node.closest("[hidden]") === null;
+  // Shown within its tool: a tool's section hidden by the router keeps its preview until a reload.
+  const shown = (node: Element): boolean =>
+    !(node as HTMLElement).hidden && (node.parentElement?.closest("[hidden]:not(.view)") ?? null) === null;
   // A preview counts while it can still be saved: its save bar is up with a button to press.
   const savable = (node: HTMLElement): boolean =>
     node.querySelector(".result:not([hidden])") === null &&
@@ -105,9 +107,9 @@ function unsavedPreviews(): string[] {
   const importBox = document.getElementById("ie-import-content") as HTMLTextAreaElement | null;
   const importFile = document.getElementById("ie-import-file") as HTMLInputElement | null;
   const pending = [
-    ...[...document.querySelectorAll<HTMLElement>(".view .review, #ie-import-preview")].filter((node) => shown(node) && savable(node)),
-    ...[...document.querySelectorAll<HTMLElement>("#pl-artists-bar, #managed-form-panel")].filter(shown),
-    // An import typed or chosen but not yet previewed.
+    ...[...document.querySelectorAll<HTMLElement>(".view .review")].filter((node) => shown(node) && savable(node)),
+    ...[...document.querySelectorAll<HTMLElement>("#ie-import-preview, #pl-artists-bar, #managed-form-panel")].filter(shown),
+    // An import typed or chosen but not yet imported (the box is cleared once it is).
     ...((importBox?.value.trim() ?? "") !== "" || (importFile?.files?.length ?? 0) > 0
       ? [document.getElementById("ie-import-content")!]
       : []),
@@ -258,7 +260,7 @@ export function showHosting(route: Route): void {
   ) {
     const fill = sourceToolFill(route.tool, hosted.source);
     if (fill !== undefined && section !== null) {
-      storePrefill(fill);
+      storePrefill({ ...fill, hash: location.hash });
       applyPrefill(fill.view);
       void confirmFill(fill, section, hosted.name);
     }

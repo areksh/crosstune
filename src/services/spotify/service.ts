@@ -96,7 +96,7 @@ const CAPABILITIES: Capabilities = {
 };
 
 /** What a playlist is, without its songs. */
-const PLAYLIST_FIELDS = "id,name,description,public,collaborative,owner,external_urls,items(total)";
+const PLAYLIST_FIELDS = "id,name,description,public,collaborative,owner,external_urls,images,items(total)";
 
 /** @throws {SpotifyError} kind `unsupported`, always: for what is declared "no". */
 function unsupported(capability: Capability): never {

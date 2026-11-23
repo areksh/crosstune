@@ -14,9 +14,13 @@ the tint should follow it.
 A page can read an image's pixels (a canvas) only if the image allows it:
 served from the page's own origin, or with CORS. The spec assumed neither held
 and proposed routing covers through the local server, the alternative
-ADR-0004 had rejected. Probed on 2026-11-23, all three image servers answer an
+ADR-0004 had rejected. Probed on 2026-11-23, the image servers seen answer an
 image request carrying an `Origin` with `Access-Control-Allow-Origin: *`:
-`static.qobuz.com`, `resources.tidal.com` and `i.scdn.co`.
+`static.qobuz.com` (Qobuz), `resources.tidal.com` (TIDAL), `i.scdn.co` and
+`mosaic.scdn.co` (Spotify's album covers and playlist mosaics). Spotify also
+serves some playlist covers from `image-cdn-*.spotifycdn.com`, not all of which
+could be confirmed; a cover from a server that does not answer CORS simply
+keeps the name's colours (below).
 
 ## Decision
 

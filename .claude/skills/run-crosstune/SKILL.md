@@ -41,18 +41,18 @@ timeout 60 bash -c 'until curl -sf http://127.0.0.1:4567/ >/dev/null; do sleep 1
 cat /tmp/crosstune-serve.log      # lists who is signed in to each service
 ```
 
-Drive the page: pipe a JSON array of steps to the driver. This one pastes a Spotify link on Home
-and opens the tool it suggests (writes nothing):
+Drive the page: pipe a JSON array of steps to the driver. This one pastes a Spotify link and an
+artist into the ask box in the top bar and opens the tool it suggests (writes nothing):
 
 ```bash
 node .claude/skills/run-crosstune/driver.mjs <<'EOF'
 [
   {"service": "all"},
-  {"nav": "#/home"},
+  {"nav": "#/"},
   {"waitFor": "!document.getElementById('view-home').hidden"},
-  {"eval": "(() => { const box = document.getElementById('home-paste'); box.value = 'https://open.spotify.com/artist/6liAMWkVf5LH7YR9yfFy1Y\\nMassive Attack'; box.dispatchEvent(new Event('input')); return true; })()"},
-  {"click": "Build a playlist from these artists"},
-  {"waitFor": "location.hash !== '#/home' && [...document.querySelectorAll('textarea')].some(t => t.value.includes('open.spotify.com'))"},
+  {"eval": "(() => { const box = document.getElementById('ask'); box.focus(); box.value = 'https://open.spotify.com/artist/6liAMWkVf5LH7YR9yfFy1Y\\nMassive Attack'; box.dispatchEvent(new Event('input')); return true; })()"},
+  {"eval": "document.getElementById('ask').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true})); true"},
+  {"waitFor": "location.hash === '#/new/artists' && document.getElementById('artists').value.includes('open.spotify.com')"},
   {"shot": "prefilled"}
 ]
 EOF

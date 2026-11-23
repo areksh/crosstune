@@ -54,6 +54,8 @@ interface FakePlaylist {
   collaborative: boolean;
   owner: string;
   collaborators: string[];
+  /** Its cover; Spotify answers null for an empty playlist. */
+  cover?: string;
   /** Every snapshot by id, oldest first; the last is the current one. */
   snapshots: Map<string, Entry[]>;
   /** The snapshot a read names: the one of its last change of details. */
@@ -147,9 +149,10 @@ export class FakeSpotify {
   seedPlaylist(
     id: string,
     uris: readonly (string | undefined)[],
-    options: { owner?: string; collaborators?: string[]; name?: string } = {},
+    options: { owner?: string; collaborators?: string[]; name?: string; cover?: string } = {},
   ): string {
     this.playlists.set(id, {
+      ...(options.cover !== undefined && { cover: options.cover }),
       name: options.name ?? id,
       description: "",
       isPublic: false,
@@ -356,6 +359,7 @@ export class FakeSpotify {
       owner: { id: playlist.owner },
       snapshot_id: playlist.shown ?? [...playlist.snapshots.keys()][0],
       external_urls: { spotify: `https://open.spotify.com/playlist/${id}` },
+      images: playlist.cover === undefined ? null : [{ url: playlist.cover, width: 640, height: 640 }],
       ...(mine && {
         items: {
           total: entries.length,

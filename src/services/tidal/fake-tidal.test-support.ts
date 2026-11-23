@@ -31,6 +31,8 @@ interface FakePlaylist {
   accessType: string;
   owner: string;
   items: Array<Ref & { meta: { itemId: string; addedAt: string } }>;
+  /** Its cover art: an "artworks" resource in the catalogue. */
+  cover?: string;
 }
 
 export interface FakeRequest {
@@ -144,13 +146,24 @@ export class FakeTidal {
     );
   }
 
-  seedPlaylist(name: string, items: Ref[], options: { id?: string; owner?: string } = {}): string {
+  seedPlaylist(name: string, items: Ref[], options: { id?: string; owner?: string; cover?: string } = {}): string {
     const id = options.id ?? `pl-${this.#next++}`;
+    if (options.cover !== undefined) {
+      // As live (2026-11-23): an image artwork with its files by size.
+      this.add("artworks", `art-${id}`, {
+        mediaType: "IMAGE",
+        files: [160, 320, 640].map((size) => ({
+          href: `${options.cover}/${size}x${size}.jpg`,
+          meta: { width: size, height: size },
+        })),
+      });
+    }
     this.playlists.set(id, {
       name,
       accessType: "UNLISTED",
       owner: options.owner ?? this.user.id,
       items: items.map((item) => this.#entry(item)),
+      ...(options.cover !== undefined && { cover: `art-${id}` }),
     });
     return id;
   }
@@ -347,7 +360,7 @@ export class FakeTidal {
     if (playlist === undefined) {
       throw new Refused(404);
     }
-    const { items, owner, ...attributes } = playlist;
+    const { items, owner, cover, ...attributes } = playlist;
     return {
       type: "playlists",
       id,
@@ -359,7 +372,11 @@ export class FakeTidal {
         numberOfTrackItems: items.filter((item) => item.type === "tracks").length,
         externalLinks: [{ href: `https://tidal.com/playlist/${id}`, meta: { type: "TIDAL_SHARING" } }],
       },
-      related: { items, owners: [{ type: "users", id: owner }] },
+      related: {
+        items,
+        owners: [{ type: "users", id: owner }],
+        coverArt: cover === undefined ? [] : [{ type: "artworks", id: cover }],
+      },
     };
   }
 

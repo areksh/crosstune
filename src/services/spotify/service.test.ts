@@ -247,6 +247,14 @@ describe("SpotifyService playlists", () => {
     expect(await service.getPlaylistTracks(s("shared"))).toHaveLength(1);
   });
 
+  it("gives a playlist its cover, listed and read one by one", async () => {
+    const { fake, service } = world();
+    fake.seedPlaylist("covered", [], { cover: "https://mosaic.scdn.co/640/abc" });
+    const listed = await service.getUserPlaylists();
+    expect(listed.find((p) => p.id === s("covered"))?.image).toBe("https://mosaic.scdn.co/640/abc");
+    expect((await service.getPlaylist(s("covered"))).image).toBe("https://mosaic.scdn.co/640/abc");
+  });
+
   it("creates private playlists unless told otherwise", async () => {
     const { service, fake } = world();
     const mine = await service.createPlaylist("Mix");

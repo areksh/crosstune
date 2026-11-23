@@ -449,8 +449,8 @@ export class TidalService implements MusicService {
 
   async getPlaylist(playlistId: PlaylistId): Promise<Playlist> {
     const path = route`/playlists/${native(playlistId)}`;
-    const document = await this.#client.get(path, { ...(await this.#country()), include: ["owners"] });
-    return parsePlaylist(resourceOf(document));
+    const document = await this.#client.get(path, { ...(await this.#country()), include: ["owners", "coverArt"] });
+    return parsePlaylist(resourceOf(document), indexIncluded(document));
   }
 
   async getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]> {

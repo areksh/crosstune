@@ -10,6 +10,8 @@
  * failures (private windows, blocked storage) are ignored.
  */
 
+import { prefillFate } from "../ui/prefill-rule.js";
+
 export interface Prefill {
   /** The view to fill, e.g. "playlist". */
   view: string;
@@ -17,6 +19,8 @@ export interface Prefill {
   fields?: Record<string, string>;
   /** Radio group names and the value to tick, applied before the fields. */
   radios?: Record<string, string>;
+  /** The address it was made for: applied only there, dropped elsewhere (src/ui/prefill-rule.ts). */
+  hash?: string;
 }
 
 const STORAGE_KEY = "crosstune:prefill";
@@ -38,7 +42,11 @@ export function storePrefill(prefill: Prefill): void {
 /** Apply (and forget) the stored fill if it is for this view. */
 export function applyPrefill(view: string): void {
   const prefill = pending ?? readStored();
-  if (prefill === undefined || prefill.view !== view) {
+  if (prefill === undefined) {
+    return;
+  }
+  const fate = prefillFate(prefill, view, location.hash);
+  if (fate === "keep") {
     return;
   }
   pending = undefined;
@@ -46,6 +54,9 @@ export function applyPrefill(view: string): void {
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     // Nothing stored.
+  }
+  if (fate === "drop") {
+    return;
   }
   for (const [name, value] of Object.entries(prefill.radios ?? {})) {
     const radio = document.querySelector<HTMLInputElement>(

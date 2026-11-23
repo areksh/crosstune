@@ -358,6 +358,9 @@ async function onCommit(): Promise<void> {
     el("ie-import-preview").hidden = true;
     setStep("import-steps", 3);
     currentPlan = undefined;
+    // Imported: nothing is left unsaved (the page asks about a typed import before reloading).
+    el<HTMLTextAreaElement>("ie-import-content").value = "";
+    el<HTMLInputElement>("ie-import-file").value = "";
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {

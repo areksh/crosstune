@@ -70,7 +70,7 @@ import { el, showError } from "../dom.js";
 import { enableDrag } from "../drag-list.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, songCount } from "./playlist-actions.js";
-import { refreshLibrary } from "../library.js";
+import { knownPlaylist, refreshLibrary } from "../library.js";
 import { actionButton, actionLink, renderPlaylistHeader } from "../playlist-page.js";
 import { routeHash } from "../../ui/routes.js";
 import { toolLabel, type SourceTool } from "../../ui/tools.js";
@@ -332,7 +332,9 @@ function renderHead(): void {
           .filter((service) => link.link.copies[service] !== playlist.id)
           .map((service) => SERVICE_LABELS[service])
           .join(", ");
-  renderPlaylistHeader(playlist, others);
+  // A service's one-playlist read may lack the cover its list had.
+  const image = playlist.image ?? knownPlaylist(playlist.id)?.image;
+  renderPlaylistHeader({ ...playlist, ...(image !== undefined && { image }) }, others);
   const notice = managedNotice(playlist);
   const mark = linkMark(playlist.id, knownLinks()?.links ?? []);
   const node = el("pl-notice");

@@ -143,6 +143,17 @@ describe("TidalService playlists", () => {
     expect(read[0]).toMatchObject({ trackCount: 1, isPublic: false });
   });
 
+  it("gives playlists their cover art, listed and read one by one", async () => {
+    const { fake, service } = setup();
+    const id = fake.seedPlaylist("Covered", tracks(1), { cover: "https://resources.tidal.com/images/e6" });
+    fake.seedPlaylist("Bare", tracks(1));
+    const listed = await service.getUserPlaylists();
+    const covered = listed.find((p) => p.id === t(id));
+    expect(covered?.image).toMatch(/^https:\/\/resources\.tidal\.com\/images\/e6\/\d+x\d+\.jpg$/);
+    expect(listed.find((p) => p.name === "Bare")).not.toHaveProperty("image");
+    expect((await service.getPlaylist(t(id))).image).toBe(covered?.image);
+  });
+
   it("says whose another's playlist is", async () => {
     const { fake, service } = setup();
     const id = fake.seedPlaylist("Theirs", tracks(1), { owner: "99" });
