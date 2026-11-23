@@ -2,7 +2,9 @@
  * What a service cannot say, asked of another (spec section 7): Spotify gives
  * no artist top tracks and no similar artists, so they come from Qobuz or TIDAL
  * and are found again on Spotify. Only exact matches by the same artist are
- * given, as managed playlists write them without review (ADR-0012).
+ * given, as managed playlists write them without review (ADR-0012); an artist
+ * is found on the other service, and similar ones back here, by exact name,
+ * and not at all when several share it.
  *
  * Likewise an artist or album id of another service -- a pasted Spotify link
  * in a tool running on Qobuz -- is read there and found again here: an artist
@@ -49,11 +51,10 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
       `${labelOf(service.name)} does not give ${what}. Connect Qobuz or TIDAL, and they are taken from there.`,
     );
 
-  /** The same artist on a donor: by exact name. */
+  /** The same artist on a donor: by exact name, and none when several there have it. */
   const onDonor = async (donor: MusicService, artistId: ArtistId): Promise<Artist | undefined> => {
     const { name } = await service.getArtist(artistId);
-    const wanted = normaliseArtistName(name);
-    return (await donor.searchArtists(name, 10)).find((artist) => normaliseArtistName(artist.name) === wanted);
+    return onlyNamed(await donor.searchArtists(name, 10), name);
   };
 
   const overrides: Partial<MusicService> = {
@@ -141,10 +142,7 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
         const theirs = await donor.getSimilarArtists(there.id, limit);
         const found: Artist[] = [];
         for (const similar of theirs) {
-          const wanted = normaliseArtistName(similar.name);
-          const here = (await service.searchArtists(similar.name, 10)).find(
-            (artist) => normaliseArtistName(artist.name) === wanted,
-          );
+          const here = onlyNamed(await service.searchArtists(similar.name, 10), similar.name);
           if (here !== undefined) {
             found.push(here);
           }
@@ -180,7 +178,16 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
     },
   });
 }
-
+/**
+ * The one artist of `found` called exactly `name`; none when several are, as
+ * {@link fillGaps}' `getArtist` has it: a namesake is a guess, and what is
+ * filled in here is written unseen (managed playlists).
+ */
+function onlyNamed(found: readonly Artist[], name: string): Artist | undefined {
+  const wanted = normaliseArtistName(name);
+  const named = found.filter((artist) => normaliseArtistName(artist.name) === wanted);
+  return named.length === 1 ? named[0] : undefined;
+}
 
 /** A UPC and the EAN-13 it becomes compare equal; undefined when there is none. */
 function barcodeOf(album: Album): string | undefined {
