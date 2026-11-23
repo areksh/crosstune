@@ -7,7 +7,7 @@
  */
 
 import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
-import { chosenService } from "./service.js";
+import { chosenService, type Choice } from "./service.js";
 
 export interface Artist {
   id: ArtistId;
@@ -88,8 +88,8 @@ const nonce =
   "";
 
 /** What every request carries: the page's nonce, and the service it is on. */
-function baseHeaders(): Record<string, string> {
-  const service = chosenService();
+function baseHeaders(on: Choice | undefined = chosenService()): Record<string, string> {
+  const service = on;
   return { "X-Qobuz-Nonce": nonce, ...(service !== undefined && { "X-Music-Service": service }) };
 }
 
@@ -98,8 +98,10 @@ export async function api<T>(
   method: string,
   path: string,
   body?: unknown,
+  /** The service to work on, when it is not the one the page is on. */
+  on?: Choice,
 ): Promise<T> {
-  const headers = baseHeaders();
+  const headers = baseHeaders(on);
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }

@@ -1,5 +1,6 @@
 /** What the playlists list and the editor share: wording, and dialogs about a playlist. */
 
+import { labelOf } from "../../services/errors.js";
 import { serviceOf, shortId, type PlaylistId } from "../../services/ids.js";
 import type { ManagerPlaylist } from "../../features/playlist-manager.js";
 import { dialogField, openDialog, textInput } from "../dialog.js";
@@ -37,9 +38,9 @@ export function managedNotice(playlist: ManagerPlaylist): string | undefined {
 export function confirmDelete(playlist: ManagerPlaylist): Promise<boolean> {
   const body = [
     playlist.trackCount === undefined
-      ? `"${playlist.name}" will be deleted from Qobuz.`
-      : `"${playlist.name}" and its ${songCount(playlist.trackCount)} will be deleted from Qobuz.`,
-    "Undoing it in History makes it again with the same songs, except any that Qobuz no longer plays; links to it will not work any more.",
+      ? `"${playlist.name}" will be deleted from ${labelOf(serviceOf(playlist.id))}.`
+      : `"${playlist.name}" and its ${songCount(playlist.trackCount)} will be deleted from ${labelOf(serviceOf(playlist.id))}.`,
+    "Undoing it in History makes it again with the same songs, except any that it no longer plays; links to it will not work any more.",
   ];
   if (playlist.managed !== undefined) {
     body.push(`The managed playlist "${playlist.managed.jobName}" looks after it, and will stop until you decide what it should do.`);

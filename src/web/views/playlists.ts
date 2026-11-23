@@ -6,9 +6,11 @@
  * the server.
  */
 
-import { readId, shortId, type EntryId, type PlaylistId } from "../../services/ids.js";
+import { readId, serviceOf, shortId, type EntryId, type PlaylistId } from "../../services/ids.js";
 import type { ArtistHit, ManagerPlaylist, RemovalReport, RemoveArtistsPlan } from "../../features/playlist-manager.js";
 import { formatDuration } from "../../features/playlist-shape.js";
+import { labelOf } from "../../services/errors.js";
+import { connectedServices } from "../service.js";
 import { api } from "../api.js";
 import { dialogField, openDialog, textInput } from "../dialog.js";
 import { el, showError } from "../dom.js";
@@ -162,6 +164,9 @@ function renderRow(playlist: ManagerPlaylist): HTMLElement {
     node.title = title;
     badges.append(node);
   };
+  if (connectedServices().length > 1) {
+    add(labelOf(serviceOf(playlist.id)));
+  }
   if (!playlist.owned) {
     add("not yours");
   }
@@ -252,7 +257,7 @@ async function duplicate(playlist: ManagerPlaylist): Promise<void> {
         "/api/manager/duplicate",
         { playlistId: playlist.id, name: name.value.trim() },
       );
-      const lost = result.missing > 0 ? `; Qobuz no longer offers ${result.missing}` : "";
+      const lost = result.missing > 0 ? `; the service no longer offers ${result.missing}` : "";
       return `Made ${result.playlist.name} with ${songCount(result.added)}${lost}.`;
     });
   }
@@ -428,7 +433,7 @@ async function removeArtists(): Promise<void> {
     body: [
       `From ${removals.length} playlist${removals.length === 1 ? "" : "s"}. You can undo this in History.`,
       ...(unplayable > 0
-        ? [`${songCount(unplayable)} can no longer be played on Qobuz, so undo cannot put ${unplayable === 1 ? "it" : "them"} back.`]
+        ? [`${songCount(unplayable)} can no longer be played, so undo cannot put ${unplayable === 1 ? "it" : "them"} back.`]
         : []),
     ],
     confirm: "Remove",

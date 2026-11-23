@@ -9,7 +9,13 @@
  * and saving in playlist-manager.ts on the server.
  */
 
-import type { ArtistId, EntryId, PlaylistId, TrackId } from "../../services/ids.js";
+import {
+  serviceOf,
+  type ArtistId,
+  type EntryId,
+  type PlaylistId,
+  type TrackId,
+} from "../../services/ids.js";
 import {
   artistCounts,
   linkLines,
@@ -52,6 +58,11 @@ import {
 import type { ManagerPlaylist, SaveOutcome } from "../../features/playlist-manager.js";
 import { formatDuration } from "../../features/playlist-shape.js";
 import { normaliseArtistName } from "../../features/track-filter.js";
+import type { Pick, TransferDestination } from "../../features/transfer.js";
+import { labelOf } from "../../services/errors.js";
+import type { ServiceName } from "../../services/names.js";
+import { connectedServices } from "../service.js";
+import { describeTransfer, reviewTransfer, sendPicks, serviceSelect } from "../transfer.js";
 import { api, type Artist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { dialogChoice, dialogField, openDialog, textInput } from "../dialog.js";
@@ -426,7 +437,7 @@ function createRow(entry: Entry): HTMLElement {
     badge("pl-version", "other version", "Another version (live, acoustic, remix) of a song here"),
   );
   if (entry.streamable === false) {
-    badges.append(badge("pl-unplayable", "unplayable", "Qobuz no longer plays this; once removed it cannot be put back"));
+    badges.append(badge("pl-unplayable", "unplayable", `${serviceName()} no longer plays this; once removed it cannot be put back`));
   }
   row.append(badges);
 
@@ -762,13 +773,20 @@ async function moveToPlace(): Promise<void> {
   );
 }
 
+/** The name of the service this playlist is on. */
+function serviceName(): string {
+  return labelOf(serviceOf(current().playlist.id));
+}
+
 /** Ask for one of the user's playlists songs can be put in. */
 async function pickPlaylist(title: string, confirm: string, forSongs: boolean): Promise<ManagerPlaylist | undefined> {
   const mine = current();
   const here = mine.playlist.id;
   let playlists: ManagerPlaylist[];
   try {
-    ({ playlists } = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists"));
+    // Songs can go to a playlist on any connected service.
+    const on = forSongs && connectedServices().length > 1 ? "all" : serviceOf(here);
+    ({ playlists } = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists", undefined, on));
   } catch (error) {
     if (isStill(mine)) {
       showError(el("pl-editor-error"), (error as Error).message);
@@ -787,7 +805,8 @@ async function pickPlaylist(title: string, confirm: string, forSongs: boolean): 
   }
   const select = document.createElement("select");
   for (const playlist of others) {
-    const option = new Option(playlist.name, String(playlist.id));
+    const there = serviceOf(playlist.id);
+    const option = new Option(there === serviceOf(here) ? playlist.name : `${playlist.name} (${labelOf(there)})`, playlist.id);
     if (forSongs && playlist.managed?.mode === "mirror") {
       option.disabled = true;
       option.textContent = `${playlist.name} (managed: kept exactly as its source)`;
@@ -814,6 +833,11 @@ async function sendSelected(how: "copy" | "move"): Promise<void> {
     return;
   }
   const destination: Destination = { type: "existing", playlistId: playlist.id, name: playlist.name };
+  const to = serviceOf(playlist.id);
+  if (to !== serviceOf(current().playlist.id)) {
+    await sendAcross(ids, to, { type: "existing", playlistId: playlist.id }, playlist.name, how === "move");
+    return;
+  }
   if (how === "copy") {
     await copyNow(ids, destination);
   } else {
@@ -829,9 +853,16 @@ async function splitSelected(): Promise<void> {
   const isPublic = dialogChoice("checkbox", "Public");
   const keep = dialogChoice("radio", "Keep the songs here too (made at once)", { name: "split", checked: true });
   const take = dialogChoice("radio", "Take them out of this playlist (when you save)", { name: "split" });
+  const here = serviceOf(current().playlist.id);
+  const on = serviceSelect(here);
   const ok = await openDialog({
     title: `New playlist of ${songCount(ids.length)}`,
-    body: [dialogField("Name", name), isPublic.field, ...(owned ? [keep.field, take.field] : [])],
+    body: [
+      dialogField("Name", name),
+      ...(on === undefined ? [] : [dialogField("On", on)]),
+      isPublic.field,
+      ...(owned ? [keep.field, take.field] : []),
+    ],
     confirm: "Create",
     validate: () => (name.value.trim() === "" ? "Give it a name." : undefined),
   });
@@ -839,11 +870,90 @@ async function splitSelected(): Promise<void> {
     return;
   }
   const destination: Destination = { type: "new", name: name.value.trim(), isPublic: isPublic.input.checked };
+  const to = (on?.value ?? here) as ServiceName;
+  if (to !== here) {
+    await sendAcross(ids, to, destination, destination.name, take.input.checked);
+    return;
+  }
   if (take.input.checked) {
     edit(takeOut(current().edits.now, ids, destination), `${songCount(ids.length)} will move to ${destination.name} when you save.`);
   } else {
     await copyNow(ids, destination);
   }
+}
+
+/**
+ * Put songs on another service, once reviewed. With `take`, those that arrived
+ * are then taken out of the draft; the others stay.
+ */
+async function sendAcross(
+  ids: readonly EntryId[],
+  to: ServiceName,
+  destination: TransferDestination,
+  name: string,
+  take: boolean,
+): Promise<void> {
+  const mine = current();
+  const songs = ids.map((id) => mine.entries.get(id)!);
+  let picks: Pick[] | undefined;
+  await working(`Looking on ${labelOf(to)}...`, async () => {
+    picks = await reviewTransfer({ tracks: songs }, to);
+  });
+  if (picks === undefined || !isStill(mine)) {
+    return;
+  }
+  const chosen = picks;
+  await working(`Copying to ${labelOf(to)}...`, async () => {
+    const result = await sendPicks(to, destination, chosen);
+    const missing = new Set(result.missing);
+    const arrived = ids.filter((_, index) => {
+      const { track } = chosen[index]!;
+      return track !== null && !missing.has(track);
+    });
+    const text = describeTransfer(to, name, result);
+    if (take && arrived.length > 0) {
+      edit(takeOut(current().edits.now, arrived), `${text} They leave this playlist when you save.`);
+    } else {
+      say(text);
+    }
+  });
+}
+
+/** Copy this whole playlist, as saved, to a new one on another service. */
+async function copyToService(): Promise<void> {
+  const mine = current();
+  const { playlist } = mine;
+  const here = serviceOf(playlist.id);
+  const others = connectedServices().filter((service) => service !== here);
+  if (others.length === 0) {
+    await openDialog({
+      title: "Copy to another service",
+      body: ["Connect another music service in Accounts first."],
+      confirm: "Close",
+      cancel: null,
+    });
+    return;
+  }
+  const on = document.createElement("select");
+  others.forEach((service) => on.append(new Option(labelOf(service), service)));
+  const name = textInput(playlist.name);
+  const ok = await openDialog({
+    title: "Copy to another service",
+    body: [dialogField("To", on), dialogField("Name", name)],
+    confirm: "Find the songs",
+    validate: () => (name.value.trim() === "" ? "Give it a name." : undefined),
+  });
+  if (!ok || !isStill(mine)) {
+    return;
+  }
+  const to = on.value as ServiceName;
+  await sendAcross(
+    mine.edits.now.order,
+    to,
+    { type: "new", name: name.value.trim(), isPublic: false },
+    name.value.trim(),
+    false,
+  );
 }
 
 async function copyNow(ids: readonly EntryId[], destination: Destination): Promise<void> {
@@ -864,7 +974,7 @@ function describeAdd(result: ConfirmedAdd, verb: string): string {
     parts.push(`${result.already.length} ${result.already.length === 1 ? "was" : "were"} there already`);
   }
   if (result.missing.length > 0) {
-    parts.push(`Qobuz no longer offers ${result.missing.length}`);
+    parts.push(`${serviceName()} no longer offers ${result.missing.length}`);
   }
   return `${parts.join("; ")}.`;
 }
@@ -1276,11 +1386,12 @@ function renderMore(): void {
     );
   }
   items.push(menuItem("Duplicate...", () => void duplicateHere()));
+  items.push(menuItem("Copy to another service...", () => void copyToService()));
   if (playlist.owned) {
     items.push(menuItem("Delete...", () => void deleteHere()));
   }
   items.push(
-    menuItem("Reload from Qobuz", () => {
+    menuItem(`Reload from ${labelOf(serviceOf(current().playlist.id))}`, () => {
       void (async () => {
         const mine = current();
         if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
@@ -1319,7 +1430,7 @@ async function duplicateHere(): Promise<void> {
     );
     say(
       `Made ${result.playlist.name} with ${songCount(result.added)}` +
-        (result.missing > 0 ? `; Qobuz no longer offers ${result.missing}.` : "."),
+        (result.missing > 0 ? `; ${serviceName()} no longer offers ${result.missing}.` : "."),
     );
   });
 }
@@ -1377,11 +1488,11 @@ async function save(): Promise<void> {
   const lost = unplayable.filter(({ destination }) => destination === undefined).length;
   if (lost > 0) {
     warnings.push(
-      `${songCount(lost)} you are removing can no longer be played on Qobuz, so undo cannot put ${lost === 1 ? "it" : "them"} back.`,
+      `${songCount(lost)} you are removing can no longer be played on ${serviceName()}, so undo cannot put ${lost === 1 ? "it" : "them"} back.`,
     );
   }
   if (unplayable.length > lost) {
-    warnings.push(`${songCount(unplayable.length - lost)} cannot be moved, as Qobuz no longer offers them; they will stay here.`);
+    warnings.push(`${songCount(unplayable.length - lost)} cannot be moved, as ${serviceName()} no longer offers them; they will stay here.`);
   }
   const notice = managedNotice(playlist);
   if (notice !== undefined) {
@@ -1463,7 +1574,7 @@ function describeSaved(outcome: Extract<SaveOutcome, { status: "saved" }>): stri
     parts.push("Reordered it");
   }
   if (outcome.kept.length > 0) {
-    parts.push(`${songCount(outcome.kept.length)} stayed here, as Qobuz no longer offers ${outcome.kept.length === 1 ? "it" : "them"}`);
+    parts.push(`${songCount(outcome.kept.length)} stayed here, as ${serviceName()} no longer offers ${outcome.kept.length === 1 ? "it" : "them"}`);
   }
   if (outcome.unverified === true) {
     parts.push("How much of the rest went through could not be checked");
@@ -1485,7 +1596,7 @@ async function offerRebase(outcome: Extract<SaveOutcome, { status: "changed" }>,
     reordered ? "songs reordered" : undefined,
   ].filter((part) => part !== undefined);
   const ok = await openDialog({
-    title: "This playlist has changed on Qobuz",
+    title: `This playlist has changed on ${labelOf(serviceOf(current().playlist.id))}`,
     body: [
       `Since you opened it: ${what.join(", ")}. Nothing has been saved.`,
       "Bring those changes into your draft, check it, then save again?",

@@ -13,8 +13,8 @@ import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
-import { accountNotices, showNotices } from "./notices.js";
-import { chosenService, rememberService } from "./service.js";
+import { accountNotices, showNotices, type Notice } from "./notices.js";
+import { chosenService, rememberService, setConnectedServices } from "./service.js";
 import { initAccountsView } from "./views/accounts.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
@@ -71,6 +71,7 @@ function route(): void {
   }
   // Fill in what the home paste box handed over, if it was for this view.
   applyPrefill(active);
+  renderNotices();
 }
 
 /** Show the accounts: whose session this is, the service picker, and what needs attention. */
@@ -84,21 +85,38 @@ async function loadAccounts(): Promise<void> {
     return;
   }
   const connected = accounts.filter((account) => account.status === "connected");
+  setConnectedServices(connected.map((account) => account.service));
+  const all = chosenService() === "all" && connected.length > 1;
   const chosen = connected.find((account) => account.service === chosenService()) ?? connected[0];
-  if (chosen?.service !== chosenService()) {
+  if (!all && chosen?.service !== chosenService()) {
     // The remembered service is not connected: say so by falling back visibly.
     rememberService(chosen?.service);
   }
-  showNotices(accountNotices(accounts));
+  notices = accountNotices(accounts);
+  renderNotices();
   el("session-label").hidden = chosen === undefined;
   target.textContent =
-    chosen === undefined
+    all
+      ? connected.map((account) => account.label).join(", ")
+      : chosen === undefined
       ? "Not connected"
       : `${chosen.displayName ?? ""}${chosen.plan === undefined ? "" : ` (${chosen.plan})`}`;
-  fillServicePicker(connected, chosen);
+  fillServicePicker(connected, all ? undefined : chosen);
   if (connected.length === 0 && (location.hash === "" || location.hash === "#/home")) {
     location.hash = "#/accounts";
   }
+}
+
+/** The views that can show every service at once; the others work on one. */
+const ALL_VIEWS: readonly View[] = ["home", "playlists", "stats", "combine", "history", "accounts", "managed", "import-export"];
+let notices: Notice[] = [];
+
+function renderNotices(): void {
+  const one: Notice[] =
+    chosenService() === "all" && !ALL_VIEWS.includes(currentView())
+      ? [{ text: "This works on one music service. Choose it in the list of music services, at the bottom left." }]
+      : [];
+  showNotices([...one, ...notices]);
 }
 
 function fillServicePicker(connected: readonly AccountView[], chosen: AccountView | undefined): void {
@@ -108,8 +126,9 @@ function fillServicePicker(connected: readonly AccountView[], chosen: AccountVie
   for (const account of connected) {
     select.appendChild(new Option(account.label, account.service, false, account.service === chosen?.service));
   }
+  select.appendChild(new Option("All services", "all", false, chosen === undefined));
   select.addEventListener("change", () => {
-    rememberService(isServiceName(select.value) ? select.value : undefined);
+    rememberService(isServiceName(select.value) || select.value === "all" ? select.value : undefined);
     location.reload();
   });
 }
@@ -133,6 +152,8 @@ initManagedView();
 initHistoryView();
 initAccountsView();
 initLastChange();
-window.addEventListener("hashchange", route);
-route();
-void loadAccounts();
+// The views load once the services are known, as they name them.
+void loadAccounts().finally(() => {
+  window.addEventListener("hashchange", route);
+  route();
+});

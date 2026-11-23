@@ -7,6 +7,8 @@ export interface DialogOptions {
   confirm: string;
   /** The other button; null for none (a message to acknowledge). Default "Cancel". */
   cancel?: string | null;
+  /** Give it more room, for a list. */
+  wide?: boolean;
   /** Draw the confirm button as destructive. */
   danger?: boolean;
   /** Why it cannot be confirmed yet, shown in the dialog. */
@@ -18,7 +20,7 @@ export function openDialog(options: DialogOptions): Promise<boolean> {
   return new Promise((resolve) => {
     const returnTo = document.activeElement;
     const dialog = document.createElement("dialog");
-    dialog.className = "dialog";
+    dialog.className = options.wide === true ? "dialog wide" : "dialog";
     const title = document.createElement("h2");
     title.id = "dialog-title";
     title.textContent = options.title;
