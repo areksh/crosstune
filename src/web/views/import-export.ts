@@ -34,6 +34,8 @@ type ImportTarget =
 let exportPlaylistsLoaded = false;
 let importPlaylistsLoaded = false;
 let currentPlan: ImportPlan | undefined;
+/** The backup text the restore preview was read from: what is restored, whatever the box holds later. */
+let previewedBackup: string | undefined;
 
 /** Wire up the import/export view. Call once on load. */
 export function initImportExportView(): void {
@@ -47,6 +49,15 @@ export function initImportExportView(): void {
   el("ie-resolve").addEventListener("click", () => void onResolve());
   el("ie-commit").addEventListener("click", () => void onCommit());
   el<HTMLInputElement>("ie-import-file").addEventListener("change", () => void onFileChosen());
+  el("ie-import-content").addEventListener("input", resetImportPreview);
+}
+
+/** Drop the import preview: what it showed no longer matches the input or target. */
+function resetImportPreview(): void {
+  currentPlan = undefined;
+  previewedBackup = undefined;
+  el("ie-import-preview").hidden = true;
+  setStep("import-steps", 0);
 }
 
 // --- Export ----------------------------------------------------------------
@@ -175,9 +186,7 @@ function onImportTargetChange(): void {
     }, importPlaylistsLoaded);
   }
   // Reset any preview: the plan no longer matches the new target's kind.
-  currentPlan = undefined;
-  el("ie-import-preview").hidden = true;
-  setStep("import-steps", 0);
+  resetImportPreview();
 }
 
 async function onFileChosen(): Promise<void> {
@@ -187,6 +196,7 @@ async function onFileChosen(): Promise<void> {
     return;
   }
   el<HTMLTextAreaElement>("ie-import-content").value = await file.text();
+  resetImportPreview();
   // Auto-select the format from the file's extension when left on "detect".
   const format = el<HTMLSelectElement>("ie-import-format");
   if (format.value === "auto") {
@@ -202,7 +212,9 @@ async function onResolve(): Promise<void> {
   const errorNode = el("ie-import-error");
   showError(errorNode, undefined);
   showError(el("ie-commit-result"), undefined);
+  showError(el("ie-commit-error"), undefined);
   currentPlan = undefined;
+  previewedBackup = undefined;
 
   const content = el<HTMLTextAreaElement>("ie-import-content").value.trim();
   if (content.length === 0) {
@@ -299,6 +311,7 @@ function renderRestorePreview(content: string, errorNode: HTMLElement): void {
     return;
   }
   currentPlan = undefined;
+  previewedBackup = content;
   el("ie-import-preview").hidden = false;
   setStep("import-steps", 1);
   el("ie-import-summary").textContent = `Backup contains ${counts}.`;
@@ -323,7 +336,10 @@ async function onCommit(): Promise<void> {
   button.textContent = "Working...";
   try {
     if (target === "account") {
-      const content = el<HTMLTextAreaElement>("ie-import-content").value.trim();
+      const content = previewedBackup;
+      if (content === undefined) {
+        return;
+      }
       const result = await api<{
         favouriteTracks: number;
         favouriteAlbums: number;
@@ -358,6 +374,7 @@ async function onCommit(): Promise<void> {
     el("ie-import-preview").hidden = true;
     setStep("import-steps", 3);
     currentPlan = undefined;
+    previewedBackup = undefined;
     // Imported: nothing is left unsaved (the page asks about a typed import before reloading).
     el<HTMLTextAreaElement>("ie-import-content").value = "";
     el<HTMLInputElement>("ie-import-file").value = "";
