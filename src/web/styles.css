@@ -2444,6 +2444,148 @@ button.history-undo {
   white-space: pre-line;
 }
 
+/* Linked playlists: a conflict is a problem, a question a reminder. */
+
+#links-result {
+  margin: 0 0 8px;
+}
+
+.link-copies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.link-service {
+  display: inline-block;
+  min-width: 64px;
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.link-state.ok {
+  border-color: rgba(127, 200, 169, 0.45);
+  color: var(--ok);
+}
+
+.link-state.asking {
+  border-color: var(--notice-line);
+  color: var(--notice-text);
+}
+
+.link-state.urgent {
+  border-color: var(--error);
+  background: rgba(240, 144, 122, 0.12);
+  color: var(--error);
+  font-weight: 600;
+}
+
+.link-conflict {
+  border: 1px solid var(--error);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: rgba(240, 144, 122, 0.07);
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.link-conflict-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--error);
+}
+
+.link-conflict ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.link-conflict-hint {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.link-questions {
+  border: 1px solid var(--notice-line);
+  background: var(--notice-bg);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--notice-text);
+  font-size: 14px;
+}
+
+.link-questions-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.link-questions ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.link-questions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.link-question {
+  margin: 0;
+}
+
+.link-question-detail {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.link-questions select {
+  min-height: 30px;
+  font-size: 13px;
+  max-width: 260px;
+}
+
+.nav-badge {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--notice-line);
+  color: var(--notice-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-badge.urgent {
+  background: var(--error);
+  color: var(--on-accent);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .managed-form {
   display: flex;
   flex-direction: column;

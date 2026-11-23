@@ -1715,6 +1715,27 @@
             pass missed while the computer was off runs once when it is back.
           </p>
 
+          <section id="links-panel" class="panel" aria-labelledby="links-title" hidden>
+            <div class="managed-head">
+              <h2 id="links-title">Linked playlists</h2>
+              <button id="links-new" type="button" class="secondary" hidden>Link playlists...</button>
+            </div>
+            <p class="hint">
+              Your playlists on different services, kept the same both ways.
+              When their copies disagree nothing is written anywhere until you
+              choose here.
+            </p>
+            <p id="links-need-two" class="hint" hidden>
+              Linking needs two connected music services.
+              <a href="#/accounts">Connect another in Accounts.</a>
+            </p>
+            <div id="links-invalid" class="warning" hidden></div>
+            <p id="links-result" class="result" aria-live="polite" hidden></p>
+            <p id="links-status" class="hint" aria-live="polite">Loading...</p>
+            <p id="links-error" class="error" hidden></p>
+            <div id="links-list" class="managed-list"></div>
+          </section>
+
           <section class="panel">
             <div class="managed-head">
               <h2>Your managed playlists</h2>

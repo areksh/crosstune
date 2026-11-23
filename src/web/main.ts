@@ -13,7 +13,8 @@ import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
-import { accountNotices, showNotices, type Notice } from "./notices.js";
+import { attentionBadge, linkAttention } from "../sync/wording.js";
+import { accountNotices, linkNotices, showNotices, type Notice } from "./notices.js";
 import { chosenService, rememberService, setConnectedServices } from "./service.js";
 import { initAccountsView } from "./views/accounts.js";
 import { initAlbumsView } from "./views/albums.js";
@@ -22,6 +23,7 @@ import { initDeduplicateView } from "./views/deduplicate.js";
 import { initHistoryView, initLastChange } from "./views/history.js";
 import { initHomeView } from "./views/home.js";
 import { initImportExportView } from "./views/import-export.js";
+import { fetchLinks, initLinksView, LINKS_CHANGED, servicesKnown as linksServicesKnown, type LinksList } from "./views/links.js";
 import { initManagedView } from "./views/managed.js";
 import { initNewReleasesView } from "./views/new-releases.js";
 import { guardUnsavedPlaylist } from "./views/playlist-editor.js";
@@ -110,13 +112,38 @@ async function loadAccounts(): Promise<void> {
 /** The views that can show every service at once; the others work on one. */
 const ALL_VIEWS: readonly View[] = ["home", "playlists", "stats", "combine", "history", "accounts", "managed", "import-export"];
 let notices: Notice[] = [];
+/** What the linked playlists need, on every page until it is settled. */
+let linksNeed: Notice[] = [];
 
 function renderNotices(): void {
   const one: Notice[] =
     chosenService() === "all" && !ALL_VIEWS.includes(currentView())
       ? [{ text: "This works on one music service. Choose it in the list of music services, at the bottom left." }]
       : [];
-  showNotices([...one, ...notices]);
+  showNotices([...one, ...linksNeed, ...notices]);
+}
+
+/** The links' notices, and the count beside Managed playlists. */
+function showLinks(list: LinksList | undefined): void {
+  const attention = linkAttention(list?.links ?? []);
+  linksNeed = linkNotices(attention);
+  renderNotices();
+  const nav = document.querySelector<HTMLAnchorElement>('.nav-link[data-view="managed"]');
+  nav?.querySelector(".nav-badge")?.remove();
+  const badge = attentionBadge(attention);
+  if (nav !== null && badge !== undefined) {
+    const node = document.createElement("span");
+    node.className = badge.urgent ? "nav-badge urgent" : "nav-badge";
+    node.title = badge.text;
+    const count = document.createElement("span");
+    count.setAttribute("aria-hidden", "true");
+    count.textContent = String(badge.count);
+    const words = document.createElement("span");
+    words.className = "visually-hidden";
+    words.textContent = `, ${badge.text}`;
+    node.append(count, words);
+    nav.appendChild(node);
+  }
 }
 
 function fillServicePicker(connected: readonly AccountView[], chosen: AccountView | undefined): void {
@@ -149,11 +176,16 @@ initUpgradeView();
 initImportExportView();
 initNewReleasesView();
 initManagedView();
+initLinksView();
 initHistoryView();
 initAccountsView();
 initLastChange();
+window.addEventListener(LINKS_CHANGED, (event) => showLinks((event as CustomEvent<LinksList>).detail));
+// Not available, or failing: no notices from links, and nothing else changes.
+void fetchLinks().then(showLinks, () => undefined);
 // The views load once the services are known, as they name them.
 void loadAccounts().finally(() => {
   window.addEventListener("hashchange", route);
   route();
+  linksServicesKnown();
 });

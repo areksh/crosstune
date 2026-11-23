@@ -1,6 +1,7 @@
 /** Notices above every view: what needs the user's attention until it is settled. */
 
 import type { AccountView } from "../accounts/accounts.js";
+import { attentionLines, type LinkAttention } from "../sync/wording.js";
 import { el } from "./dom.js";
 
 export interface Notice {
@@ -50,4 +51,11 @@ export function accountNotices(accounts: readonly AccountView[]): Notice[] {
         return [];
     }
   });
+}
+
+const MANAGED = { href: "#/managed", text: "Open Managed playlists" };
+
+/** What the linked playlists need: conflicts loudly, waiting questions less. */
+export function linkNotices(attention: LinkAttention): Notice[] {
+  return attentionLines(attention).map((line) => ({ text: line.text, link: MANAGED, urgent: line.urgent }));
 }
