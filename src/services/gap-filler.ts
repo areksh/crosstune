@@ -1,9 +1,8 @@
 /**
  * What a service cannot say, asked of another (spec section 7): Spotify gives
  * no artist top tracks and no similar artists, so they come from Qobuz or TIDAL
- * and are found again on Spotify. Only songs matched exactly, or as the best of
- * a likely match by the same artist, are given; tools then show them for review
- * as usual.
+ * and are found again on Spotify. Only exact matches by the same artist are
+ * given, as managed playlists write them without review (ADR-0012).
  */
 
 import { matchTracks, type MatchMemory } from "../features/match.js";
@@ -51,8 +50,10 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
           continue;
         }
         const theirs = await donor.getArtistTopTracks(there.id, limit * 2);
+        // Scheduled jobs write these unseen: only the same recording, by this
+        // artist (a namesake's songs match exactly too) -- never a likely one.
         const found = (await matchTracks(service, theirs, matches)).flatMap((match) =>
-          match.track !== undefined && (match.grade === "exact" || match.track.artistId === artistId) ? [match.track] : [],
+          match.track !== undefined && match.grade === "exact" && match.track.artistId === artistId ? [match.track] : [],
         );
         return [...new Map(found.map((track) => [track.id, track])).values()].slice(0, limit);
       }

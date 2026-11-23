@@ -75,6 +75,26 @@ describe("fillGaps", () => {
     expect(filled.capabilities.topTracks).toEqual({ ok: true, from: "qobuz" });
   });
 
+  it("gives only exact matches by the same artist: nothing unseen that may be wrong", async () => {
+    const own = [
+      song("spotify", 1, { title: "Song 1 (Live)" }), // the same ISRC, another title: likely
+      song("spotify", 3, { artistId: tagId<ArtistId>("spotify", 99), artist: "Portishead" }), // a namesake
+      song("spotify", 4),
+    ];
+    const base = spotify({
+      findByIsrc: vi.fn(async (isrcs: readonly string[]) => {
+        const out = new Map<string, Track[]>();
+        for (const isrc of isrcs) {
+          const found = own.filter((track) => track.isrc === isrc);
+          if (found.length > 0) out.set(isrc, found);
+        }
+        return out;
+      }),
+    } as Partial<MusicService>);
+    const filled = fillGaps(base, () => [qobuz()], new MemoryMatches());
+    expect((await filled.getArtistTopTracks(artist, 10)).map((track) => track.id)).toEqual(["spotify:4"]);
+  });
+
   it("honours the limit", async () => {
     const filled = fillGaps(spotify(), () => [qobuz()], new MemoryMatches());
     expect(await filled.getArtistTopTracks(artist, 2)).toHaveLength(2);
