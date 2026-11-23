@@ -708,16 +708,24 @@ export async function resolveImport(
  */
 async function attempt(
   label: string,
-  resolve: () => Promise<Match | undefined>,
+  resolve: () => Promise<Match | NoMatch | undefined>,
 ): Promise<{ label: string; match: Match | undefined }> {
   try {
-    return { label, match: await resolve() };
+    const result = await resolve();
+    return result !== undefined && "note" in result
+      ? { label: `${label} (${result.note})`, match: undefined }
+      : { label, match: result };
   } catch (error) {
     if (stopsEverySong(error)) {
       throw error;
     }
     return { label: `${label} (could not be looked up)`, match: undefined };
   }
+}
+
+/** An item that matched nothing, with why, when that is more than "not found". */
+interface NoMatch {
+  note: string;
 }
 
 /** A resolved Qobuz id and how it was found. */
@@ -733,7 +741,7 @@ interface Match {
 async function resolveTrack(
   client: ImportResolverClient,
   item: ParsedTrack,
-): Promise<Match | undefined> {
+): Promise<Match | NoMatch | undefined> {
   if (item.id !== undefined) {
     return { id: item.id, via: "id" };
   }
@@ -747,12 +755,17 @@ async function resolveTrack(
   if (item.title === undefined) {
     return undefined;
   }
+  // A title alone ("Yesterday") names a song by anybody: whichever cover the
+  // search ranks first would be taken, unseen. Without an artist to check a
+  // result by (or an ISRC, above), the line is reported rather than guessed.
+  const artist = item.artists?.[0] ?? item.artist;
+  if (artist === undefined) {
+    return { note: "no artist given" };
+  }
   // Search by the first credited artist and the title without its "feat." part:
   // Qobuz keeps featured artists in the version or artist, not the title.
-  const artist = item.artists?.[0] ?? item.artist;
   const title = withoutFeaturing(item.title);
-  const query = artist !== undefined ? `${artist} ${title}` : title;
-  const candidates = await client.searchTracks(query, IMPORT_SEARCH_LIMIT);
+  const candidates = await client.searchTracks(`${artist} ${title}`, IMPORT_SEARCH_LIMIT);
   const picked = pickTrack(candidates, item);
   return picked === undefined ? undefined : { id: picked.id, via: "search" };
 }
@@ -841,8 +854,8 @@ function pickByIsrc(
  * outright; otherwise the title must match (with or without a "feat." credit,
  * and against Qobuz's title alone or title plus version, so Spotify's
  * "Song - Live" finds "Song" [Live]) and the artist tokens must overlap with
- * the credit or any one credited artist. A streamable match beats one that is
- * not.
+ * the credit or any one credited artist -- so a wanted track with no artist
+ * matches nothing by name. A streamable match beats one that is not.
  */
 function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | undefined {
   if (want.isrc !== undefined) {
@@ -853,10 +866,9 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
     if (byIsrc !== undefined) return byIsrc;
   }
   const wantTitles = titleKeys(want.title ?? "");
-  const wantArtists =
-    want.artist === undefined
-      ? undefined
-      : [want.artist, ...(want.artists ?? [])].map(tokens);
+  const wantArtists = [want.artist, ...(want.artists ?? [])]
+    .filter((artist) => artist !== undefined)
+    .map(tokens);
   const matches = candidates.filter((candidate) => {
     const candidateTitles = [
       ...titleKeys(candidate.title),
@@ -865,9 +877,9 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
         : titleKeys(`${candidate.title} ${candidate.version}`)),
     ];
     if (!candidateTitles.some((key) => wantTitles.includes(key))) return false;
-    if (wantArtists === undefined) return true;
     if (candidate.artist === undefined) return false;
     const candidateArtist = tokens(candidate.artist);
+    // With no artist wanted nothing matches: a title alone is anybody's song.
     return wantArtists.some((artist) => tokensOverlap(artist, candidateArtist));
   });
   return matches.find((track) => track.streamable !== false) ?? matches[0];

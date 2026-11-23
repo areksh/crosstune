@@ -208,6 +208,22 @@ describe("resolveImport", () => {
     expect(plan.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
   });
 
+  it("does not guess whose song a title-only line is", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> =>
+      query === "GBAYE6300001"
+        ? [{ id: qid(81), title: "Yesterday", artist: "The Beatles", isrc: "GBAYE6300001" }]
+        : [{ id: qid(80), title: "Yesterday", artist: "A Cover Band" }],
+    );
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Yesterday" }, { title: "Yesterday", isrc: "GBAYE6300001" }],
+    });
+    // By its ISRC a title-only line is still the same recording.
+    expect(plan.matched).toEqual([{ label: "Yesterday", id: qid(81), via: "isrc" }]);
+    expect(plan.unmatched).toEqual(["Yesterday (no artist given)"]);
+    expect(searchTracks.mock.calls.map((call) => call[0])).toEqual(["GBAYE6300001"]);
+  });
+
   it("takes an artist only by name, never the first search hit", async () => {
     const searchArtists = vi.fn(async (query: string): Promise<Artist[]> =>
       query === "Bjork"
