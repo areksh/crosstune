@@ -14,9 +14,10 @@ import { groupActions, libraryRows, sidebarRows, type LibraryRow, type SidebarRo
 import { routeHash, type Route } from "../ui/routes.js";
 import { api } from "./api.js";
 import { el } from "./dom.js";
-import { chooseTab, currentTab, TAB_CHANGED } from "./shell.js";
+import { currentTab, TAB_CHANGED } from "./shell.js";
 import { openDialog } from "./dialog.js";
-import { chosenService, rememberService } from "./service.js";
+import { rememberService, rememberTab } from "./service.js";
+import { reloadHere } from "./hosting.js";
 import { useSources } from "./views/combine.js";
 import { startRemoveArtists } from "./views/playlists.js";
 import { knownLinks, LINKS_CHANGED } from "./views/links.js";
@@ -220,8 +221,12 @@ function renderGroup(): void {
   if (removeFrom !== undefined) {
     buttons.push(
       groupButton("Remove artists", () => {
-        startRemoveArtists(chosen.map((playlist) => playlist.id));
-        location.hash = routeHash({ kind: "all", service: removeFrom });
+        const target = routeHash({ kind: "all", service: removeFrom });
+        startRemoveArtists(
+          chosen.map((playlist) => playlist.id),
+          target,
+        );
+        location.hash = target;
       }),
     );
   }
@@ -246,27 +251,22 @@ function groupButton(text: string, act: () => void, className = "secondary small
   return button;
 }
 
-/** Combine the ticked playlists: on their service, or on all of them when they span several. */
+/**
+ * Combine the ticked playlists: on their service, or on all of them when they
+ * span several. Always one fresh page (asking first about unsaved previews):
+ * the tab, the page's service and the address are set just before it, and
+ * Combine applies the hand-over only on the page that stays.
+ */
 function combineTicked(chosen: readonly ManagerPlaylist[]): void {
   const services = new Set(chosen.map((playlist) => serviceOf(playlist.id)));
   const [only] = services;
   const on = services.size === 1 && only !== undefined ? only : "all";
-  if (on === "all" && currentTab() !== "all") {
-    chooseTab("all");
-  }
-  const target = routeHash({ kind: "new", tool: "combine" });
-  const reloading = chosenService() !== on;
-  useSources(
-    chosen.map((playlist) => playlist.id),
-    reloading,
-  );
-  if (reloading) {
+  void reloadHere(() => {
+    useSources(chosen.map((playlist) => playlist.id));
+    rememberTab(on);
     rememberService(on);
-    history.pushState(null, "", target);
-    location.reload();
-    return;
-  }
-  location.hash = target;
+    history.pushState(null, "", routeHash({ kind: "new", tool: "combine" }));
+  });
 }
 
 async function deleteTicked(chosen: readonly ManagerPlaylist[]): Promise<void> {

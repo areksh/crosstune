@@ -14,3 +14,9 @@ export function currentRoute(): Route {
 export function isViewShown(view: string): boolean {
   return viewOf(currentRoute()) === view;
 }
+
+/**
+ * Fired on `window` (detail: the view's name) once the page shows a view and
+ * stays: not before a reload. Hand-overs meant for the next page apply here.
+ */
+export const VIEW_SHOWN = "crosstune:view-shown";

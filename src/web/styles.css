@@ -496,6 +496,22 @@ body.hosted[data-hosted-part="import"] [data-part="export"] {
   display: none !important;
 }
 
+/* The source could not be put in the tool: its picker is shown after all. */
+body.hosted.hosted-unconfirmed [data-source-controls] {
+  display: revert !important;
+}
+
+/* Waiting for the tool's picker to hold the source; the tool is inert meanwhile. */
+.hosting-pending {
+  opacity: 0.55;
+}
+
+.context-problem {
+  margin: 6px 0 0;
+  color: var(--error);
+  font-size: 14px;
+}
+
 body.hosted .view:not([hidden]) > .view-header {
   justify-content: flex-end;
 }

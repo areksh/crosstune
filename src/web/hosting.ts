@@ -10,15 +10,16 @@
  */
 
 import { serviceOf } from "../services/ids.js";
-import type { ServiceName } from "../services/names.js";
+import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
 import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art.js";
 import { parseRoute, routeHash, viewOf, type Route } from "../ui/routes.js";
-import { sourceToolFill, toolLabel, type Source } from "../ui/tools.js";
+import { hostingDecision } from "../ui/hosting-decision.js";
+import { sourceToolFill, toolLabel, type Fill, type Source } from "../ui/tools.js";
 import { openDialog } from "./dialog.js";
 import { el } from "./dom.js";
 import { knownPlaylist, LIBRARY_LOADED } from "./library.js";
 import { applyPrefill, storePrefill } from "./prefill.js";
-import { chosenService, rememberService, workingService } from "./service.js";
+import { chosenService, connectedServices, rememberService } from "./service.js";
 import { currentTab } from "./shell.js";
 
 /**
@@ -91,10 +92,11 @@ function unsavedPreviews(): string[] {
 }
 
 /**
- * Load the page afresh for this address, asking first about unsaved previews;
- * `before` runs just before. False when the user stays.
+ * Load the page afresh, asking first about unsaved previews; `before` runs
+ * just before the reload (and may stop it by returning false), `stay` when
+ * the user chooses to stay. Every reload the frame makes goes through here.
  */
-async function reloadHere(before: () => void): Promise<boolean> {
+export async function reloadHere(before: () => boolean | void, stay: () => void = () => {}): Promise<void> {
   const unsaved = unsavedPreviews();
   if (unsaved.length > 0) {
     const leave = await openDialog({
@@ -107,42 +109,65 @@ async function reloadHere(before: () => void): Promise<boolean> {
       danger: true,
     });
     if (!leave) {
-      return false;
+      stay();
+      return;
     }
   }
-  before();
+  if (before() === false) {
+    return;
+  }
   location.reload();
-  return true;
 }
+
+/** Why the hosted tool cannot be shown (a service not connected...), or undefined. */
+let problem: string | undefined;
+/** Whether the route's source is to be put in the tool when it is shown. */
+let fillOnShow = false;
 
 /**
  * Prepare a route that hosts a tool. "reload" when the page is being loaded
- * afresh (or the user chose to stay, and is being taken back): show nothing.
+ * afresh (or the user chose to stay): show nothing now. `stay` undoes what led
+ * here when the user stays (going back, by default).
  */
-export function prepareHosting(route: Route): "reload" | "show" {
+export function prepareHosting(route: Route, stay: () => void = () => history.back()): "reload" | "show" {
+  problem = undefined;
+  fillOnShow = false;
   const hosted = hostedBy(route);
   if (hosted === undefined) {
     return "show";
   }
   const view = viewOf(route);
-  const target = hosted.service;
-  const switchService = target !== undefined && target !== (chosenService() ?? workingService());
-  const last = hostedHere.get(view);
-  const freshSource = last !== undefined && last !== location.hash;
-  if (switchService || freshSource) {
-    void reloadHere(() => {
-      if (switchService) {
-        rememberService(target);
-      }
-    }).then((reloading) => {
-      if (!reloading) {
-        history.back();
-      }
-    });
-    return "reload";
+  const decision = hostingDecision({
+    ...(hosted.service !== undefined && { target: hosted.service }),
+    ...(chosenService() !== undefined && { remembered: chosenService() }),
+    connected: connectedServices(),
+    ...(hostedHere.has(view) && { lastHere: hostedHere.get(view) }),
+    hash: location.hash,
+  });
+  switch (decision.kind) {
+    case "not-connected":
+      problem = `${SERVICE_LABELS[decision.service]} is not connected, so this cannot open here.`;
+      return "show";
+    case "switch":
+      void reloadHere(() => {
+        rememberService(decision.to);
+        if (chosenService() !== decision.to) {
+          // This browser keeps no settings: switching could never stick.
+          problem = `This browser does not let crosstune remember a music service, so it cannot switch to ${SERVICE_LABELS[decision.to]} here.`;
+          showHosting(route);
+          return false;
+        }
+        return true;
+      }, stay);
+      return "reload";
+    case "fresh":
+      void reloadHere(() => {}, stay);
+      return "reload";
+    case "show":
+      hostedHere.set(view, location.hash);
+      fillOnShow = decision.fill;
+      return "show";
   }
-  hostedHere.set(view, location.hash);
-  return "show";
 }
 
 // The playlist's name is known once the library has been read (after a reload, later).
@@ -177,12 +202,69 @@ export function showHosting(route: Route): void {
   }
   paintContext(hosted.name);
   el<HTMLAnchorElement>("context-back").href = hosted.back;
+  const section = document.getElementById(`view-${viewOf(route)}`);
+  el("context-problem").hidden = problem === undefined;
+  el("context-problem").textContent = problem ?? "";
+  body.classList.remove("hosted-unconfirmed");
+  if (section !== null) {
+    // A tool that cannot open here is not offered at all.
+    section.hidden = problem !== undefined;
+  }
+  if (problem !== undefined) {
+    return;
+  }
   el("context-title").textContent = hosted.title;
-  if (hosted.source !== undefined && (route.kind === "playlist" || route.kind === "favourites" || route.kind === "all") && route.tool !== undefined) {
+  if (
+    fillOnShow &&
+    hosted.source !== undefined &&
+    (route.kind === "playlist" || route.kind === "favourites" || route.kind === "all") &&
+    route.tool !== undefined
+  ) {
     const fill = sourceToolFill(route.tool, hosted.source);
-    if (fill !== undefined) {
+    if (fill !== undefined && section !== null) {
       storePrefill(fill);
       applyPrefill(fill.view);
+      void confirmFill(fill, section, hosted.name);
     }
+  }
+}
+
+/** How long a playlist picker may take to offer the route's playlist. */
+const CONFIRM_MS = 20_000;
+
+/**
+ * The tool's source picker is hidden, so it must really hold the route's
+ * source before the tool can be used: the tool stays inert until each filled
+ * picker shows it. If one never does (not one of the user's playlists here),
+ * the picker is shown again with a word on why, rather than letting the tool
+ * act on whatever it fell back to.
+ */
+async function confirmFill(fill: Fill, section: HTMLElement, name: string): Promise<void> {
+  const selects = Object.entries(fill.fields ?? {}).flatMap(([id, value]) => {
+    const node = document.getElementById(id);
+    return node instanceof HTMLSelectElement ? [{ node, value }] : [];
+  });
+  if (selects.length === 0) {
+    return;
+  }
+  const hash = location.hash;
+  section.inert = true;
+  section.classList.add("hosting-pending");
+  const started = Date.now();
+  while (selects.some(({ node, value }) => node.value !== value) && Date.now() - started < CONFIRM_MS) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (location.hash !== hash) {
+      break;
+    }
+  }
+  section.inert = false;
+  section.classList.remove("hosting-pending");
+  if (location.hash !== hash) {
+    return;
+  }
+  if (selects.some(({ node, value }) => node.value !== value)) {
+    document.body.classList.add("hosted-unconfirmed");
+    el("context-problem").hidden = false;
+    el("context-problem").textContent = `"${name}" is not among the playlists this tool can work on here. Choose what it should work on below.`;
   }
 }

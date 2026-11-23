@@ -989,9 +989,9 @@ change, with undo; *Settings* the accounts, album covers, and import, export
 and backup. Multi-step tools show the step you are on at the top, and while you
 review a selection the destination and save button stay docked at the bottom of
 the window. Track rows show a quality badge such as "24/96" (bit depth /
-sampling rate in kHz), in gold for hi-res. A tool that would have to load the
-page afresh (to work on another service) asks first if another tool has a
-preview you have not saved.
+sampling rate in kHz), in gold for hi-res. When the page has to load afresh
+(a tool on another service, or on another playlist than it last showed), it
+asks first if a tool has a preview you have not saved.
 
 With no playlist open, the page shows a paste box, *Start with a link or a list*: paste
 links (Qobuz, Spotify or TIDAL), artist names or "Artist - Album" lines, one per line. It says what

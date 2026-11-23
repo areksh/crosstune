@@ -16,8 +16,10 @@ import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
 import { parseRoute, redirectFor, viewOf, type Route } from "../ui/routes.js";
 import { initLibrary, markActive, refreshLibrary } from "./library.js";
-import { currentTab, initShell, TAB_CHANGED } from "./shell.js";
-import { prepareHosting, showHosting } from "./hosting.js";
+import { chooseTab, currentTab, initShell, TAB_CHANGED } from "./shell.js";
+import type { Tab } from "../ui/library.js";
+import { prepareHosting, reloadHere, showHosting } from "./hosting.js";
+import { VIEW_SHOWN } from "./route-state.js";
 import { initFavouritesView } from "./playlist-page.js";
 import { attentionBadge, linkAttention } from "../sync/wording.js";
 import { accountNotices, linkNotices, showNotices, type Notice } from "./notices.js";
@@ -80,7 +82,8 @@ function currentView(): View {
   return viewFor(parseRoute(location.hash));
 }
 
-function route(): void {
+/** Show what the address names; `stay` undoes what led here if the user stays rather than reload. */
+function route(stay?: () => void): void {
   const redirect = redirectFor(location.hash, workingService());
   if (redirect !== undefined) {
     // Fires hashchange again, which shows the new address.
@@ -88,7 +91,7 @@ function route(): void {
     return;
   }
   const where = parseRoute(location.hash);
-  if (prepareHosting(where) === "reload") {
+  if (prepareHosting(where, stay) === "reload") {
     return;
   }
   const active = viewFor(where);
@@ -105,6 +108,7 @@ function route(): void {
   // Fill in what another view handed over, if it was for this one.
   applyPrefill(active);
   renderNotices();
+  window.dispatchEvent(new CustomEvent<string>(VIEW_SHOWN, { detail: active }));
 }
 
 /** Read the accounts: which services the frame offers, and what needs attention. */
@@ -156,8 +160,7 @@ function renderNotices(): void {
               href: location.hash,
               text: `Use ${SERVICE_LABELS[service]}`,
               onClick: () => {
-                rememberService(service);
-                location.reload();
+                void reloadHere(() => rememberService(service));
               },
             })),
           },
@@ -210,10 +213,18 @@ initLinksView();
 initHistoryView();
 initAccountsView();
 initLastChange();
-// A new playlist is made on the tab's service: a tab change moves the tool there.
-window.addEventListener(TAB_CHANGED, () => {
+// A new playlist is made on the tab's service: a tab change moves the tool there
+// (staying, if asked, puts the tab back).
+let lastTab: Tab | undefined;
+window.addEventListener(TAB_CHANGED, (event) => {
+  const previous = lastTab;
+  lastTab = (event as CustomEvent<Tab>).detail;
   if (parseRoute(location.hash).kind === "new") {
-    route();
+    route(() => {
+      if (previous !== undefined) {
+        chooseTab(previous);
+      }
+    });
   } else {
     renderNotices();
   }
@@ -223,7 +234,8 @@ window.addEventListener(LINKS_CHANGED, (event) => showLinks((event as CustomEven
 void fetchLinks().then(showLinks, () => undefined);
 // The views load once the services are known, as they name them.
 void loadAccounts().finally(() => {
-  window.addEventListener("hashchange", route);
+  lastTab = currentTab();
+  window.addEventListener("hashchange", () => route());
   route();
   linksServicesKnown();
 });

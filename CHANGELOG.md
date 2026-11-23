@@ -137,8 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its songs. **Tick playlists** in the sidebar to combine them (across services
   too), remove artists from them, or delete them together. Home keeps the paste
   box and drops its list of tools, which are under *+ New* and on each
-  playlist. When a tool has to load the page afresh (to work on another
-  service), it asks first if another tool has a preview you have not saved.
+  playlist. When the page has to load afresh (a tool on another service, or on
+  another playlist than it last showed), it asks first if a tool has a preview
+  you have not saved.
 - **The app is now called crosstune**, as it works with TIDAL and Spotify as
   well as Qobuz: the command is `crosstune`, and its settings live in
   `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that

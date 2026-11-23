@@ -1343,14 +1343,15 @@ function togglePanel(buttonId: string, panelId: string): void {
 
 /** The action row: the tools for this playlist (the songs below are edited in place). */
 function renderActions(): void {
-  const { id } = current().playlist;
+  const { id, owned } = current().playlist;
   // Links: leaving with a draft is asked about by guardUnsavedPlaylist, as for any address.
   const tool = (name: SourceTool): HTMLAnchorElement => actionLink(toolLabel(name), routeHash({ kind: "playlist", id, tool: name }));
   el("pl-actions").replaceChildren(
     tool("repeats"),
     tool("upgrade"),
     actionButton("Copy to...", () => void copyToService()),
-    actionButton("Link...", () => void createLink(id)),
+    // Only the user's own playlists can be linked (a link writes to each copy).
+    ...(owned ? [actionButton("Link...", () => void createLink(id))] : []),
     tool("stats"),
     tool("export"),
   );

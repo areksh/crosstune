@@ -667,6 +667,10 @@ export async function createLink(preset?: PlaylistId): Promise<void> {
     }
   } catch (error) {
     await reloadSaying((error as Error).message, true);
+    if (!isShown()) {
+      // Linked from a playlist's page: Jobs, where the error is shown, is not on screen.
+      await openDialog({ title: "Could not link them", body: [(error as Error).message], confirm: "Close", cancel: null });
+    }
   } finally {
     button.disabled = false;
   }

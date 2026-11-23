@@ -11,6 +11,7 @@
 
 import { missingGoesTo, type CombineMode } from "../../features/combine.js";
 import { serviceOf, type PlaylistId, type TrackId } from "../../services/ids.js";
+import { VIEW_SHOWN } from "../route-state.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
@@ -72,6 +73,14 @@ export function initCombineView(): void {
     radio.addEventListener("change", onTargetChange);
   }
   void loadPlaylists();
+  window.addEventListener(VIEW_SHOWN, (event) => {
+    if ((event as CustomEvent<string>).detail === "combine") {
+      wantSources = true;
+      if (playlists !== undefined) {
+        applyHandedSources();
+      }
+    }
+  });
 }
 
 /** Add a numbered playlist picker; rows past the second can be removed. */
@@ -154,31 +163,34 @@ async function loadPlaylists(): Promise<void> {
     playlists = [];
   }
   document.querySelectorAll<HTMLSelectElement>(".combine-source").forEach(fillSourceSelect);
-  applyHandedSources();
+  if (wantSources) {
+    applyHandedSources();
+  }
 }
 
 const SOURCES_KEY = "crosstune:combine-sources";
 
 /**
- * Start Combine on these playlists (ticked in the library). Kept in
- * sessionStorage, so it survives the page loading afresh on another service.
+ * Start Combine on these playlists (ticked in the library), on the next page:
+ * kept in sessionStorage and applied once Combine is shown on a page that
+ * stays (VIEW_SHOWN), so a reload on the way cannot use it up.
  */
-export function useSources(ids: readonly PlaylistId[], reloading: boolean): void {
+export function useSources(ids: readonly PlaylistId[]): void {
   try {
     sessionStorage.setItem(SOURCES_KEY, JSON.stringify(ids));
   } catch {
     // Storage unavailable: kept for this page only.
     handed = [...ids];
   }
-  // Applied now only when this page stays: else the next page applies it.
-  if (!reloading && playlists !== undefined) {
-    applyHandedSources();
-  }
 }
+
+/** Set once Combine is shown: the hand-over is applied when the playlists are loaded. */
+let wantSources = false;
 
 let handed: string[] | undefined;
 
 function applyHandedSources(): void {
+  wantSources = false;
   let ids = handed;
   handed = undefined;
   try {

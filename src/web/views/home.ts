@@ -12,6 +12,7 @@ import { classifyPaste, type PasteSummary } from "../../features/music-links.js"
 import { el } from "../dom.js";
 import { storePrefill, type Prefill } from "../prefill.js";
 import { routeHash } from "../../ui/routes.js";
+import { knownPlaylist } from "../library.js";
 
 interface Suggestion {
   label: string;
@@ -104,7 +105,6 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
   }
   const playlist = found.playlists[0];
   if (playlist !== undefined) {
-    const id = String(playlist.id);
     suggestions.push(
       {
         label: "Similar artists from this playlist",
@@ -116,10 +116,14 @@ function suggestionsFor(found: PasteSummary): Suggestion[] {
         },
         primary: suggestions.length === 0,
       },
-      // Any playlist can be read; these three open on it as one of the user's.
-      { label: "Upgrade & repair", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "upgrade" }) },
-      { label: "Library stats", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "stats" }) },
-      { label: "Find duplicates", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "repeats" }) },
+      // These three work on the user's own playlists only.
+      ...(knownPlaylist(playlist.id)?.owned === true
+        ? [
+            { label: "Upgrade & repair", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "upgrade" }) },
+            { label: "Library stats", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "stats" }) },
+            { label: "Find duplicates", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "repeats" }) },
+          ]
+        : []),
     );
   }
   return suggestions;

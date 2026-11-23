@@ -59,6 +59,9 @@ export function initPlaylistsView(): void {
 /** Show a playlist ("#/p/<id>") or a service's list ("#/all/<service>"), by the hash. */
 function route(): void {
   const where = parseRoute(location.hash);
+  if (handedArtists !== undefined && handedArtists.at !== location.hash) {
+    handedArtists = undefined;
+  }
   if ((where.kind !== "playlist" && where.kind !== "all") || where.tool !== undefined) {
     // Read it afresh next time: it may change meanwhile (an undo, another tool).
     // Unsaved edits have been asked about (guardUnsavedPlaylist).
@@ -101,9 +104,9 @@ async function load(): Promise<void> {
       playlists = result.playlists;
       const ids = new Set(playlists.map((p) => p.id));
       [...ticked].filter((id) => !ids.has(id)).forEach((id) => ticked.delete(id));
-      if (handedArtists !== undefined) {
+      if (handedArtists !== undefined && handedArtists.at === location.hash) {
         ticked.clear();
-        handedArtists.filter((id) => ids.has(id)).forEach((id) => ticked.add(id));
+        handedArtists.ids.filter((id) => ids.has(id)).forEach((id) => ticked.add(id));
         handedArtists = undefined;
         renderList();
         openArtists();
@@ -312,12 +315,19 @@ function tickedPlaylists(): ManagerPlaylist[] {
   return playlists.filter((p) => ticked.has(p.id));
 }
 
-/** Playlists to remove artists from, ticked in the library: applied once the list is read. */
-let handedArtists: PlaylistId[] | undefined;
+/** Playlists to remove artists from, ticked in the library, for the list at `at`. */
+let handedArtists: { ids: PlaylistId[]; at: string } | undefined;
 
-/** Open "Remove artists" on these playlists of one service ("#/all/<service>" must be on its way). */
-export function startRemoveArtists(ids: readonly PlaylistId[]): void {
-  handedArtists = [...ids];
+/**
+ * Open "Remove artists" on these playlists of one service, on the list at
+ * `at` ("#/all/<service>"): at once if the page is there already, else once
+ * it gets there (a hand-over not taken up there is dropped).
+ */
+export function startRemoveArtists(ids: readonly PlaylistId[], at: string): void {
+  handedArtists = { ids: [...ids], at };
+  if (location.hash === at) {
+    void load();
+  }
 }
 
 function openArtists(): void {
