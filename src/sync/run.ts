@@ -12,7 +12,7 @@ import type { EntryId, PlaylistId, ServiceName, TrackId } from "../services/ids.
 import { normaliseIsrc } from "../services/isrc.js";
 import type { Playlist, Track } from "../services/model.js";
 import { SERVICES } from "../services/names.js";
-import type { Account } from "../services/service.js";
+import type { Account, Capabilities } from "../services/service.js";
 import { align } from "./align.js";
 import {
   type Conflict,
@@ -28,6 +28,7 @@ import { findChanges, planSync, refOf, type Choice, type Copy, type CopyPlan, ty
 
 /** A service as a sync uses it; MusicService satisfies it. */
 export interface SyncClient extends MatchClient {
+  readonly capabilities?: Pick<Capabilities, "playability">;
   account?(): Account | undefined;
   getPlaylist(id: PlaylistId): Promise<Playlist>;
   getPlaylistTracks(id: PlaylistId): Promise<Track[]>;
@@ -281,7 +282,11 @@ async function gatherFacts(
 async function isOffered(client: SyncClient, id: TrackId): Promise<Offered> {
   try {
     const track = await client.getTrack(id);
-    return track.streamable === false ? "no" : "yes";
+    if (track.streamable === false) {
+      return "no";
+    }
+    // Found, but does that mean offered? Only where the service says which are.
+    return track.streamable === undefined && client.capabilities?.playability.ok === false ? "unknown" : "yes";
   } catch (error) {
     return isNotFound(error) ? "no" : "unknown";
   }

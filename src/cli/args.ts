@@ -2,6 +2,7 @@
  * Argument parsing for CLI commands.
  */
 
+import { isServiceName, type ServiceName } from "../services/names.js";
 import type { PlaylistId } from "../services/ids.js";
 import {
   COMBINE_KEEPS,
@@ -2422,13 +2423,35 @@ export function parseScheduleArgs(argv: readonly string[]): { target: ScheduleTa
 }
 
 /** `login [--print-url]`. */
-export function parseLoginArgs(argv: readonly string[]): { printUrl: boolean } {
+export interface LoginArgs {
+  printUrl: boolean;
+  service: ServiceName;
+  /** The id of the app the user registered with the service. */
+  clientId?: string;
+}
+
+export function parseLoginArgs(argv: readonly string[]): LoginArgs {
   let printUrl = false;
-  for (const arg of argv) {
-    if (arg !== "--print-url") {
+  let service: ServiceName | undefined;
+  let clientId: string | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (arg === "--print-url") {
+      printUrl = true;
+    } else if (arg === "--client-id") {
+      clientId = argv[i + 1];
+      i += 1;
+      if (clientId === undefined || clientId.startsWith("--")) {
+        throw new Error("--client-id needs the client id of your app");
+      }
+    } else if (isServiceName(arg)) {
+      if (service !== undefined) {
+        throw new Error("login takes one service at a time");
+      }
+      service = arg;
+    } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
-    printUrl = true;
   }
-  return { printUrl };
+  return { printUrl, service: service ?? "qobuz", ...(clientId !== undefined && { clientId }) };
 }

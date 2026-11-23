@@ -193,6 +193,7 @@ import {
   parseImportArgs,
   parseJobsArgs,
   parseLoginArgs,
+  type LoginArgs,
   parseRunDueArgs,
   parseScheduleArgs,
   parseServeArgs,
@@ -364,7 +365,19 @@ import {
 } from "./features/undo.js";
 import { QobuzClient, QobuzError } from "./services/qobuz/index.js";
 import { Accounts, type AccountStore, type Connector } from "./accounts/accounts.js";
-import { fileAccountStore } from "./cli/account-store.js";
+import { oauthConnector, type OAuthConnectorOptions } from "./accounts/oauth-connector.js";
+import { SpotifyClient } from "./services/spotify/client.js";
+import {
+  SPOTIFY_AUTHORIZE_URL,
+  SPOTIFY_SCOPES,
+  SPOTIFY_SIGN_IN_MONTHS,
+  SPOTIFY_TOKEN_URL,
+} from "./services/spotify/oauth-config.js";
+import { SpotifyService } from "./services/spotify/service.js";
+import { TidalClient } from "./services/tidal/client.js";
+import { TIDAL_AUTHORIZE_URL, TIDAL_SCOPES, TIDAL_TOKEN_URL } from "./services/tidal/oauth-config.js";
+import { TidalService } from "./services/tidal/service.js";
+import { fileAccountStore, fileTokenVault, removeTokens } from "./cli/account-store.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
 import { homeService } from "./jobs/model.js";
@@ -473,6 +486,16 @@ async function main(): Promise<void> {
   if (command === "serve") {
     await runServe(parseServeArgs(args.slice(1)));
     return;
+  }
+
+  // Other services than Qobuz sign in through the accounts.
+  if (command === "login") {
+    const login = parseLoginArgs(args.slice(1));
+    if (login.service !== "qobuz") {
+      await signIn(login, journal);
+      output.flush();
+      return;
+    }
   }
 
   // `accounts` only reads what is saved.
@@ -727,8 +750,25 @@ function openConnections(journal: Journal): Connections {
   return { hub, accounts, listener };
 }
 
-/** How each service is signed in to. */
-function connectors(_store: AccountStore): Connector[] {
+/** Where a service's sign-in comes back to; registered with the user's app. */
+function redirectUri(service: ServiceName): string {
+  return `http://127.0.0.1:${DEFAULT_SIGN_IN_PORT}/callback/${service}`;
+}
+
+/** How each service is signed in to. A new service is one entry here. */
+function connectors(store: AccountStore): Connector[] {
+  const oauth = (
+    service: ServiceName,
+    settings: Pick<OAuthConnectorOptions, "authorizeUrl" | "tokenUrl" | "scopes" | "lifetimeMs" | "load">,
+  ): Connector =>
+    oauthConnector({
+      ...settings,
+      service,
+      redirectUri: redirectUri(service),
+      clientId: () => store.clientId(service),
+      vault: fileTokenVault(service),
+      dropTokens: () => removeTokens(service),
+    });
   return [
     qobuzConnector({
       newClient: () => new QobuzClient({ logger }),
@@ -736,7 +776,64 @@ function connectors(_store: AccountStore): Connector[] {
       tokens: fileTokenStore(),
       port: DEFAULT_SIGN_IN_PORT,
     }),
+    oauth("tidal", {
+      authorizeUrl: TIDAL_AUTHORIZE_URL,
+      tokenUrl: TIDAL_TOKEN_URL,
+      scopes: TIDAL_SCOPES,
+      load: async (tokens) => {
+        const service = new TidalService(new TidalClient({ tokens, logger }));
+        await service.load();
+        return service;
+      },
+    }),
+    oauth("spotify", {
+      authorizeUrl: SPOTIFY_AUTHORIZE_URL,
+      tokenUrl: SPOTIFY_TOKEN_URL,
+      scopes: SPOTIFY_SCOPES,
+      lifetimeMs: SPOTIFY_SIGN_IN_MONTHS * 30 * 24 * 60 * 60 * 1000,
+      load: async (tokens) => {
+        const service = new SpotifyService(new SpotifyClient({ tokens, logger }));
+        await service.load();
+        return service;
+      },
+    }),
   ];
+}
+
+/** `login <service>`: sign in from the terminal, by redirect or a pasted address. */
+async function signIn(login: LoginArgs, journal: Journal): Promise<void> {
+  const { hub, accounts, listener } = openConnections(journal);
+  const { service } = login;
+  if (login.clientId !== undefined) {
+    accounts.setClientId(service, login.clientId);
+  }
+  const { url } = await accounts.start(service);
+  const listening = login.printUrl ? undefined : await listener.listen();
+  if (listening?.ok === true) {
+    logger.info(`Opening your browser to sign in to ${labelOf(service)}...`);
+    logger.info(`If it does not open, visit this URL manually:\n  ${url}`);
+    openInBrowser(url);
+    while (accounts.waiting(service)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    // The redirect has been taken; the token and account are read after it.
+    for (let waited = 0; waited < 60 && !hub.connected().includes(service); waited += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    listener.close();
+  } else {
+    if (listening !== undefined) {
+      logger.warn(listening.problem);
+    }
+    const io = consoleIO();
+    io.print(`Open this link in a browser on any device and sign in to ${labelOf(service)}:\n\n  ${url}\n`);
+    io.print("Then copy the address of the page it ends on (it may not load) and paste it here.");
+    await accounts.complete(await io.readLine("Address: "));
+  }
+  if (!hub.connected().includes(service)) {
+    throw new Error(`${labelOf(service)} was not connected; run qobuz-helper login ${service} again.`);
+  }
+  logConnected(accounts);
 }
 
 /** Start the web server over the connected services. */

@@ -243,6 +243,15 @@ describe("what is not a removal", () => {
     expect([w.state.questions, w.state.answers]).toEqual([[], {}]);
   });
 
+  it("waits where the service finds songs it no longer offers just the same", async () => {
+    const w = await linked([1, 2, 3]);
+    Object.assign(w.at("tidal").account, { capabilities: { playability: { ok: false, reason: "cannot say" } } });
+    w.edit("tidal", without(2));
+    await w.sync();
+    expect(w.songs("qobuz")).toEqual([1, 2, 3]);
+    expect(w.state.questions).toMatchObject([{ kind: "removed-or-withdrawn" }]);
+  });
+
   it("answered as withdrawn, it stays on the others for good", async () => {
     const w = await linked([1, 2, 3]);
     w.at("tidal").account.knowsAvailability = false;

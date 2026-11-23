@@ -1254,8 +1254,8 @@ describe("driver commands' arguments", () => {
     expect(parseServeArgs([])).toEqual({ open: true });
     expect(parseServeArgs(["--no-open", "--port", "8123"])).toEqual({ open: false, port: 8123 });
     expect(parseScheduleArgs(["print", "--systemd"])).toEqual({ target: "systemd" });
-    expect(parseLoginArgs(["--print-url"])).toEqual({ printUrl: true });
-    expect(parseLoginArgs([])).toEqual({ printUrl: false });
+    expect(parseLoginArgs(["--print-url"])).toEqual({ printUrl: true, service: "qobuz" });
+    expect(parseLoginArgs([])).toEqual({ printUrl: false, service: "qobuz" });
   });
 
   it("rejects bad driver arguments", () => {
@@ -1302,5 +1302,19 @@ describe("parseRemoveArtistsArgs", () => {
     expect(() => parseRemoveArtistsArgs(["--playlist", "x"])).toThrow(/numeric id/);
     expect(() => parseRemoveArtistsArgs(["--playlist"])).toThrow(/numeric id/);
     expect(() => parseRemoveArtistsArgs(["--all-playlists", "--force"])).toThrow(/Unknown argument/);
+  });
+});
+
+describe("parseLoginArgs with a service", () => {
+  it("signs in to Qobuz unless another is named", () => {
+    expect(parseLoginArgs([])).toEqual({ printUrl: false, service: "qobuz" });
+    expect(parseLoginArgs(["tidal", "--print-url"])).toEqual({ printUrl: true, service: "tidal" });
+    expect(() => parseLoginArgs(["deezer"])).toThrow(/Unknown argument: deezer/);
+    expect(() => parseLoginArgs(["tidal", "spotify"])).toThrow(/one service/);
+  });
+
+  it("takes the client id of the user's app", () => {
+    expect(parseLoginArgs(["spotify", "--client-id", "abc"])).toEqual({ printUrl: false, service: "spotify", clientId: "abc" });
+    expect(() => parseLoginArgs(["spotify", "--client-id"])).toThrow(/--client-id/);
   });
 });
