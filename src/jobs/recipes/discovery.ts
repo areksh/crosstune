@@ -8,6 +8,7 @@
  * same list without reading Qobuz (and a retry, or another machine, agrees).
  */
 
+import { shortId } from "../../services/ids.js";
 import type { Artist, Track } from "../../services/model.js";
 import { seededRandom, shuffle } from "../../features/combine.js";
 import { fetchArtistTracks, type SimilarArtistsClient } from "../../features/similar-artists.js";
@@ -89,7 +90,7 @@ export async function resolveDiscovery(
   const tracks: DesiredTrack[] = fetched.flatMap((entry) =>
     entry.tracks.map((track) => ({
       trackId: track.id,
-      source: `artist:${entry.artist.id}`,
+      source: `artist:${shortId(entry.artist.id)}`,
       ...(track.duration !== undefined && { durationSeconds: track.duration }),
     })),
   );

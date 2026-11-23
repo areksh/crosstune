@@ -9,6 +9,7 @@
  * and saving in playlist-manager.ts on the server.
  */
 
+import type { ArtistId, EntryId, PlaylistId, TrackId } from "../../services/ids.js";
 import {
   artistCounts,
   linkLines,
@@ -58,19 +59,19 @@ import { el, showError } from "../dom.js";
 import { enableDrag } from "../drag-list.js";
 import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
-import { confirmDelete, editDetails, managedNotice, songCount } from "./playlist-actions.js";
+import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
 
 interface Editor {
   playlist: ManagerPlaylist;
-  entries: Map<number, Entry>;
+  entries: Map<EntryId, Entry>;
   edits: EditStack<Draft>;
-  selected: Set<number>;
+  selected: Set<EntryId>;
   /** Where a shift-click range starts. */
-  anchor?: number;
+  anchor?: EntryId;
   /** The row the keyboard is on. */
-  focused?: number;
+  focused?: EntryId;
   query: string;
-  rows: Map<number, HTMLElement>;
+  rows: Map<EntryId, HTMLElement>;
 }
 
 let editor: Editor | undefined;
@@ -85,8 +86,8 @@ function isDirty(): boolean {
   return editor !== undefined && summarise(editor.edits.now).changed;
 }
 
-function hashFor(id: number): string {
-  return `#/playlists/${id}`;
+function hashFor(id: PlaylistId): string {
+  return playlistHash(id);
 }
 
 /**
@@ -161,7 +162,7 @@ interface Opened {
 }
 
 /** Show a playlist, reading it unless it is open already. */
-export async function openEditor(id: number, known?: ManagerPlaylist): Promise<void> {
+export async function openEditor(id: PlaylistId, known?: ManagerPlaylist): Promise<void> {
   if (editor?.playlist.id === id) {
     return;
   }
@@ -242,12 +243,12 @@ function kept(): Entry[] {
 }
 
 /** The ids shown: the kept ones, narrowed by the search. */
-function shownIds(): readonly number[] {
+function shownIds(): readonly EntryId[] {
   const { edits, query } = current();
   return query.trim().length === 0 ? edits.now.order : searchIds(kept(), query);
 }
 
-function selectedInOrder(): number[] {
+function selectedInOrder(): EntryId[] {
   const { edits, selected } = current();
   return edits.now.order.filter((id) => selected.has(id));
 }
@@ -343,8 +344,8 @@ function renderMeta(): void {
 
 /** What marks a song out: a copy of another, unplayable... */
 interface Badges {
-  duplicates: Set<number>;
-  versions: Set<number>;
+  duplicates: Set<EntryId>;
+  versions: Set<EntryId>;
 }
 
 function badgesNow(entries: readonly Entry[]): Badges {
@@ -529,7 +530,7 @@ function button(text: string, onClick: () => void, className = "secondary small"
 
 // ---- Selecting --------------------------------------------------------------
 
-function selectOnly(ids: Iterable<number>): void {
+function selectOnly(ids: Iterable<EntryId>): void {
   const state = current();
   state.selected = new Set(ids);
   renderSelection();
@@ -537,7 +538,7 @@ function selectOnly(ids: Iterable<number>): void {
 }
 
 /** Select what a menu item picked, among the songs shown. */
-function selectPicked(ids: readonly number[], what: string): void {
+function selectPicked(ids: readonly EntryId[], what: string): void {
   const shown = new Set(shownIds());
   const picked = ids.filter((id) => shown.has(id));
   selectOnly(picked);
@@ -549,7 +550,7 @@ function selectPicked(ids: readonly number[], what: string): void {
   }
 }
 
-function toggle(id: number): void {
+function toggle(id: EntryId): void {
   const { selected } = current();
   if (!selected.delete(id)) {
     selected.add(id);
@@ -562,7 +563,7 @@ function onRowClick(event: MouseEvent): void {
   if (row === null || editor === undefined || target.closest(".pl-handle") !== null) {
     return;
   }
-  const id = Number(row.dataset["id"]);
+  const id = (row.dataset["id"] as EntryId);
   const state = current();
   if (event.shiftKey && state.anchor !== undefined) {
     const range = rangeBetween(shownIds(), state.anchor, id);
@@ -845,7 +846,7 @@ async function splitSelected(): Promise<void> {
   }
 }
 
-async function copyNow(ids: readonly number[], destination: Destination): Promise<void> {
+async function copyNow(ids: readonly EntryId[], destination: Destination): Promise<void> {
   await working("Copying...", async () => {
     const result = await api<ConfirmedAdd>("POST", "/api/manager/copy", { trackIds: trackIdsOf(ids), destination });
     say(describeAdd(result, "Copied"));
@@ -868,7 +869,7 @@ function describeAdd(result: ConfirmedAdd, verb: string): string {
   return `${parts.join("; ")}.`;
 }
 
-function trackIdsOf(ids: readonly number[]): number[] {
+function trackIdsOf(ids: readonly EntryId[]): TrackId[] {
   const { entries } = current();
   return ids.map((id) => entries.get(id)!.id);
 }
@@ -923,7 +924,7 @@ function menuItem(text: string, act: () => void): HTMLButtonElement {
 }
 
 function renderSelectMenu(): void {
-  const pick = (text: string, what: string, ids: () => readonly number[]): HTMLElement =>
+  const pick = (text: string, what: string, ids: () => readonly EntryId[]): HTMLElement =>
     menuItem(text, () => selectPicked(ids(), what));
 
   const keep = document.createElement("select");
@@ -1030,7 +1031,7 @@ function renderSortMenu(): void {
     const { selected } = current();
     return only.input.checked && selected.size > 1 ? kept().filter((e) => selected.has(e.playlistTrackId)) : kept();
   };
-  const arrange = (text: string, ids: (entries: Entry[]) => number[]): HTMLElement =>
+  const arrange = (text: string, ids: (entries: Entry[]) => EntryId[]): HTMLElement =>
     menuItem(text, () => edit(reorder(current().edits.now, ids(scope())), `Sorted: ${text}.`));
   el("pl-sort-items").replaceChildren(
     only.field,
@@ -1046,7 +1047,7 @@ function renderSortMenu(): void {
 
 // ---- Artists ------------------------------------------------------------------
 
-function entriesOfArtist(artist: { id?: number; name: string }): number[] {
+function entriesOfArtist(artist: { id?: ArtistId; name: string }): EntryId[] {
   const name = normaliseArtistName(artist.name);
   return kept()
     .filter((entry) =>
@@ -1122,7 +1123,7 @@ async function lookUpLinks(lines: readonly string[]): Promise<void> {
 }
 
 /** The songs the typed artists pick: theirs, or (to keep only them) all others. */
-function byPicked(): { ids: number[]; keepOnly: boolean } {
+function byPicked(): { ids: EntryId[]; keepOnly: boolean } {
   const entries = kept();
   const { terms } = parseArtistTerms(byLines(), links);
   const guests = el<HTMLInputElement>("pl-by-guests").checked;
@@ -1214,7 +1215,7 @@ function renderOpenIn(): void {
       prefill: {
         view: "similar",
         radios: { "similar-source": "playlist" },
-        fields: { "similar-source-link": `https://play.qobuz.com/playlist/${id}` },
+        fields: { "similar-source-link": playlistLink(id as PlaylistId) },
       },
     },
     { label: "Combine playlists", prefill: { view: "combine", fields: { "combine-source-first": id } } },
@@ -1522,13 +1523,13 @@ export function initPlaylistEditor(): void {
     handle: ".pl-handle",
     enabled: () => canEdit() && current().query.trim().length === 0,
     rowsToDrag: (row) => {
-      const id = Number(row.dataset["id"]);
+      const id = (row.dataset["id"] as EntryId);
       const { selected, rows } = current();
       return selected.has(id) ? selectedInOrder().map((item) => rows.get(item)!) : [row];
     },
     onDrop: (rows, index) => {
       if (editor !== undefined) {
-        const ids = rows.map((row) => Number(row.dataset["id"]));
+        const ids = rows.map((row) => (row.dataset["id"] as EntryId));
         edit(moveTo(current().edits.now, ids, index), `Moved ${songCount(ids.length)}.`);
       }
     },

@@ -11,14 +11,14 @@
  * server modules.
  */
 
-import type { EntryId, PlaylistId } from "../../services/ids.js";
+import type { EntryId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { coverSlot } from "../artwork.js";
 import { groupHead, qualityPill, titleOf, trackText } from "../tracks.js";
 
 interface DedupTrack {
-  id: number;
+  id: TrackId;
   title: string;
   version?: string;
   artist: string;
@@ -33,11 +33,11 @@ interface DedupTrack {
 interface ResolvedGroup {
   tracks: DedupTrack[];
   /** The copy kept; absent for a song in several versions, all kept by default. */
-  keepId?: number;
+  keepId?: TrackId;
 }
 
 interface PlaylistRef {
-  id: number;
+  id: PlaylistId;
   name: string;
 }
 
@@ -63,7 +63,7 @@ type Source =
   | { type: "all-playlists" };
 
 interface Removal {
-  id: number;
+  id: TrackId;
   playlistTrackId?: EntryId;
   playlistId?: PlaylistId;
 }
@@ -138,7 +138,7 @@ function currentSource(): Source | undefined {
   if (value === "") {
     return undefined;
   }
-  return { type: "playlist", playlistId: Number(value) };
+  return { type: "playlist", playlistId: value as PlaylistId };
 }
 
 /** The keep strategy, then the tie-breaker when one is chosen. */
@@ -459,7 +459,7 @@ function collectRemovals(): Removal[] {
       const song = scannedSongs[Number(songIndex)];
       for (const row of wrapper.querySelectorAll<HTMLElement>(".dedup-track")) {
         const box = row.querySelector<HTMLInputElement>(".dedup-keep-box");
-        const playlistId = Number(row.dataset["playlistId"]);
+        const playlistId = (row.dataset["playlistId"] as PlaylistId);
         const entry = song?.playlists.find((p) => p.playlist.id === playlistId);
         if (box === null || box.checked || entry === undefined) {
           continue;
@@ -481,7 +481,7 @@ function collectRemovals(): Removal[] {
       if (box === null || box.checked) {
         continue;
       }
-      const id = Number(row.dataset["trackId"]);
+      const id = (row.dataset["trackId"] as TrackId);
       // By position, not id: two entries of the same track share an id.
       const track = scanned.group.tracks[Number(row.dataset["position"])];
       removals.push({

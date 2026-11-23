@@ -9,6 +9,7 @@
  * refresh from removing tracks (see ../reconcile.ts).
  */
 
+import { shortId, type TrackId } from "../../services/ids.js";
 import { findNewReleases, type NewReleasesClient } from "../../features/new-releases.js";
 import {
   fetchAlbumTracks,
@@ -92,14 +93,14 @@ export async function resolveNewReleasesFeed(
   }
 
   let tracks: DesiredTrack[] = [];
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   for (const album of fetched) {
     for (const { track, exclusion } of album.tracks) {
       if (exclusion === undefined && !seen.has(track.id)) {
         seen.add(track.id);
         tracks.push({
           trackId: track.id,
-          source: `album:${album.albumId}`,
+          source: `album:${shortId(album.albumId)}`,
           ...(track.duration !== undefined && { durationSeconds: track.duration }),
         });
       }

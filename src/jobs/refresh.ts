@@ -77,7 +77,7 @@ export interface RefreshPreview {
   createsPlaylist: boolean;
   add: { trackId: TrackId; source: string }[];
   remove: PresentEntry[];
-  newlyDismissed: number[];
+  newlyDismissed: TrackId[];
   withheldRemovals: number;
   complete: boolean;
   notes: string[];
@@ -96,7 +96,7 @@ export interface PassOptions {
   now: Date;
   dryRun?: boolean;
   /** Original dates of favourites the favourites job's tidy-ups replaced. */
-  favouriteDates?: ReadonlyMap<number, string>;
+  favouriteDates?: ReadonlyMap<TrackId, string>;
 }
 
 export const MANAGED_DESCRIPTION = "Managed by qobuz-helper";
@@ -298,7 +298,7 @@ async function sourceStep(
   job: Job & { source: SourceDef },
   state: JobState,
   tracks0: readonly Track[],
-  playlistId0: number | undefined,
+  playlistId0: PlaylistId | undefined,
   options: PassOptions,
 ): Promise<SourceStepResult> {
   const recipe = await resolveSource(client, job, state.source ?? {}, {
@@ -406,9 +406,9 @@ async function reorder(
   playlistId: PlaylistId,
   entries: readonly PresentEntry[],
   owned: readonly { playlistTrackId: EntryId }[],
-  desiredOrder: readonly number[],
+  desiredOrder: readonly TrackId[],
 ): Promise<boolean> {
-  const rank = new Map<number, number>();
+  const rank = new Map<TrackId, number>();
   desiredOrder.forEach((trackId, index) => {
     if (!rank.has(trackId)) {
       rank.set(trackId, index);

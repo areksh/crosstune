@@ -31,20 +31,20 @@ export interface ReconcileInput {
   complete: boolean;
   present: readonly PresentEntry[];
   owned: readonly OwnedEntry[];
-  dismissed: readonly number[];
+  dismissed: readonly TrackId[];
 }
 
 export interface ReconcilePlan {
   /** Track ids to add, in desired order, each once. */
-  add: number[];
+  add: TrackId[];
   /** Playlist-track ids to remove. */
-  remove: number[];
+  remove: EntryId[];
   /** Owned entries that stay (still present and not removed). */
   keptOwned: OwnedEntry[];
   /** The whole dismissed list after this run (empty in mirror mode). */
-  dismissed: number[];
+  dismissed: TrackId[];
   /** Tracks dismissed by this run (the user removed them since last time). */
-  newlyDismissed: number[];
+  newlyDismissed: TrackId[];
   /** Removals skipped because the resolve was incomplete. */
   withheldRemovals: number;
 }
@@ -56,8 +56,8 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
 
   let candidates: PresentEntry[];
   let kept: OwnedEntry[];
-  let dismissed: number[];
-  let newlyDismissed: number[] = [];
+  let dismissed: TrackId[];
+  let newlyDismissed: TrackId[] = [];
 
   if (input.mode === "respect") {
     const stillThere = input.owned.filter((entry) => presentEntries.has(entry.playlistTrackId));
@@ -74,7 +74,7 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
   } else {
     // The job owns the whole playlist: anything undesired goes, and so does
     // every copy of a desired track after the first.
-    const seen = new Set<number>();
+    const seen = new Set<TrackId>();
     candidates = [];
     kept = [];
     for (const entry of input.present) {
@@ -122,7 +122,7 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
 export function settlePending(
   owned: readonly OwnedEntry[],
   present: readonly PresentEntry[],
-  pending: { removed: readonly number[]; added: readonly number[] },
+  pending: { removed: readonly EntryId[]; added: readonly TrackId[] },
 ): OwnedEntry[] {
   const presentIds = new Set(present.map((entry) => entry.playlistTrackId));
   const removing = new Set(pending.removed);
@@ -142,7 +142,7 @@ export function settlePending(
   return [...kept, ...adopted];
 }
 
-function unique(ids: readonly number[]): number[] {
+function unique<T>(ids: readonly T[]): T[] {
   return [...new Set(ids)];
 }
 
@@ -207,7 +207,7 @@ export function planMoves(entries: readonly Ranked[]): Move[] {
 }
 
 /** Playlist-track ids of a longest increasing (by rank) subsequence ending at the max rank. */
-function increasingRunEndingAtMax(ranked: readonly Required<Ranked>[]): Set<number> {
+function increasingRunEndingAtMax(ranked: readonly Required<Ranked>[]): Set<EntryId> {
   // Patience sorting with predecessors: for each entry, `previous` links an
   // increasing run ending there that is as long as any.
   const tails: number[] = []; // indexes into `ranked`, by run length - 1
@@ -230,7 +230,7 @@ function increasingRunEndingAtMax(ranked: readonly Required<Ranked>[]): Set<numb
       maxIndex = index;
     }
   });
-  const keep = new Set<number>();
+  const keep = new Set<EntryId>();
   for (let index = maxIndex; index >= 0; index = previous[index] ?? -1) {
     const entry = ranked[index];
     if (entry !== undefined) {

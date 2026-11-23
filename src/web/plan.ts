@@ -10,6 +10,7 @@
  * branches) counts once, at its first place.
  */
 
+import type { TrackId } from "../services/ids.js";
 import { seededRandom } from "../features/combine.js";
 import {
   fitToLength,
@@ -24,7 +25,7 @@ import { el } from "./dom.js";
 
 /** One ticked track, as read off its row's checkbox. */
 interface Pick {
-  id: number;
+  id: TrackId;
   title: string;
   duration?: number;
 }
@@ -91,7 +92,7 @@ export class PlanControls {
   }
 
   /** The ticked track ids in the chosen play order. */
-  orderedTrackIds(): number[] {
+  orderedTrackIds(): TrackId[] {
     return this.#ordered().map((pick) => pick.id);
   }
 
@@ -126,7 +127,7 @@ export class PlanControls {
     );
     const droppedIds = new Set(dropped.map((pick) => pick.id));
     for (const box of groups.flat()) {
-      if (!droppedIds.has(Number(box.dataset["trackId"]))) {
+      if (!droppedIds.has((box.dataset["trackId"] as TrackId))) {
         continue;
       }
       box.checked = false;
@@ -143,10 +144,10 @@ export class PlanControls {
 
   /** The ticked tracks per group, each track once (at its first place). */
   #picks(): Pick[][] {
-    const seen = new Set<number>();
+    const seen = new Set<TrackId>();
     return this.#options.groups().map((group) =>
       group.flatMap((box): Pick[] => {
-        const id = Number(box.dataset["trackId"]);
+        const id = (box.dataset["trackId"] as TrackId);
         if (!box.checked || seen.has(id)) {
           return [];
         }

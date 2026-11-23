@@ -10,19 +10,21 @@
  */
 
 import { labelOf, ServiceError } from "./errors.js";
-import { isServiceName, type ServiceName } from "./names.js";
+import { isServiceName, SERVICES, type ServiceName } from "./names.js";
 
 export { SERVICES, SERVICE_LABELS, isServiceName, type ServiceName } from "./names.js";
 
-// Aliases for now: they become distinct string types once every use is named
-// (the multi-service phase 1 plan, task 4).
-export type TrackId = number;
-export type AlbumId = string;
-export type ArtistId = number;
-export type PlaylistId = number;
+declare const kind: unique symbol;
+/** A string that only the functions here make, distinct per kind of thing. */
+type Id<Kind extends string> = string & { readonly [kind]: Kind };
+
+export type TrackId = Id<"track">;
+export type AlbumId = Id<"album">;
+export type ArtistId = Id<"artist">;
+export type PlaylistId = Id<"playlist">;
 /** A playlist entry: one track's place in one playlist. */
-export type EntryId = number;
-export type UserId = number;
+export type EntryId = Id<"entry">;
+export type UserId = Id<"user">;
 export type AnyId = TrackId | AlbumId | ArtistId | PlaylistId | EntryId | UserId;
 
 /** @throws {ServiceError} kind `bad-id` if the native id is empty. */
@@ -31,7 +33,7 @@ export function tagId<T extends AnyId>(service: ServiceName, native: string | nu
   if (text.length === 0) {
     throw new ServiceError(service, "bad-id", `${labelOf(service)} gave an empty id`);
   }
-  return `${service}:${text}` as unknown as T;
+  return `${service}:${text}` as T;
 }
 
 /** An id's parts, or undefined when it is not one. */
@@ -68,6 +70,31 @@ export function nativeOf(service: ServiceName, id: AnyId): string {
   return parsed.native;
 }
 
+/**
+ * An id as shown and as used in stored keys: Qobuz's own, as it always was, or
+ * the whole id of any other service.
+ */
+export function shortId(id: AnyId): string {
+  const parsed = parseId(String(id));
+  return parsed?.service === "qobuz" ? parsed.native : String(id);
+}
+
+/** Service by service; within one, numbers by value and before text. */
+export function compareIds(a: AnyId, b: AnyId): number {
+  const [x, y] = [parts(a), parts(b)];
+  if (x.service !== y.service) {
+    return SERVICES.indexOf(x.service) - SERVICES.indexOf(y.service);
+  }
+  const [m, n] = [x.native, y.native].map((native) => (BARE_NUMBER.test(native) ? Number(native) : NaN)) as [
+    number,
+    number,
+  ];
+  if (Number.isNaN(m) !== Number.isNaN(n)) {
+    return Number.isNaN(m) ? 1 : -1;
+  }
+  return Number.isNaN(m) ? (x.native < y.native ? -1 : x.native > y.native ? 1 : 0) : m - n;
+}
+
 const BARE_NUMBER = /^[1-9]\d{0,15}$/;
 const BARE_ALBUM = /^[a-z0-9]+$/i;
 
@@ -82,7 +109,7 @@ export function readId<T extends AnyId>(value: unknown): T | undefined {
   if (BARE_NUMBER.test(value)) {
     return Number.isSafeInteger(Number(value)) ? tagId<T>("qobuz", value) : undefined;
   }
-  return parseId(value) === undefined ? undefined : (value as unknown as T);
+  return parseId(value) === undefined ? undefined : (value as T);
 }
 
 /** An album id from outside: a tagged one, or a bare one, which is Qobuz's. */

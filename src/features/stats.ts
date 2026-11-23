@@ -13,7 +13,7 @@
  * the stats is the *resolve* step and writes nothing.
  */
 
-import type { PlaylistId, TrackId } from "../services/ids.js";
+import { shortId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
@@ -106,7 +106,7 @@ export async function collectLibrary(
         client.getPlaylistTracks(source.playlistId),
       ]);
       const name = playlists.find((p) => p.id === source.playlistId)?.name;
-      return { kind: "playlist", label: name ?? `Playlist ${source.playlistId}`, tracks };
+      return { kind: "playlist", label: name ?? `Playlist ${shortId(source.playlistId)}`, tracks };
     }
     case "everything": {
       const [favourites, playlists] = await Promise.all([
@@ -116,7 +116,7 @@ export async function collectLibrary(
       const lists = await mapWithConcurrency(playlists, DEFAULT_CONCURRENCY, (playlist) =>
         client.getPlaylistTracks(playlist.id),
       );
-      const seen = new Set<number>();
+      const seen = new Set<TrackId>();
       const tracks = [favourites, ...lists].flat().filter((track) => {
         if (seen.has(track.id)) {
           return false;
@@ -236,7 +236,7 @@ function byCountThenLabel(a: Bucket, b: Bucket): number {
 
 /** Decade buckets, oldest first and gap-free, then the unknown bucket if any. */
 function decadeBuckets(tracks: readonly Track[], name: (label: string) => string): Bucket[] {
-  const byDecade = new Map<string, number[]>();
+  const byDecade = new Map<string, TrackId[]>();
   for (const track of tracks) {
     const key = decadeOf(track.releaseDate);
     const ids = byDecade.get(key);

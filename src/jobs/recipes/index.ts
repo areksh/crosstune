@@ -1,5 +1,6 @@
 /** Resolve a job's source, whichever kind it is, into desired tracks and its new state. */
 
+import type { TrackId } from "../../services/ids.js";
 import type { Job, SourceDef, SourceState } from "../model.js";
 import { resolveCombined } from "./combined.js";
 import { applyShape, type SourceResult } from "./common.js";
@@ -16,7 +17,7 @@ export type SourceClient = FeedClient & DiscoveryClient;
 export interface SourceContext {
   now: Date;
   /** Original dates of favourites a tidy-up replaced. */
-  favouriteDates?: ReadonlyMap<number, string>;
+  favouriteDates?: ReadonlyMap<TrackId, string>;
 }
 
 export async function resolveSource(

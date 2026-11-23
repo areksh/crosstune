@@ -76,7 +76,7 @@ function currentSource(): Source {
   const value = el<HTMLSelectElement>("stats-source").value;
   return value === "favourites" || value === "everything"
     ? { type: value }
-    : { type: "playlist", playlistId: Number(value) };
+    : { type: "playlist", playlistId: value as PlaylistId };
 }
 
 async function load(): Promise<void> {
@@ -261,7 +261,7 @@ async function onCommit(): Promise<void> {
   button.disabled = true;
   button.textContent = "Saving...";
   try {
-    const result = await api<{ playlist?: Playlist; added: number[] }>("POST", "/api/commit", {
+    const result = await api<{ playlist?: Playlist; added: TrackId[] }>("POST", "/api/commit", {
       tool: "stats",
       target: {
         type: "new",

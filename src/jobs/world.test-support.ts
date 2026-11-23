@@ -4,6 +4,8 @@
  * and favourite dates -- enough for sources and tidy-ups to run against.
  */
 
+import { shortId, type PlaylistId, type TrackId } from "../services/ids.js";
+import { qid } from "../services/ids.test-support.js";
 import type { Track } from "../services/model.js";
 import { FakeAccount } from "../features/fake-account.test-support.js";
 
@@ -22,27 +24,27 @@ export const CATALOGUE: Record<number, Omit<Track, "id">> = {
   8: { title: "Karmacoma", artist: "Massive Attack", isrc: "GB8", streamable: true, bitDepth: 24, samplingRate: 192 },
 };
 
-export function detail(id: number): Track {
-  return { id, title: `Track ${id}`, ...CATALOGUE[id] };
+export function detail(id: TrackId): Track {
+  return { id, title: `Track ${shortId(id)}`, ...CATALOGUE[Number(shortId(id))] };
 }
 
 export function richAccount(favouriteDates: Record<number, string> = {}) {
   const account = new FakeAccount();
   const plain = account.getPlaylistTracks.bind(account);
   return Object.assign(account, {
-    getPlaylistTracks: async (playlistId: number) =>
+    getPlaylistTracks: async (playlistId: PlaylistId) =>
       (await plain(playlistId)).map((track) => ({ ...detail(track.id), playlistTrackId: track.playlistTrackId })),
     getFavoriteTracks: async () => {
       account.calls.push("getFavoriteTracks:");
       return account.favourites.tracks.map((id) => ({
         ...detail(id),
-        ...(favouriteDates[id] !== undefined && { favouritedAt: favouriteDates[id] }),
+        ...(favouriteDates[Number(shortId(id))] !== undefined && { favouritedAt: favouriteDates[Number(shortId(id))] }),
       }));
     },
     searchTracks: async (query: string) =>
       Object.keys(CATALOGUE)
         .map(Number)
         .filter((id) => CATALOGUE[id]?.isrc === query)
-        .map(detail),
+        .map((id) => detail(qid(id))),
   });
 }

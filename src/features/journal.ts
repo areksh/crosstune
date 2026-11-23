@@ -17,7 +17,7 @@
  * happen before the error is rethrown.
  */
 
-import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { shortId, type AnyId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
@@ -81,9 +81,9 @@ export interface EntryMeta {
 
 /** Per-action scratch the recorder keeps: playlist names and known contents. */
 export interface RecordingScope {
-  names: Map<number, string>;
+  names: Map<PlaylistId, string>;
   /** A playlist's entries as they are now, when known (saves a read). */
-  snapshots: Map<number, Track[]>;
+  snapshots: Map<PlaylistId, Track[]>;
 }
 
 interface Draft extends RecordingScope {
@@ -264,7 +264,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
   };
 
   const favourites = (method: string, kind: Operation["kind"], type: FavouriteType) =>
-    async (ids: ReadonlyArray<number | string>): Promise<void> => {
+    async (ids: readonly AnyId[]): Promise<void> => {
       // Batch by batch, so a failure records the batches that went through.
       for (const batch of chunk(ids, BATCH)) {
         await call(method, batch);
@@ -299,7 +299,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       } catch {
         // Deleted all the same; undo then recreates it private.
       }
-      const name = details?.name ?? scope.names.get(playlistId) ?? `playlist ${playlistId}`;
+      const name = details?.name ?? scope.names.get(playlistId) ?? `playlist ${shortId(playlistId)}`;
       await call("deletePlaylist", playlistId);
       scope.snapshots.delete(playlistId);
       journal.record({
@@ -356,7 +356,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       }
       const after = await tryRead(playlistId);
       let entries: PlaylistEntryRecord[] = [];
-      let unconfirmed: number[] | undefined;
+      let unconfirmed: TrackId[] | undefined;
       if (after === undefined) {
         scope.snapshots.delete(playlistId);
         unconfirmed = [...trackIds];
@@ -400,7 +400,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
         // Read first: a removal that cannot be recorded is not made.
         before = await client.getPlaylistTracks(playlistId);
       }
-      let gone = new Set<number>();
+      let gone = new Set<EntryId>();
       let failure: { error: unknown } | undefined;
       for (const batch of chunk(playlistTrackIds, BATCH)) {
         try {

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import type { Artist, Release, Track } from "../services/model.js";
 import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
 import { Journal, recordingClient } from "../features/journal.js";
 import { applyUndo, planUndo } from "../features/undo.js";
-import { emptyJobState, validateJob, type JobState, type ManagedPlaylistJob } from "./model.js";
+import { emptyJobState, parseJobState, validateJob, type JobState, type ManagedPlaylistJob } from "./model.js";
 import { RefreshWriteError, refreshManagedPlaylist, type RefreshClient } from "./refresh.js";
 
-const A: Artist = { id: 1, name: "Air" };
+const A: Artist = { id: qid(1), name: "Air" };
 const DAY1 = new Date("2026-11-01T12:00:00Z");
 
 function release(id: string, date: string): Release {
@@ -31,7 +32,7 @@ function world() {
       return { releases, truncated: false };
     },
     getAlbumTracks: async (albumId: string): Promise<Track[]> =>
-      (albumTracks[albumId] ?? []).map((id) => ({ id, title: `Track ${id}`, duration: 180 })),
+      (albumTracks[albumId] ?? []).map((id) => ({ id: qid(id), title: `Track ${id}`, duration: 180 })),
   };
   const client = Object.assign(account, feed) as FakeAccount & RefreshClient;
   return {
@@ -81,10 +82,10 @@ describe("refreshManagedPlaylist", () => {
     const { account, client } = world();
     const { state, result } = await run(client, emptyJobState());
     expect(state.playlistId).toBeDefined();
-    const id = state.playlistId ?? 0;
+    const id = state.playlistId ?? qid(0);
     expect(account.playlists.get(id)?.name).toBe("Air feed");
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
-    expect(state.owned.map((e) => e.trackId)).toEqual([21, 22, 11, 12]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
+    expect(state.owned.map((e) => e.trackId)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     expect(result).toMatchObject({ status: "ok", added: 4, removed: 0, dismissed: 0 });
     expect(state.lastRunAt).toBe(DAY1.toISOString());
     expect(state.lastResult).toEqual(result);
@@ -104,18 +105,18 @@ describe("refreshManagedPlaylist", () => {
     const first = await run(client, emptyJobState());
     releases.push(release("r3", "2026-10-30"));
     const second = await run(client, first.state);
-    expect(account.trackIds(second.state.playlistId ?? 0)).toEqual([31, 21, 22, 11, 12]);
+    expect(account.trackIds(second.state.playlistId ?? qid(0))).toEqual([qid(31), qid(21), qid(22), qid(11), qid(12)]);
     expect(second.result.added).toBe(1);
   });
 
   it("dismisses tracks the user removed, even all of them, and does not add them back", async () => {
     const { account, client } = world();
     const first = await run(client, emptyJobState());
-    const id = first.state.playlistId ?? 0;
+    const id = first.state.playlistId ?? qid(0);
     await account.removeTracksFromPlaylist(id, account.entryIds(id));
     const second = await run(client, first.state);
     expect(account.trackIds(id)).toEqual([]);
-    expect(second.state.dismissed.sort()).toEqual([11, 12, 21, 22]);
+    expect(second.state.dismissed.sort()).toEqual([qid(11), qid(12), qid(21), qid(22)]);
     expect(second.result.dismissed).toBe(4);
     const third = await run(client, second.state);
     expect(account.trackIds(id)).toEqual([]);
@@ -125,20 +126,20 @@ describe("refreshManagedPlaylist", () => {
   it("keeps a hand-added track in respect mode", async () => {
     const { account, client } = world();
     const first = await run(client, emptyJobState());
-    const id = first.state.playlistId ?? 0;
-    await account.addTracksToPlaylist(id, [999]);
+    const id = first.state.playlistId ?? qid(0);
+    await account.addTracksToPlaylist(id, [qid(999)]);
     await run(client, first.state, { now: new Date("2026-12-31T00:00:00Z") });
-    expect(account.trackIds(id)).toEqual([999]);
+    expect(account.trackIds(id)).toEqual([qid(999)]);
   });
 
   it("removes a hand-added track in mirror mode", async () => {
     const { account, client } = world();
     const mirror = job({ edits: "mirror" });
     const first = await run(client, emptyJobState(), { job: mirror });
-    const id = first.state.playlistId ?? 0;
-    await account.addTracksToPlaylist(id, [999]);
+    const id = first.state.playlistId ?? qid(0);
+    await account.addTracksToPlaylist(id, [qid(999)]);
     await run(client, first.state, { job: mirror });
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
   });
 
   it("removes releases that age out of the window", async () => {
@@ -146,9 +147,9 @@ describe("refreshManagedPlaylist", () => {
     const first = await run(client, emptyJobState());
     // On 2026-11-22 the window starts 2026-10-23: r1 (10-20) ages out.
     const second = await run(client, first.state, { now: new Date("2026-11-22T12:00:00Z") });
-    expect(account.trackIds(second.state.playlistId ?? 0)).toEqual([21, 22]);
+    expect(account.trackIds(second.state.playlistId ?? qid(0))).toEqual([qid(21), qid(22)]);
     expect(second.result.removed).toBe(2);
-    expect(second.state.owned.map((e) => e.trackId)).toEqual([21, 22]);
+    expect(second.state.owned.map((e) => e.trackId)).toEqual([qid(21), qid(22)]);
     expect(second.state.dismissed).toEqual([]);
   });
 
@@ -157,7 +158,7 @@ describe("refreshManagedPlaylist", () => {
     const first = await run(client, emptyJobState());
     failReleases(true);
     const second = await run(client, first.state, { now: new Date("2026-12-31T00:00:00Z") });
-    expect(account.trackIds(second.state.playlistId ?? 0)).toEqual([21, 22, 11, 12]);
+    expect(account.trackIds(second.state.playlistId ?? qid(0))).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     expect(second.result.status).toBe("partial");
     expect(second.result.notes.join(" ")).toMatch(/Air/);
   });
@@ -165,7 +166,7 @@ describe("refreshManagedPlaylist", () => {
   it("pauses when the playlist was deleted, without creating another", async () => {
     const { account, client } = world();
     const first = await run(client, emptyJobState());
-    await account.deletePlaylist(first.state.playlistId ?? 0);
+    await account.deletePlaylist(first.state.playlistId ?? qid(0));
     const creates = account.calls.filter((c) => c.startsWith("createPlaylist")).length;
     const second = await run(client, first.state);
     expect(second.result.status).toBe("paused");
@@ -183,7 +184,7 @@ describe("refreshManagedPlaylist", () => {
     expect(writes(account)).toEqual([]);
     expect(after).toEqual(state);
     expect(preview.createsPlaylist).toBe(true);
-    expect(preview.add.map((t) => t.trackId)).toEqual([21, 22, 11, 12]);
+    expect(preview.add.map((t) => t.trackId)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     expect(preview.add[0]?.source).toBe("album:r2");
   });
 
@@ -202,11 +203,11 @@ describe("refreshManagedPlaylist", () => {
     }
     const plan = await planUndo(recorded, latest, items);
     await applyUndo(journal, recorded, latest, plan);
-    const id = second.state.playlistId ?? 0;
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    const id = second.state.playlistId ?? qid(0);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     const third = await run(recorded, second.state);
-    expect(third.state.dismissed).toEqual([31]);
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    expect(third.state.dismissed).toEqual([qid(31)]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
   });
 
   it("keeps the new playlist when adding to it fails, and fills it next run", async () => {
@@ -219,7 +220,7 @@ describe("refreshManagedPlaylist", () => {
     const second = await run(client, saved);
     expect(second.state.playlistId).toBe(saved.playlistId);
     expect(account.calls.filter((c) => c.startsWith("createPlaylist"))).toHaveLength(1);
-    expect(account.trackIds(saved.playlistId ?? 0)).toEqual([21, 22, 11, 12]);
+    expect(account.trackIds(saved.playlistId ?? qid(0))).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     expect(second.state.pending).toBeUndefined();
   });
 
@@ -228,21 +229,21 @@ describe("refreshManagedPlaylist", () => {
     account.failAfter("getPlaylistTracks", 0); // the read-back after adding
     const error = await run(client, emptyJobState()).catch((e: unknown) => e);
     const saved = (error as RefreshWriteError).state;
-    expect(saved.pending?.added).toEqual([21, 22, 11, 12]);
-    const id = saved.playlistId ?? 0;
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    expect(saved.pending?.added).toEqual([qid(21), qid(22), qid(11), qid(12)]);
+    const id = saved.playlistId ?? qid(0);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
     const second = await run(client, saved);
-    expect(second.state.owned.map((e) => e.trackId).sort()).toEqual([11, 12, 21, 22]);
+    expect(second.state.owned.map((e) => e.trackId).sort()).toEqual([qid(11), qid(12), qid(21), qid(22)]);
     expect(second.result.added).toBe(0);
     const third = await run(client, second.state, { now: new Date("2026-11-22T12:00:00Z") });
-    expect(account.trackIds(id)).toEqual([21, 22]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22)]);
     expect(third.state.dismissed).toEqual([]);
   });
 
   it("does not dismiss what a removal that failed part-way did remove", async () => {
     const { account, client } = world();
     const first = await run(client, emptyJobState());
-    const id = first.state.playlistId ?? 0;
+    const id = first.state.playlistId ?? qid(0);
     // Removing r1's two tracks: the first goes, then the request fails.
     const remove = account.removeTracksFromPlaylist.bind(account);
     client.removeTracksFromPlaylist = async (playlistId, ptids) => {
@@ -255,19 +256,33 @@ describe("refreshManagedPlaylist", () => {
     client.removeTracksFromPlaylist = remove;
     const second = await run(client, saved, { now: later });
     expect(second.state.dismissed).toEqual([]);
-    expect(account.trackIds(id)).toEqual([21, 22]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22)]);
   });
 
   it("reorders a mirrored playlist even when nothing is added", async () => {
     const { account, client } = world();
     const mirror = job({ edits: "mirror" });
     const first = await run(client, emptyJobState(), { job: mirror });
-    const id = first.state.playlistId ?? 0;
+    const id = first.state.playlistId ?? qid(0);
     const entries = account.entryIds(id);
     // The user drags the last track to the top.
-    await account.movePlaylistTracks(id, [entries[3] ?? 0], 1);
-    expect(account.trackIds(id)).toEqual([12, 21, 22, 11]);
+    await account.movePlaylistTracks(id, [entries[3] ?? qid(0)], 1);
+    expect(account.trackIds(id)).toEqual([qid(12), qid(21), qid(22), qid(11)]);
     await run(client, first.state, { job: mirror });
-    expect(account.trackIds(id)).toEqual([21, 22, 11, 12]);
+    expect(account.trackIds(id)).toEqual([qid(21), qid(22), qid(11), qid(12)]);
+  });
+});
+
+describe("a job from before ids named their service", () => {
+  it("keeps refreshing the playlist it made, changing nothing when nothing is new", async () => {
+    const { account, client } = world();
+    const first = await run(client, emptyJobState());
+    // As version 2 stored it: bare ids.
+    const old = JSON.parse(JSON.stringify(first.state).replace(/"qobuz:(\d+)"/g, "$1")) as Record<string, unknown>;
+    account.calls.length = 0;
+    const again = await run(client, parseJobState({ ...old, version: 2 }));
+    expect(account.playlists.size).toBe(1);
+    expect(again.result).toMatchObject({ status: "ok", added: 0, removed: 0, dismissed: 0 });
+    expect(account.calls.filter((call) => /^(create|add|remove|move)/.test(call))).toEqual([]);
   });
 });

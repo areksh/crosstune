@@ -9,7 +9,7 @@
  * matching and writing all live in the tested server modules.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import type { AnyId, PlaylistId } from "../../services/ids.js";
 import { api, apiDownload, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 
@@ -20,7 +20,7 @@ interface ExportResponse {
 
 interface ImportPlan {
   kind: "tracks" | "albums" | "artists";
-  matched: Array<{ label: string; id: number | string; via?: "id" | "isrc" | "search" }>;
+  matched: Array<{ label: string; id: AnyId; via?: "id" | "isrc" | "search" }>;
   unmatched: string[];
   /** The format the server read (a CSV may turn out to be a Spotify export). */
   format?: string;
@@ -135,7 +135,7 @@ function exportSourceBody():
     if (value === "") {
       return undefined;
     }
-    return { type: "playlist", playlistId: Number(value) };
+    return { type: "playlist", playlistId: value as PlaylistId };
   }
   return { type: source as "favourite-tracks" };
 }
@@ -377,7 +377,7 @@ function commitTargetBody(target: string): ImportTarget | undefined {
     if (value === "") {
       return undefined;
     }
-    return { type: "playlist-existing", playlistId: Number(value) };
+    return { type: "playlist-existing", playlistId: value as PlaylistId };
   }
   // favourites, favourite-albums and favourite-artists all route by plan kind.
   return { type: "favourites" };

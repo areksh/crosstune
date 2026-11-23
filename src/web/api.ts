@@ -6,15 +6,15 @@
  * one place that knows the transport; views deal in typed requests/responses.
  */
 
-import type { AlbumId, EntryId } from "../services/ids.js";
+import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
 
 export interface Artist {
-  id: number;
+  id: ArtistId;
   name: string;
 }
 
 export interface Track {
-  id: number;
+  id: TrackId;
   title: string;
   version?: string;
   discNumber?: number;
@@ -63,7 +63,7 @@ export interface FilterInput {
 }
 
 export interface Album {
-  id: string;
+  id: AlbumId;
   title: string;
   artist: string;
   version?: string;
@@ -77,7 +77,7 @@ export interface Album {
 }
 
 export interface Playlist {
-  id: number;
+  id: PlaylistId;
   name: string;
   trackCount?: number;
 }

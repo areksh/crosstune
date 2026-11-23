@@ -21,7 +21,7 @@
  * pure core.
  */
 
-import type { PlaylistId } from "../services/ids.js";
+import { shortId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { findDuplicateGroups, selectKeeper, toDedupTrack, type DedupTrack } from "./deduplicate.js";
@@ -145,7 +145,7 @@ export async function resolveCombine(
       source.type === "favourites"
         ? { label: FAVOURITES_LABEL, tracks: await client.getFavoriteTracks() }
         : {
-            label: names.get(source.playlistId) ?? `Playlist ${source.playlistId}`,
+            label: names.get(source.playlistId) ?? `Playlist ${shortId(source.playlistId)}`,
             tracks: await client.getPlaylistTracks(source.playlistId),
           },
   );
@@ -219,7 +219,7 @@ export function combineTracks(
  */
 function groupSongs(copies: readonly Copy[], matchSongs: boolean): Song[] {
   // Collapse equal ids first, so the matcher sees each track once.
-  const byId = new Map<number, Copy[]>();
+  const byId = new Map<TrackId, Copy[]>();
   for (const copy of copies) {
     const same = byId.get(copy.track.id);
     if (same === undefined) {
@@ -323,7 +323,7 @@ export function seededRandom(seed: number): () => number {
 }
 
 /** The result's track ids, in order. */
-export function combinedTrackIds(plan: CombinePlan): number[] {
+export function combinedTrackIds(plan: CombinePlan): TrackId[] {
   return plan.tracks.map((entry) => entry.track.id);
 }
 

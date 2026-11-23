@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import { ServiceHub } from "../services/hub.js";
 import { QobuzService } from "../services/qobuz/service.js";
 import { MUSIC_READS, MUSIC_WRITES } from "../services/service.js";
@@ -25,7 +26,7 @@ function entriesOf(store: MemoryStore): HistoryEntry[] {
   return parseHistory(store.text).flatMap((r) => (r.type === "entry" ? [r] : []));
 }
 
-const createOp: Operation = { kind: "create-playlist", playlistId: 1, name: "Road Trip" };
+const createOp: Operation = { kind: "create-playlist", playlistId: qid(1), name: "Road Trip" };
 
 describe("Journal", () => {
   it("writes one entry per run, labelled from its operations", async () => {
@@ -70,12 +71,12 @@ describe("Journal", () => {
     const { store, journal } = setup();
     await expect(
       journal.run({ tool: "import" }, async () => {
-        journal.record({ kind: "add-favourites", type: "tracks", ids: [1, 2] });
+        journal.record({ kind: "add-favourites", type: "tracks", ids: [qid(1), qid(2)] });
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
     expect(entriesOf(store)).toEqual([
-      expect.objectContaining({ tool: "import", error: "boom", ops: [expect.objectContaining({ ids: [1, 2] })] }),
+      expect.objectContaining({ tool: "import", error: "boom", ops: [expect.objectContaining({ ids: [qid(1), qid(2)] })] }),
     ]);
   });
 
@@ -91,9 +92,9 @@ describe("Journal", () => {
     await Promise.all([
       journal.run({ tool: "a" }, async () => {
         await tick();
-        journal.record({ kind: "add-favourites", type: "tracks", ids: [1] });
+        journal.record({ kind: "add-favourites", type: "tracks", ids: [qid(1)] });
         await tick();
-        journal.record({ kind: "add-favourites", type: "tracks", ids: [2] });
+        journal.record({ kind: "add-favourites", type: "tracks", ids: [qid(2)] });
       }),
       journal.run({ tool: "b" }, async () => {
         journal.record({ kind: "add-favourites", type: "albums", ids: ["x"] });
@@ -267,7 +268,7 @@ describe("recordingClient", () => {
     const { store, journal, account, client } = setup();
     await journal.run({ tool: "playlist-from-artists" }, async () => {
       const playlist = await client.createPlaylist("Road Trip", { isPublic: false });
-      await client.addTracksToPlaylist(playlist.id, [11, 12]);
+      await client.addTracksToPlaylist(playlist.id, [qid(11), qid(12)]);
     });
     const [id] = [...account.playlists.keys()];
     const [e1, e2] = account.entryIds(id!);
@@ -279,8 +280,8 @@ describe("recordingClient", () => {
           kind: "add-tracks",
           playlistId: id,
           entries: [
-            { trackId: 11, playlistTrackId: e1, position: 0 },
-            { trackId: 12, playlistTrackId: e2, position: 1 },
+            { trackId: qid(11), playlistTrackId: e1, position: 0 },
+            { trackId: qid(12), playlistTrackId: e2, position: 1 },
           ],
         },
       ],
@@ -291,8 +292,8 @@ describe("recordingClient", () => {
 
   it("records only the new entries of an existing playlist, with its name", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1, 2]);
-    await journal.run({ tool: "similar-artists" }, () => client.addTracksToPlaylist(id, [3, 1]));
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2)]);
+    await journal.run({ tool: "similar-artists" }, () => client.addTracksToPlaylist(id, [qid(3), qid(1)]));
     const [, , e3, e4] = account.entryIds(id);
     expect(entriesOf(store)[0]).toMatchObject({
       label: "Added 2 tracks to Late Night",
@@ -302,8 +303,8 @@ describe("recordingClient", () => {
           playlistId: id,
           playlistName: "Late Night",
           entries: [
-            { trackId: 3, playlistTrackId: e3, position: 2 },
-            { trackId: 1, playlistTrackId: e4, position: 3 },
+            { trackId: qid(3), playlistTrackId: e3, position: 2 },
+            { trackId: qid(1), playlistTrackId: e4, position: 3 },
           ],
         },
       ],
@@ -312,7 +313,7 @@ describe("recordingClient", () => {
 
   it("records what arrived when an add fails part-way, and rethrows", async () => {
     const { store, journal, account } = setup();
-    const id = account.seedPlaylist("Late Night", [1]);
+    const id = account.seedPlaylist("Late Night", [qid(1)]);
     // A client whose add lands the first track, then fails.
     const flaky = Object.assign(Object.create(account) as FakeAccount, {
       addTracksToPlaylist: async (playlistId: number, trackIds: readonly number[]) => {
@@ -323,40 +324,40 @@ describe("recordingClient", () => {
       getPlaylist: (playlistId: number) => account.getPlaylist(playlistId),
     });
     const client = recordingClient(flaky, journal);
-    await expect(journal.run({ tool: "x" }, () => client.addTracksToPlaylist(id, [5, 6]))).rejects.toThrow(
+    await expect(journal.run({ tool: "x" }, () => client.addTracksToPlaylist(id, [qid(5), qid(6)]))).rejects.toThrow(
       "throttled",
     );
     const entry = entriesOf(store)[0]!;
     expect(entry.error).toBe("throttled");
     expect(entry.ops).toEqual([
-      expect.objectContaining({ entries: [{ trackId: 5, playlistTrackId: account.entryIds(id)[1], position: 1 }] }),
+      expect.objectContaining({ entries: [{ trackId: qid(5), playlistTrackId: account.entryIds(id)[1], position: 1 }] }),
     ]);
   });
 
   it("keeps the track ids as unconfirmed when the playlist cannot be read back", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1]);
+    const id = account.seedPlaylist("Late Night", [qid(1)]);
     await journal.run({ tool: "x" }, async () => {
       await client.getPlaylistTracks(id); // not recorded
       account.failAfter("getPlaylistTracks", 1); // the read before the add works, the one after fails
-      await client.addTracksToPlaylist(id, [7]);
+      await client.addTracksToPlaylist(id, [qid(7)]);
     });
     expect(entriesOf(store)[0]?.ops).toEqual([
-      { kind: "add-tracks", playlistId: id, playlistName: "Late Night", entries: [], unconfirmed: [7] },
+      { kind: "add-tracks", playlistId: id, playlistName: "Late Night", entries: [], unconfirmed: [qid(7)] },
     ]);
   });
 
   it("matches the end of the playlist when it could not be read before adding", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1]);
+    const id = account.seedPlaylist("Late Night", [qid(1)]);
     account.failAfter("getPlaylistTracks", 0);
-    await journal.run({ tool: "x" }, () => client.addTracksToPlaylist(id, [7, 8]));
+    await journal.run({ tool: "x" }, () => client.addTracksToPlaylist(id, [qid(7), qid(8)]));
     const [, e7, e8] = account.entryIds(id);
     expect(entriesOf(store)[0]?.ops).toEqual([
       expect.objectContaining({
         entries: [
-          { trackId: 7, playlistTrackId: e7, position: 1 },
-          { trackId: 8, playlistTrackId: e8, position: 2 },
+          { trackId: qid(7), playlistTrackId: e7, position: 1 },
+          { trackId: qid(8), playlistTrackId: e8, position: 2 },
         ],
       }),
     ]);
@@ -364,7 +365,7 @@ describe("recordingClient", () => {
 
   it("records removed entries with their track and old position", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1, 2, 3, 2]);
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2), qid(3), qid(2)]);
     const [, e2, , e4] = account.entryIds(id);
     await journal.run({ tool: "deduplicate" }, () => client.removeTracksFromPlaylist(id, [e4!, e2!]));
     expect(entriesOf(store)[0]).toMatchObject({
@@ -374,8 +375,8 @@ describe("recordingClient", () => {
           kind: "remove-tracks",
           playlistId: id,
           entries: [
-            { trackId: 2, playlistTrackId: e2, position: 1 },
-            { trackId: 2, playlistTrackId: e4, position: 3 },
+            { trackId: qid(2), playlistTrackId: e2, position: 1 },
+            { trackId: qid(2), playlistTrackId: e4, position: 3 },
           ],
         },
       ],
@@ -384,11 +385,11 @@ describe("recordingClient", () => {
 
   it("does not remove what it could not record", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1, 2]);
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2)]);
     const [e1] = account.entryIds(id);
     account.failAfter("getPlaylistTracks", 0);
     await expect(client.removeTracksFromPlaylist(id, [e1!])).rejects.toThrow();
-    expect(account.trackIds(id)).toEqual([1, 2]);
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2)]);
     expect(store.text).toBe("");
   });
 
@@ -406,12 +407,12 @@ describe("recordingClient", () => {
 
   it("records moves with where their entries were, without reading it again", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1, 2]);
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2)]);
     const [, e2] = account.entryIds(id);
     await journal.run({ tool: "upgrade" }, async () => {
-      await client.addTracksToPlaylist(id, [3]);
+      await client.addTracksToPlaylist(id, [qid(3)]);
       await client.movePlaylistTracks!(id, [e2!], 1);
-      await client.addTracksToPlaylist(id, [4]);
+      await client.addTracksToPlaylist(id, [qid(4)]);
     });
     const ops = entriesOf(store)[0]?.ops ?? [];
     expect(ops.map((op) => op.kind)).toEqual(["add-tracks", "move-tracks", "add-tracks"]);
@@ -429,10 +430,10 @@ describe("recordingClient", () => {
 
   it("records a move's entries as positioned by the moves before it", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1, 2, 3]);
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2), qid(3)]);
     const [e1, e2, e3] = account.entryIds(id);
     await journal.run({ tool: "playlist-manager" }, async () => {
-      await client.movePlaylistTracks!(id, [e3!, 999], 1);
+      await client.movePlaylistTracks!(id, [e3!, qid(999)], 1);
       await client.movePlaylistTracks!(id, [e2!, e1!], 1);
     });
     const ops = entriesOf(store)[0]?.ops ?? [];
@@ -446,7 +447,7 @@ describe("recordingClient", () => {
 
   it("records changed details as they were", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1]);
+    const id = account.seedPlaylist("Late Night", [qid(1)]);
     await journal.run({ tool: "playlist-manager" }, () =>
       client.updatePlaylist!(id, { name: "Early Morning", isPublic: true, description: "Calm" }),
     );
@@ -466,7 +467,7 @@ describe("recordingClient", () => {
 
   it("does not change details it could not record", async () => {
     const { journal, account, client } = setup();
-    const id = account.seedPlaylist("Late Night", [1]);
+    const id = account.seedPlaylist("Late Night", [qid(1)]);
     account.failAfter("getPlaylist", 0);
     await expect(client.updatePlaylist!(id, { name: "X" })).rejects.toThrow();
     expect(account.playlists.get(id)?.name).toBe("Late Night");
@@ -475,28 +476,28 @@ describe("recordingClient", () => {
 
   it("records favourites added and removed, batch by batch", async () => {
     const { store, journal, account, client } = setup();
-    const ids = Array.from({ length: 60 }, (_, i) => i + 1);
+    const ids = Array.from({ length: 60 }, (_, i) => qid(i + 1));
     account.failAfter("addFavoriteTracks", 1);
     await expect(
       journal.run({ tool: "import" }, async () => {
-        await client.addFavoriteAlbums(["a"]);
-        await client.removeFavoriteArtists([9]);
+        await client.addFavoriteAlbums([qid("a")]);
+        await client.removeFavoriteArtists([qid(9)]);
         await client.addFavoriteTracks(ids);
       }),
     ).rejects.toThrow();
     expect(entriesOf(store)[0]?.ops).toEqual([
-      { kind: "add-favourites", type: "albums", ids: ["a"] },
-      { kind: "remove-favourites", type: "artists", ids: [9] },
+      { kind: "add-favourites", type: "albums", ids: [qid("a")] },
+      { kind: "remove-favourites", type: "artists", ids: [qid(9)] },
       { kind: "add-favourites", type: "tracks", ids: ids.slice(0, 50) },
     ]);
   });
 
   it("records a deleted playlist's name and tracks", async () => {
     const { store, journal, account, client } = setup();
-    const id = account.seedPlaylist("Old", [4, 5]);
+    const id = account.seedPlaylist("Old", [qid(4), qid(5)]);
     await journal.run({ tool: "undo", label: "Undid: x" }, () => client.deletePlaylist!(id));
     expect(entriesOf(store)[0]?.ops).toEqual([
-      { kind: "delete-playlist", playlistId: id, name: "Old", trackIds: [4, 5], isPublic: false },
+      { kind: "delete-playlist", playlistId: id, name: "Old", trackIds: [qid(4), qid(5)], isPublic: false },
     ]);
   });
 });

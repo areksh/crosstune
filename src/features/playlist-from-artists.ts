@@ -363,9 +363,9 @@ export function takeTopTracks(
  */
 export function collectTrackIds(
   resolvedArtists: readonly ResolvedArtistTracks[],
-): number[] {
-  const ids: number[] = [];
-  const seen = new Set<number>();
+): TrackId[] {
+  const ids: TrackId[] = [];
+  const seen = new Set<TrackId>();
   for (const resolved of resolvedArtists) {
     for (const track of resolved.tracks) {
       if (!seen.has(track.id)) {
@@ -397,9 +397,9 @@ export async function createPlaylistWithTracks(
 
 export interface AddToExistingResult {
   /** Track ids actually added (not already present, de-duplicated). */
-  added: number[];
+  added: TrackId[];
   /** Track ids skipped because they were already in the playlist or repeated. */
-  skipped: number[];
+  skipped: TrackId[];
 }
 
 /**
@@ -412,9 +412,9 @@ export async function addTracksToExistingPlaylist(
 ): Promise<AddToExistingResult> {
   const existing = await client.getPlaylistTracks(options.playlistId);
   const present = new Set(existing.map((track) => track.id));
-  const added: number[] = [];
-  const skipped: number[] = [];
-  const seen = new Set<number>();
+  const added: TrackId[] = [];
+  const skipped: TrackId[] = [];
+  const seen = new Set<TrackId>();
   for (const id of options.trackIds) {
     if (present.has(id) || seen.has(id)) {
       skipped.push(id);

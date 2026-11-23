@@ -8,6 +8,7 @@
  * stops every job until it is fixed, and is remembered in the global flags.
  */
 
+import type { TrackId } from "../services/ids.js";
 import { ServiceError } from "../services/model.js";
 import { runOrder } from "./dependencies.js";
 import type { InvalidJob, Job, JobState, RunResultSummary } from "./model.js";
@@ -226,7 +227,7 @@ function favouriteDatesOf(
   deps: Pick<RunDueDeps, "state">,
   jobs: readonly Job[],
   running: Job,
-): ReadonlyMap<number, string> | undefined {
+): ReadonlyMap<TrackId, string> | undefined {
   const favourites = jobs.find((job) => job.target.type === "favourites");
   if (favourites === undefined || favourites.id === running.id) {
     return undefined;

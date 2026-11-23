@@ -9,7 +9,7 @@
  * ordering live in src/features/combine.ts.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
@@ -168,7 +168,7 @@ function chosenSources(): Source[] | string {
     return "Choose each playlist only once.";
   }
   return values.map((value) =>
-    value === FAVOURITES ? { type: "favourites" } : { type: "playlist", playlistId: Number(value) },
+    value === FAVOURITES ? { type: "favourites" } : { type: "playlist", playlistId: value as PlaylistId },
   );
 }
 
@@ -316,10 +316,10 @@ function songs(count: number): string {
 }
 
 /** The ticked track ids, in list order. */
-function selectedTrackIds(): number[] {
+function selectedTrackIds(): TrackId[] {
   return [
     ...document.querySelectorAll<HTMLInputElement>("#combine-tracks input[type=checkbox]:checked"),
-  ].map((box) => Number(box.dataset["trackId"]));
+  ].map((box) => (box.dataset["trackId"] as TrackId));
 }
 
 function updateCount(): void {
@@ -358,7 +358,7 @@ function buildTarget(): CommitTarget | string {
     };
   }
   const value = el<HTMLSelectElement>("combine-playlist-select").value;
-  return value === "" ? "Choose a playlist." : { type: "existing", playlistId: Number(value) };
+  return value === "" ? "Choose a playlist." : { type: "existing", playlistId: value as PlaylistId };
 }
 
 async function onCommit(): Promise<void> {
@@ -383,7 +383,7 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Saving...";
   try {
-    const result = await api<{ playlist?: Playlist; added: number[]; skipped: number[] }>(
+    const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/commit",
       { tool: "combine", target, trackIds },

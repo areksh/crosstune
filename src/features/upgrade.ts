@@ -27,7 +27,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
-import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { shortId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { toDedupTrack, trackSignature } from "./deduplicate.js";
@@ -76,14 +76,14 @@ export interface UpgradeItem {
   /** The proposed action; the caller may change it. */
   action: UpgradeAction;
   /** The chosen candidate's id when the action is `replace`. */
-  replacementId?: number;
+  replacementId?: TrackId;
 }
 
 /** The resolved plan, plus what was skipped and why. */
 export interface UpgradePlan {
   items: UpgradeItem[];
   /** Tracks whose search ran (whatever it found), for incremental re-checks. */
-  checkedTrackIds: number[];
+  checkedTrackIds: TrackId[];
   /** How many tracks (entries) the source held. */
   scanned: number;
   /** Below the best quality but without an ISRC to search by. */
@@ -197,7 +197,7 @@ async function readSource(
     const tracks = await client.getFavoriteTracks();
     return tracks.map((track) => ({ track, location: { type: "favourites" } }));
   }
-  const playlists: Array<{ id: number; name?: string }> =
+  const playlists: Array<{ id: PlaylistId; name?: string }> =
     source.type === "playlist"
       ? [{ id: source.playlistId }]
       : await client.getUserPlaylists();
@@ -228,7 +228,7 @@ async function readSource(
  * (best first), keeping search order otherwise; each track once.
  */
 function rankCandidates(candidates: readonly Candidate[]): Candidate[] {
-  const byId = new Map<number, Candidate>();
+  const byId = new Map<TrackId, Candidate>();
   for (const candidate of candidates) {
     const seen = byId.get(candidate.track.id);
     if (seen === undefined || (seen.match === "signature" && candidate.match === "isrc")) {
@@ -392,7 +392,7 @@ export async function resolveUpgradesOf(
   );
 
   const items: UpgradeItem[] = [];
-  const checkedTrackIds = new Set<number>();
+  const checkedTrackIds = new Set<TrackId>();
   let unchecked = 0;
   let failed = 0;
   outcomes.forEach((outcome, index) => {
@@ -551,7 +551,7 @@ export async function commitUpgrades(
   if (favourites.length > 0) {
     await commitFavourites(client, favourites, result);
   }
-  const byPlaylist = new Map<number, UpgradeChange[]>();
+  const byPlaylist = new Map<PlaylistId, UpgradeChange[]>();
   for (const change of changes) {
     if (change.location.type === "playlist") {
       const list = byPlaylist.get(change.location.playlistId) ?? [];
@@ -617,8 +617,8 @@ async function commitPlaylist(
   const failAll = (list: readonly UpgradeChange[], reason: string): void => {
     list.forEach((change) => result.failed.push({ change, reason }));
   };
-  const entryId = (change: UpgradeChange): number =>
-    change.location.type === "playlist" ? change.location.playlistTrackId : -1;
+  const entryId = (change: UpgradeChange): EntryId | undefined =>
+    change.location.type === "playlist" ? change.location.playlistTrackId : undefined;
 
   let before: Track[];
   try {
@@ -627,7 +627,7 @@ async function commitPlaylist(
     failAll(changes, `could not read the playlist: ${messageOf(error)}`);
     return;
   }
-  const position = new Map<number, number>();
+  const position = new Map<EntryId | undefined, number>();
   before.forEach((track, index) => {
     if (track.playlistTrackId !== undefined) {
       position.set(track.playlistTrackId, index);
@@ -635,7 +635,7 @@ async function commitPlaylist(
   });
 
   // Each old entry once, still in the playlist, in playlist order.
-  const seen = new Set<number>();
+  const seen = new Set<EntryId | undefined>();
   const live: UpgradeChange[] = [];
   for (const change of changes) {
     const id = entryId(change);
@@ -656,7 +656,7 @@ async function commitPlaylist(
   );
 
   // Add the replacements (in the old entries' order), then confirm which arrived.
-  const newEntry = new Map<UpgradeChange, number>();
+  const newEntry = new Map<UpgradeChange, EntryId>();
   if (replaces.length > 0) {
     const order = replaces.map((c) => c.newTrackId);
     for (const batch of chunk(order, MUTATION_BATCH)) {
@@ -676,7 +676,7 @@ async function commitPlaylist(
       );
     }
     if (after !== undefined) {
-      const arrived = new Map<number, number[]>();
+      const arrived = new Map<TrackId, EntryId[]>();
       for (const track of after) {
         if (track.playlistTrackId !== undefined && !position.has(track.playlistTrackId)) {
           const queue = arrived.get(track.id) ?? [];
@@ -698,7 +698,7 @@ async function commitPlaylist(
   // Delete the old entries: confirmed replacements and plain removals only.
   const deletable = live.filter((c) => c.action === "remove" || newEntry.has(c));
   const deleted = await inBatches(deletable, (batch) =>
-    client.removeTracksFromPlaylist(playlistId, batch.map(entryId)),
+    client.removeTracksFromPlaylist(playlistId, batch.flatMap((c) => entryId(c) ?? [])),
   );
   const replacedInPlace: UpgradeChange[] = [];
   for (const change of deletable) {
@@ -736,7 +736,7 @@ async function moveIntoPlace(
   before: readonly Track[],
   deleted: ReadonlySet<UpgradeChange>,
   replaced: readonly UpgradeChange[],
-  newEntry: ReadonlyMap<UpgradeChange, number>,
+  newEntry: ReadonlyMap<UpgradeChange, EntryId>,
   result: UpgradeCommitResult,
 ): Promise<void> {
   if (replaced.length === 0) {
@@ -746,14 +746,14 @@ async function moveIntoPlace(
     result.movedToEnd += replaced.length;
     return;
   }
-  const deletedIds = new Map<number, UpgradeChange>();
+  const deletedIds = new Map<EntryId, UpgradeChange>();
   for (const change of deleted) {
     if (change.location.type === "playlist") {
       deletedIds.set(change.location.playlistTrackId, change);
     }
   }
   // Target index of each replacement in the final playlist.
-  const targets: Array<{ id: number; index: number }> = [];
+  const targets: Array<{ id: EntryId; index: number }> = [];
   let index = 0;
   for (const track of before) {
     const change =
@@ -765,7 +765,7 @@ async function moveIntoPlace(
       index += 1;
     }
   }
-  const runs: Array<{ ids: number[]; index: number }> = [];
+  const runs: Array<{ ids: EntryId[]; index: number }> = [];
   for (const target of targets) {
     const last = runs[runs.length - 1];
     if (last !== undefined && last.index + last.ids.length === target.index) {
@@ -827,7 +827,7 @@ export function formatUpgradeReport(plan: UpgradePlan): string {
       const chosen = item.candidates.find((c) => c.track.id === item.replacementId) ?? item.candidates[0]!;
       lines.push(`  ${describeTrack(item.track)}${describeLocation(item.location)}`);
       lines.push(
-        `    ${qualityLabel(item.track)} -> ${qualityLabel(chosen.track)}  id ${chosen.track.id}${chosen.track.album === undefined ? "" : ` [${chosen.track.album}]`}${matchNote(chosen)}`,
+        `    ${qualityLabel(item.track)} -> ${qualityLabel(chosen.track)}  id ${shortId(chosen.track.id)}${chosen.track.album === undefined ? "" : ` [${chosen.track.album}]`}${matchNote(chosen)}`,
       );
     }
   }
@@ -843,7 +843,7 @@ export function formatUpgradeReport(plan: UpgradePlan): string {
         lines.push(`    no replacement found -- ${item.action === "remove" ? "remove" : "leave"}`);
       } else {
         lines.push(
-          `    replace with id ${chosen.track.id}${chosen.track.album === undefined ? "" : ` [${chosen.track.album}]`}${matchNote(chosen)}`,
+          `    replace with id ${shortId(chosen.track.id)}${chosen.track.album === undefined ? "" : ` [${chosen.track.album}]`}${matchNote(chosen)}`,
         );
       }
     }

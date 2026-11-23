@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import { emptyJobState, type JobsFile, type JobState } from "./model.js";
 import { jobsService, UnknownJobError } from "./service.js";
 import type { GlobalFlags, RunRecord } from "./stores.js";
@@ -13,7 +14,7 @@ const input = {
   target: { type: "created" },
   source: {
     type: "new-releases",
-    artists: { type: "list", artists: [{ id: 1, name: "Air" }] },
+    artists: { type: "list", artists: [{ id: qid(1), name: "Air" }] },
     similar: { perArtist: 2, refreshDays: 30 },
     window: { type: "last-days", days: 30 },
   },
@@ -64,7 +65,7 @@ describe("jobsService", () => {
   it("lists jobs with their state and recent runs", () => {
     const { service, runs } = setup();
     const job = service.create(input, NOW);
-    runs.push({ at: "x", jobId: job.id, jobName: job.name, result: { at: "x", status: "ok", added: 1, removed: 0, dismissed: 0, notes: [] }, durationMs: 1 });
+    runs.push({ at: "x", jobId: job.id, jobName: job.name, result: { at: "x", status: "ok", added: 1, removed: 0, dismissed: qid(0), notes: [] }, durationMs: 1 });
     const listed = service.list();
     expect(listed.jobs).toEqual([{ job, state: emptyJobState(), recentRuns: [runs[0]] }]);
     expect(listed.flags).toEqual({});
@@ -75,16 +76,16 @@ describe("jobsService", () => {
   it("keeps the state when a job is edited", () => {
     const { service, states } = setup();
     const job = service.create(input, NOW);
-    states.set(job.id, { ...emptyJobState(), playlistId: 5, owned: [{ playlistTrackId: 1, trackId: 2 }], dismissed: [3] });
+    states.set(job.id, { ...emptyJobState(), playlistId: qid(5), owned: [{ playlistTrackId: qid(1), trackId: qid(2) }], dismissed: [qid(3)] });
     const updated = service.update(job.id, { ...input, name: "Renamed", source: { ...input.source, window: { type: "last-days", days: 60 } } });
     expect(updated).toMatchObject({ id: job.id, createdAt: job.createdAt, name: "Renamed" });
-    expect(states.get(job.id)).toMatchObject({ playlistId: 5, dismissed: [3] });
+    expect(states.get(job.id)).toMatchObject({ playlistId: qid(5), dismissed: [qid(3)] });
   });
 
   it("forgets dismissed tracks when switching to mirror mode", () => {
     const { service, states } = setup();
     const job = service.create(input, NOW);
-    states.set(job.id, { ...emptyJobState(), dismissed: [3] });
+    states.set(job.id, { ...emptyJobState(), dismissed: [qid(3)] });
     service.update(job.id, { ...input, edits: "mirror" });
     expect(states.get(job.id)?.dismissed).toEqual([]);
   });
@@ -92,13 +93,13 @@ describe("jobsService", () => {
   it("drops the similar-artist snapshot when the artists change", () => {
     const { service, states } = setup();
     const job = service.create(input, NOW);
-    const similar = { takenAt: "2026-11-01T00:00:00.000Z", artists: [{ id: 9, name: "Zero 7" }] };
+    const similar = { takenAt: "2026-11-01T00:00:00.000Z", artists: [{ id: qid(9), name: "Zero 7" }] };
     states.set(job.id, { ...emptyJobState(), source: { similar } });
     service.update(job.id, { ...input, name: "Same artists" });
     expect(states.get(job.id)?.source?.similar).toEqual(similar);
     service.update(job.id, {
       ...input,
-      source: { ...input.source, artists: { type: "list", artists: [{ id: 2, name: "Bonobo" }] } },
+      source: { ...input.source, artists: { type: "list", artists: [{ id: qid(2), name: "Bonobo" }] } },
     });
     expect(states.get(job.id)?.source).toBeUndefined();
   });
@@ -115,9 +116,9 @@ describe("jobsService", () => {
     const job = service.create(input, NOW);
     states.set(job.id, {
       ...emptyJobState(),
-      playlistId: 5,
-      owned: [{ playlistTrackId: 1, trackId: 2 }],
-      dismissed: [3],
+      playlistId: qid(5),
+      owned: [{ playlistTrackId: qid(1), trackId: qid(2) }],
+      dismissed: [qid(3)],
       paused: { reason: "playlist-deleted", since: "x" },
       nextRunAt: "2026-12-01T00:00:00.000Z",
     });
@@ -126,13 +127,13 @@ describe("jobsService", () => {
     expect(state.playlistId).toBeUndefined();
     expect(state.owned).toEqual([]);
     expect(state.nextRunAt).toBeUndefined();
-    expect(state.dismissed).toEqual([3]);
+    expect(state.dismissed).toEqual([qid(3)]);
   });
 
   it("resumes a job the user paused without forgetting its playlist", () => {
     const { service, states } = setup();
     const job = service.create(input, NOW);
-    const before = { ...emptyJobState(), playlistId: 5, owned: [{ playlistTrackId: 1, trackId: 2 }], nextRunAt: "x" };
+    const before = { ...emptyJobState(), playlistId: qid(5), owned: [{ playlistTrackId: qid(1), trackId: qid(2) }], nextRunAt: "x" };
     states.set(job.id, before);
     expect(service.resume(job.id)).toEqual(before);
   });
@@ -148,8 +149,8 @@ describe("jobsService", () => {
   it("removes a job and its state, saying which playlist it managed", () => {
     const { service, states, file } = setup();
     const job = service.create(input, NOW);
-    states.set(job.id, { ...emptyJobState(), playlistId: 5 });
-    expect(service.remove(job.id)).toEqual({ job, playlistId: 5 });
+    states.set(job.id, { ...emptyJobState(), playlistId: qid(5) });
+    expect(service.remove(job.id)).toEqual({ job, playlistId: qid(5) });
     expect(file().jobs).toEqual([]);
     expect(states.has(job.id)).toBe(false);
   });
@@ -157,23 +158,23 @@ describe("jobsService", () => {
   it("refuses a second job on a playlist another job manages", () => {
     const { service, states } = setup();
     const first = service.create(input, NOW);
-    states.set(first.id, { ...emptyJobState(), playlistId: 5 });
+    states.set(first.id, { ...emptyJobState(), playlistId: qid(5) });
     expect(() =>
-      service.create({ ...input, target: { type: "adopted", playlistId: 5 }, source: undefined, tidy: { dedupe: {} } }, NOW),
+      service.create({ ...input, target: { type: "adopted", playlistId: qid(5) }, source: undefined, tidy: { dedupe: {} } }, NOW),
     ).toThrow(/already managed by "Fresh"/);
   });
 
   it("never offers an adopted playlist for deletion", () => {
     const { service } = setup();
-    const job = service.create({ ...input, target: { type: "adopted", playlistId: 7 } }, NOW);
+    const job = service.create({ ...input, target: { type: "adopted", playlistId: qid(7) } }, NOW);
     expect(service.remove(job.id)).toEqual({ job });
   });
 
   it("starts the state afresh when the job moves to another playlist", () => {
     const { service, states } = setup();
-    const job = service.create({ ...input, target: { type: "adopted", playlistId: 7 } }, NOW);
-    states.set(job.id, { ...emptyJobState(), owned: [{ playlistTrackId: 1, trackId: 2 }], dismissed: [3] });
-    service.update(job.id, { ...input, target: { type: "adopted", playlistId: 8 } });
+    const job = service.create({ ...input, target: { type: "adopted", playlistId: qid(7) } }, NOW);
+    states.set(job.id, { ...emptyJobState(), owned: [{ playlistTrackId: qid(1), trackId: qid(2) }], dismissed: [qid(3)] });
+    service.update(job.id, { ...input, target: { type: "adopted", playlistId: qid(8) } });
     expect(states.get(job.id)).toMatchObject({ owned: [], dismissed: [] });
   });
 
@@ -185,7 +186,7 @@ describe("jobsService", () => {
       key,
       tidy: kind,
       summary: key,
-      change: { type: "remove" as const, trackId: 1 },
+      change: { type: "remove" as const, trackId: qid(1) },
       foundAt: "x",
     });
     states.set(job.id, { ...emptyJobState(), suggestions: [suggestion("u", "upgrade"), suggestion("d", "dedupe"), suggestion("d2", "dedupe")] });

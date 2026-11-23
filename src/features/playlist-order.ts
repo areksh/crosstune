@@ -27,10 +27,10 @@ export const MAX_MOVE_IDS = 200;
  * after the unmoved entries that were ahead of position `insertBefore`.
  */
 export function applyMove(
-  ids: readonly number[],
-  moved: readonly number[],
+  ids: readonly EntryId[],
+  moved: readonly EntryId[],
   insertBefore: number,
-): number[] {
+): EntryId[] {
   const present = new Set(ids);
   const moving = [...new Set(moved)].filter((id) => present.has(id));
   const movingSet = new Set(moving);
@@ -43,7 +43,7 @@ export function applyMove(
  * The ids that can stay put when `current` is reordered to `wanted`: a longest
  * run already in relative order. Every other id has to move.
  */
-export function stayingIds(current: readonly number[], wanted: readonly number[]): Set<number> {
+export function stayingIds(current: readonly EntryId[], wanted: readonly EntryId[]): Set<EntryId> {
   const rank = new Map(wanted.map((id, index) => [id, index]));
   const ids = current.filter((id) => rank.has(id));
   // Patience sorting: tails[k] is the index (in ids) of the lowest-ranked end
@@ -65,7 +65,7 @@ export function stayingIds(current: readonly number[], wanted: readonly number[]
     previous[i] = low === 0 ? -1 : tails[low - 1]!;
     tails[low] = i;
   });
-  const staying = new Set<number>();
+  const staying = new Set<EntryId>();
   for (let i = tails[tails.length - 1] ?? -1; i >= 0; i = previous[i]!) {
     staying.add(ids[i]!);
   }
@@ -76,12 +76,12 @@ export function stayingIds(current: readonly number[], wanted: readonly number[]
  * `wanted` with the ids only `current` has put in, each after the id it follows
  * in `current` (at the top when it leads), and the ids `current` lacks left out.
  */
-export function mergeOrder(current: readonly number[], wanted: readonly number[]): number[] {
+export function mergeOrder(current: readonly EntryId[], wanted: readonly EntryId[]): EntryId[] {
   const inCurrent = new Set(current);
   const kept = wanted.filter((id) => inCurrent.has(id));
   const inWanted = new Set(kept);
-  const leading: number[] = [];
-  const followers = new Map<number, number[]>();
+  const leading: EntryId[] = [];
+  const followers = new Map<EntryId, EntryId[]>();
   let list = leading;
   for (const id of current) {
     if (inWanted.has(id)) {
@@ -106,8 +106,8 @@ export function mergeOrder(current: readonly number[], wanted: readonly number[]
  * @throws {Error} if the two do not hold the same ids, each once.
  */
 export function planOrder(
-  current: readonly number[],
-  wanted: readonly number[],
+  current: readonly EntryId[],
+  wanted: readonly EntryId[],
   blockSize: number = MAX_MOVE_IDS,
 ): OrderMove[] {
   const ids = new Set(current);
@@ -136,7 +136,7 @@ export function planOrder(
 
 /** Re-send the stretch [start, end) in blocks, each in front of what follows it. */
 function blockMoves(
-  wanted: readonly number[],
+  wanted: readonly EntryId[],
   start: number,
   end: number,
   blockSize: number,
@@ -153,15 +153,15 @@ function blockMoves(
  * that takes more than `limit` requests.
  */
 function groupedMoves(
-  current: readonly number[],
-  wanted: readonly number[],
+  current: readonly EntryId[],
+  wanted: readonly EntryId[],
   start: number,
   end: number,
   blockSize: number,
   limit: number,
 ): OrderMove[] | undefined {
   const staying = stayingIds(current.slice(start, end), wanted.slice(start, end));
-  const runs: number[][] = [];
+  const runs: EntryId[][] = [];
   for (let i = start; i < end; i += 1) {
     const id = wanted[i]!;
     if (staying.has(id)) {

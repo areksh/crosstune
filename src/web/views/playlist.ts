@@ -9,7 +9,7 @@
  * in the tested server modules.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import type { ArtistId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { PlanControls } from "../plan.js";
@@ -24,7 +24,7 @@ import {
 } from "../tracks.js";
 
 interface Artist {
-  id: number;
+  id: ArtistId;
   name: string;
 }
 
@@ -278,8 +278,8 @@ async function onCommit(): Promise<void> {
   try {
     const result = await api<{
       playlist?: Playlist;
-      added: number[];
-      skipped: number[];
+      added: TrackId[];
+      skipped: TrackId[];
     }>("POST", "/api/commit", { tool: "playlist-from-artists", target, trackIds });
     showResult(resultNode, target, result);
     setStep("playlist-steps", 3);
@@ -307,13 +307,13 @@ function buildTarget(): CommitTarget | undefined {
   if (value === "") {
     return undefined;
   }
-  return { type: "existing", playlistId: Number(value) };
+  return { type: "existing", playlistId: value as PlaylistId };
 }
 
 function showResult(
   node: HTMLElement,
   target: CommitTarget,
-  result: { playlist?: Playlist; added: number[]; skipped: number[] },
+  result: { playlist?: Playlist; added: TrackId[]; skipped: TrackId[] },
 ): void {
   node.hidden = false;
   if (target.type === "new") {

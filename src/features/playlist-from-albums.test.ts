@@ -413,7 +413,7 @@ describe("album links", () => {
       entry: { artist: "Portishead", album: "Dummy" },
     });
     expect(parseAlbumLine("https://open.qobuz.com/album/pvsb64n704d0b")).toEqual({
-      entry: { link: "https://open.qobuz.com/album/pvsb64n704d0b", albumId: "pvsb64n704d0b" },
+      entry: { link: "https://open.qobuz.com/album/pvsb64n704d0b", albumId: "qobuz:pvsb64n704d0b" },
     });
     expect(parseAlbumLine("https://play.qobuz.com/artist/41259")).toEqual({
       problem: "https://play.qobuz.com/artist/41259 (an artist link, not an album)",
@@ -430,10 +430,10 @@ describe("album links", () => {
     const link = "https://open.qobuz.com/album/pvsb64n704d0b";
 
     const result = await resolveAlbumVersions(client, {
-      entries: [{ link, albumId: "pvsb64n704d0b" }, { artist: "Portishead", album: "Dummy" }],
+      entries: [{ link, albumId: "qobuz:pvsb64n704d0b" }, { artist: "Portishead", album: "Dummy" }],
     });
 
-    expect(client.getAlbum).toHaveBeenCalledWith("pvsb64n704d0b");
+    expect(client.getAlbum).toHaveBeenCalledWith("qobuz:pvsb64n704d0b");
     expect(client.searchAlbums).not.toHaveBeenCalledWith(expect.stringContaining("Mezzanine"), expect.anything());
     expect(result.resolvedAlbums.map((r) => [r.query, r.fromLink, r.versions.map((v) => v.id)])).toEqual([
       ["Massive Attack - Mezzanine", true, ["pvsb64n704d0b"]],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import {
   dayLabel,
   describeEntry,
@@ -24,8 +25,8 @@ import {
 /** `count` playlist entries for track ids from `firstTrack`, at positions from `from`. */
 function entries(count: number, firstTrack = 1, from = 0): PlaylistEntryRecord[] {
   return Array.from({ length: count }, (_, i) => ({
-    trackId: firstTrack + i,
-    playlistTrackId: 9000 + firstTrack + i,
+    trackId: qid(firstTrack + i),
+    playlistTrackId: qid(9000 + firstTrack + i),
     position: from + i,
   }));
 }
@@ -38,8 +39,8 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     source: "cli",
     label: "Created Road Trip with 2 tracks",
     ops: [
-      { kind: "create-playlist", playlistId: 1, name: "Road Trip" },
-      { kind: "add-tracks", playlistId: 1, entries: entries(2) },
+      { kind: "create-playlist", playlistId: qid(1), name: "Road Trip" },
+      { kind: "add-tracks", playlistId: qid(1), entries: entries(2) },
     ],
     ...overrides,
   };
@@ -80,13 +81,13 @@ describe("serializeRecords / parseHistory", () => {
 
   it("keeps every kind of operation", () => {
     const ops: Operation[] = [
-      { kind: "create-playlist", playlistId: 1, name: "A", isPublic: true, description: "d" },
-      { kind: "delete-playlist", playlistId: 2, name: "B", trackIds: [5, 6], isPublic: false },
-      { kind: "add-tracks", playlistId: 1, playlistName: "A", entries: entries(1), unconfirmed: [7] },
-      { kind: "remove-tracks", playlistId: 1, entries: entries(1, 3, 4) },
-      { kind: "move-tracks", playlistId: 1, playlistTrackIds: [11], insertBefore: 1 },
-      { kind: "add-favourites", type: "albums", ids: ["alb"] },
-      { kind: "remove-favourites", type: "tracks", ids: [8] },
+      { kind: "create-playlist", playlistId: qid(1), name: "A", isPublic: true, description: "d" },
+      { kind: "delete-playlist", playlistId: qid(2), name: "B", trackIds: [qid(5), qid(6)], isPublic: false },
+      { kind: "add-tracks", playlistId: qid(1), playlistName: "A", entries: entries(1), unconfirmed: [qid(7)] },
+      { kind: "remove-tracks", playlistId: qid(1), entries: entries(1, 3, 4) },
+      { kind: "move-tracks", playlistId: qid(1), playlistTrackIds: [qid(11)], insertBefore: 1 },
+      { kind: "add-favourites", type: "albums", ids: [qid("alb")] },
+      { kind: "remove-favourites", type: "tracks", ids: [qid(8)] },
     ];
     const records = [record(entry({ ops }))];
     expect(parseHistory(serializeRecords(records))).toEqual(records);
@@ -143,12 +144,12 @@ describe("summarise", () => {
       summarise(
         entry({
           ops: [
-            { kind: "add-tracks", playlistId: 1, entries: entries(4), unconfirmed: [99] },
-            { kind: "remove-tracks", playlistId: 1, entries: entries(4, 10) },
+            { kind: "add-tracks", playlistId: qid(1), entries: entries(4), unconfirmed: [qid(99)] },
+            { kind: "remove-tracks", playlistId: qid(1), entries: entries(4, 10) },
             { kind: "add-favourites", type: "albums", ids: ["a", "b"] },
-            { kind: "remove-favourites", type: "tracks", ids: [1] },
-            { kind: "delete-playlist", playlistId: 3, name: "X", trackIds: [1, 2, 3] },
-            { kind: "move-tracks", playlistId: 1, playlistTrackIds: [1], insertBefore: 1 },
+            { kind: "remove-favourites", type: "tracks", ids: [qid(1)] },
+            { kind: "delete-playlist", playlistId: qid(3), name: "X", trackIds: [qid(1), qid(2), qid(3)] },
+            { kind: "move-tracks", playlistId: qid(1), playlistTrackIds: [qid(1)], insertBefore: 1 },
           ],
         }),
       ),
@@ -160,17 +161,17 @@ describe("describeEntry", () => {
   it("names a created playlist with its track count", () => {
     expect(
       describeEntry("playlist-from-artists", [
-        { kind: "create-playlist", playlistId: 1, name: "Road Trip" },
-        { kind: "add-tracks", playlistId: 1, entries: entries(15) },
+        { kind: "create-playlist", playlistId: qid(1), name: "Road Trip" },
+        { kind: "add-tracks", playlistId: qid(1), entries: entries(15) },
       ]),
     ).toBe("Created Road Trip with 15 tracks");
     expect(
       describeEntry("word-play", [
-        { kind: "create-playlist", playlistId: 1, name: "Solo" },
-        { kind: "add-tracks", playlistId: 1, entries: entries(1) },
+        { kind: "create-playlist", playlistId: qid(1), name: "Solo" },
+        { kind: "add-tracks", playlistId: qid(1), entries: entries(1) },
       ]),
     ).toBe("Created Solo with 1 track");
-    expect(describeEntry("other", [{ kind: "create-playlist", playlistId: 1, name: "Empty" }])).toBe(
+    expect(describeEntry("other", [{ kind: "create-playlist", playlistId: qid(1), name: "Empty" }])).toBe(
       "Created Empty",
     );
   });
@@ -183,13 +184,13 @@ describe("describeEntry", () => {
     ).toBe("Removed 12 duplicates from Favourites");
     expect(
       describeEntry("deduplicate", [
-        { kind: "remove-tracks", playlistId: 5, playlistName: "Late Night", entries: entries(3) },
+        { kind: "remove-tracks", playlistId: qid(5), playlistName: "Late Night", entries: entries(3) },
       ]),
     ).toBe("Removed 3 duplicates from Late Night");
     expect(
       describeEntry("deduplicate", [
-        { kind: "remove-tracks", playlistId: 5, playlistName: "A", entries: entries(3) },
-        { kind: "remove-tracks", playlistId: 6, playlistName: "B", entries: entries(2) },
+        { kind: "remove-tracks", playlistId: qid(5), playlistName: "A", entries: entries(3) },
+        { kind: "remove-tracks", playlistId: qid(6), playlistName: "B", entries: entries(2) },
       ]),
     ).toBe("Removed 5 duplicates from 2 playlists");
   });
@@ -197,15 +198,15 @@ describe("describeEntry", () => {
   it("counts replacements for upgrade & repair", () => {
     expect(
       describeEntry("upgrade", [
-        { kind: "add-tracks", playlistId: 5, playlistName: "Late Night", entries: entries(4) },
-        { kind: "remove-tracks", playlistId: 5, playlistName: "Late Night", entries: entries(4, 20) },
-        { kind: "move-tracks", playlistId: 5, playlistTrackIds: [1], insertBefore: 3 },
+        { kind: "add-tracks", playlistId: qid(5), playlistName: "Late Night", entries: entries(4) },
+        { kind: "remove-tracks", playlistId: qid(5), playlistName: "Late Night", entries: entries(4, 20) },
+        { kind: "move-tracks", playlistId: qid(5), playlistTrackIds: [qid(1)], insertBefore: 3 },
       ]),
     ).toBe("Upgraded 4 tracks in Late Night");
     expect(
       describeEntry("upgrade", [
-        { kind: "add-favourites", type: "tracks", ids: [1, 2] },
-        { kind: "remove-favourites", type: "tracks", ids: [3, 4, 5] },
+        { kind: "add-favourites", type: "tracks", ids: [qid(1), qid(2)] },
+        { kind: "remove-favourites", type: "tracks", ids: [qid(3), qid(4), qid(5)] },
       ]),
     ).toBe("Upgraded 2 tracks in Favourites and removed 1");
   });
@@ -221,10 +222,10 @@ describe("describeEntry", () => {
     ).toBe("Added 3 albums to Favourites");
     expect(
       describeEntry("similar-artists", [
-        { kind: "add-tracks", playlistId: 9, playlistName: "Mix", entries: entries(20) },
+        { kind: "add-tracks", playlistId: qid(9), playlistName: "Mix", entries: entries(20) },
       ]),
     ).toBe("Added 20 tracks to Mix");
-    expect(describeEntry("other", [{ kind: "add-tracks", playlistId: 42, entries: entries(2) }])).toBe(
+    expect(describeEntry("other", [{ kind: "add-tracks", playlistId: qid(42), entries: entries(2) }])).toBe(
       "Added 2 tracks to playlist 42",
     );
   });
@@ -234,10 +235,10 @@ describe("describeEntry", () => {
       describeEntry("restore", [
         { kind: "add-favourites", type: "tracks", ids: Array.from({ length: 100 }, (_, i) => i) },
         { kind: "add-favourites", type: "albums", ids: ["a", "b", "c"] },
-        { kind: "create-playlist", playlistId: 1, name: "A" },
-        { kind: "add-tracks", playlistId: 1, entries: entries(10) },
-        { kind: "create-playlist", playlistId: 2, name: "B" },
-        { kind: "add-tracks", playlistId: 2, entries: entries(5) },
+        { kind: "create-playlist", playlistId: qid(1), name: "A" },
+        { kind: "add-tracks", playlistId: qid(1), entries: entries(10) },
+        { kind: "create-playlist", playlistId: qid(2), name: "B" },
+        { kind: "add-tracks", playlistId: qid(2), entries: entries(5) },
       ]),
     ).toBe("Imported 100 tracks and 3 albums into Favourites; created 2 playlists with 15 tracks");
   });
@@ -245,15 +246,15 @@ describe("describeEntry", () => {
   it("describes removals, deletions and reorders", () => {
     expect(
       describeEntry("other", [
-        { kind: "remove-tracks", playlistId: 5, playlistName: "Late Night", entries: entries(2) },
+        { kind: "remove-tracks", playlistId: qid(5), playlistName: "Late Night", entries: entries(2) },
       ]),
     ).toBe("Removed 2 tracks from Late Night");
     expect(
-      describeEntry("undo", [{ kind: "delete-playlist", playlistId: 5, name: "Road Trip", trackIds: [] }]),
+      describeEntry("undo", [{ kind: "delete-playlist", playlistId: qid(5), name: "Road Trip", trackIds: [] }]),
     ).toBe("Deleted Road Trip");
     expect(
       describeEntry("other", [
-        { kind: "move-tracks", playlistId: 5, playlistName: "Late Night", playlistTrackIds: [1], insertBefore: 1 },
+        { kind: "move-tracks", playlistId: qid(5), playlistName: "Late Night", playlistTrackIds: [qid(1)], insertBefore: 1 },
       ]),
     ).toBe("Reordered Late Night");
     expect(describeEntry("other", [])).toBe("No changes");
@@ -262,11 +263,11 @@ describe("describeEntry", () => {
 
 describe("laterConflicts", () => {
   const items: HistoryItem[] = foldHistory([
-    record(entry({ id: "e1", at: "2026-11-01T10:00:00.000Z", ops: [{ kind: "add-tracks", playlistId: 1, entries: entries(1) }] })),
-    record(entry({ id: "e2", at: "2026-11-01T11:00:00.000Z", ops: [{ kind: "remove-tracks", playlistId: 1, entries: entries(1) }] })),
-    record(entry({ id: "e3", at: "2026-11-01T12:00:00.000Z", ops: [{ kind: "add-tracks", playlistId: 2, entries: entries(1) }] })),
-    record(entry({ id: "e4", at: "2026-11-01T13:00:00.000Z", ops: [{ kind: "add-favourites", type: "tracks", ids: [1] }] })),
-    record(entry({ id: "e5", at: "2026-11-01T14:00:00.000Z", ops: [{ kind: "remove-tracks", playlistId: 1, entries: entries(1) }] })),
+    record(entry({ id: "e1", at: "2026-11-01T10:00:00.000Z", ops: [{ kind: "add-tracks", playlistId: qid(1), entries: entries(1) }] })),
+    record(entry({ id: "e2", at: "2026-11-01T11:00:00.000Z", ops: [{ kind: "remove-tracks", playlistId: qid(1), entries: entries(1) }] })),
+    record(entry({ id: "e3", at: "2026-11-01T12:00:00.000Z", ops: [{ kind: "add-tracks", playlistId: qid(2), entries: entries(1) }] })),
+    record(entry({ id: "e4", at: "2026-11-01T13:00:00.000Z", ops: [{ kind: "add-favourites", type: "tracks", ids: [qid(1)] }] })),
+    record(entry({ id: "e5", at: "2026-11-01T14:00:00.000Z", ops: [{ kind: "remove-tracks", playlistId: qid(1), entries: entries(1) }] })),
     { type: "undone", id: "e5", at: "2026-11-01T15:00:00.000Z" },
   ]);
 
@@ -347,5 +348,69 @@ describe("formatHistoryList", () => {
 
   it("says when there is no history", () => {
     expect(formatHistoryList([])).toBe("No changes recorded yet.");
+  });
+});
+
+describe("ids in the history file", () => {
+  /** One line of each kind, as written before ids carried their service. */
+  const OLD = [
+    { kind: "create-playlist", playlistId: 5, name: "Mix" },
+    { kind: "delete-playlist", playlistId: 5, name: "Mix", trackIds: [1, 2] },
+    { kind: "update-playlist", playlistId: 5, before: { name: "a" }, after: { name: "b" } },
+    { kind: "add-tracks", playlistId: 5, entries: [{ trackId: 1, playlistTrackId: 90, position: 0 }], unconfirmed: [7] },
+    { kind: "remove-tracks", playlistId: 5, entries: [{ trackId: 1, playlistTrackId: 90, position: 0 }] },
+    { kind: "move-tracks", playlistId: 5, playlistTrackIds: [90, 91], insertBefore: 1, from: [3, 4] },
+    { kind: "add-favourites", type: "tracks", ids: [1] },
+    { kind: "add-favourites", type: "albums", ids: [qid("0060254735156")] },
+    { kind: "remove-favourites", type: "artists", ids: [3] },
+  ];
+  const line = (ops: unknown[], id = "a") =>
+    `${JSON.stringify({ v: 1, type: "entry", id, at: "2026-11-02T10:00:00.000Z", tool: "t", source: "cli", label: "L", ops })}\n`;
+  const opsOf = (text: string) => parseHistory(text).flatMap((r) => (r.type === "entry" ? r.ops : []));
+
+  it("reads older lines as Qobuz's", () => {
+    expect(opsOf(line(OLD))).toEqual([
+      { kind: "create-playlist", playlistId: "qobuz:5", name: "Mix" },
+      { kind: "delete-playlist", playlistId: "qobuz:5", name: "Mix", trackIds: ["qobuz:1", "qobuz:2"] },
+      { kind: "update-playlist", playlistId: "qobuz:5", before: { name: "a" }, after: { name: "b" } },
+      {
+        kind: "add-tracks",
+        playlistId: "qobuz:5",
+        entries: [{ trackId: "qobuz:1", playlistTrackId: "qobuz:90", position: 0 }],
+        unconfirmed: ["qobuz:7"],
+      },
+      {
+        kind: "remove-tracks",
+        playlistId: "qobuz:5",
+        entries: [{ trackId: "qobuz:1", playlistTrackId: "qobuz:90", position: 0 }],
+      },
+      {
+        kind: "move-tracks",
+        playlistId: "qobuz:5",
+        playlistTrackIds: ["qobuz:90", "qobuz:91"],
+        insertBefore: 1,
+        from: [3, 4],
+      },
+      { kind: "add-favourites", type: "tracks", ids: ["qobuz:1"] },
+      { kind: "add-favourites", type: "albums", ids: ["qobuz:0060254735156"] },
+      { kind: "remove-favourites", type: "artists", ids: ["qobuz:3"] },
+    ]);
+  });
+
+  it("reads what it writes, and a file holding both", () => {
+    const tagged = opsOf(line(OLD));
+    expect(opsOf(line(tagged))).toEqual(tagged);
+    const both = line(OLD, "a") + line([{ kind: "create-playlist", playlistId: "tidal:x-1", name: "T" }], "b");
+    expect(parseHistory(both)).toHaveLength(2);
+  });
+
+  it.each(["qobuz:", "nope:1", "", 12.5, 0, null])("skips a line with the id %j", (playlistId) => {
+    expect(parseHistory(line([{ kind: "create-playlist", playlistId, name: "x" }]))).toEqual([]);
+  });
+
+  it("shows Qobuz's ids as before where a playlist has no name", () => {
+    expect(describeEntry("t", opsOf(line([OLD[3]])))).toContain(
+      "playlist 5",
+    );
   });
 });

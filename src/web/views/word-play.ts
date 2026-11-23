@@ -9,7 +9,7 @@
  * src/features/word-play.ts.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { formatDuration, totalSeconds } from "../../features/playlist-shape.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
@@ -193,7 +193,7 @@ function buildRequest(): Record<string, unknown> | string {
       if (id === "") {
         return "Choose a playlist to pick songs from.";
       }
-      body["source"] = { type: "playlist", playlistId: Number(id) };
+      body["source"] = { type: "playlist", playlistId: id as PlaylistId };
     } else {
       body["source"] = { type: "favourites" };
     }
@@ -436,14 +436,14 @@ function renderSplitOptions(): void {
 }
 
 /** The picked songs' track ids, in order, each once. */
-function selectedTrackIds(): number[] {
+function selectedTrackIds(): TrackId[] {
   return selectedTracks().map((track) => track.id);
 }
 
 /** The picked songs, in order, each once. */
 function selectedTracks(): Track[] {
   const tracks: Track[] = [];
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   plan?.splits[splitIndex]?.slots.forEach((_, index) => {
     const track = pickedCandidate(index)?.track;
     if (track !== undefined && !seen.has(track.id)) {
@@ -471,7 +471,7 @@ function updateCount(): void {
 function buildTarget(): CommitTarget | undefined {
   if (checkedValue("wp-target") === "existing") {
     const value = el<HTMLSelectElement>("wp-playlist-select").value;
-    return value === "" ? undefined : { type: "existing", playlistId: Number(value) };
+    return value === "" ? undefined : { type: "existing", playlistId: value as PlaylistId };
   }
   const name = el<HTMLInputElement>("wp-playlist-name").value.trim();
   if (name.length === 0) {
@@ -503,7 +503,7 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Working...";
   try {
-    const result = await api<{ playlist?: Playlist; added: number[]; skipped: number[] }>(
+    const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/word-play/commit",
       { target, trackIds },

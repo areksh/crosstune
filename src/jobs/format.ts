@@ -1,6 +1,6 @@
 /** Plain-text wording of jobs, runs and previews, for the CLI (and parts of the web UI). */
 
-import type { PlaylistId } from "../services/ids.js";
+import { shortId, type PlaylistId } from "../services/ids.js";
 import type {
   Job,
   InvalidJob,
@@ -67,15 +67,15 @@ export function describeResult(result: RunResultSummary): string {
 }
 
 /** How a playlist or the favourites is named, given the names known. */
-export function describeInput(input: PlaylistInput, names: ReadonlyMap<number, string> = new Map()): string {
-  return input.type === "favourites" ? "Favourites" : (names.get(input.playlistId) ?? `playlist ${input.playlistId}`);
+export function describeInput(input: PlaylistInput, names: ReadonlyMap<PlaylistId, string> = new Map()): string {
+  return input.type === "favourites" ? "Favourites" : (names.get(input.playlistId) ?? `playlist ${shortId(input.playlistId)}`);
 }
 
-function list(inputs: readonly PlaylistInput[], names: ReadonlyMap<number, string>): string {
+function list(inputs: readonly PlaylistInput[], names: ReadonlyMap<PlaylistId, string>): string {
   return inputs.map((input) => describeInput(input, names)).join(" + ");
 }
 
-function describeArtists(artists: Extract<SourceDef, { type: "new-releases" }>["artists"], names: ReadonlyMap<number, string>): string {
+function describeArtists(artists: Extract<SourceDef, { type: "new-releases" }>["artists"], names: ReadonlyMap<PlaylistId, string>): string {
   return artists.type === "list"
     ? count(artists.artists.length, "artist")
     : artists.type === "favourites"
@@ -112,7 +112,7 @@ function describeRule(rule: SmartRule): string {
 const MODE_WORDS = { merge: "merged", "only-first": "only in the first", common: "in all of them" } as const;
 
 /** One line saying what fills a playlist. */
-export function describeSource(source: SourceDef | undefined, names: ReadonlyMap<number, string> = new Map()): string {
+export function describeSource(source: SourceDef | undefined, names: ReadonlyMap<PlaylistId, string> = new Map()): string {
   if (source === undefined) {
     return "No source: only tidied";
   }
@@ -151,9 +151,9 @@ export function describeTarget(job: Job, playlistId: PlaylistId | undefined, nam
   }
   const called = name === undefined ? "" : ` "${name}"`;
   if (job.target.type === "adopted") {
-    return `your playlist${called} (${job.target.playlistId})`;
+    return `your playlist${called} (${shortId(job.target.playlistId)})`;
   }
-  return playlistId === undefined ? "no playlist yet" : `playlist${called} (${playlistId}), created by qobuz-helper`;
+  return playlistId === undefined ? "no playlist yet" : `playlist${called} (${shortId(playlistId)}), created by qobuz-helper`;
 }
 
 function describeFlags(flags: GlobalFlags): string[] {

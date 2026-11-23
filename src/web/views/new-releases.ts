@@ -8,6 +8,7 @@
  * DOM glue; the finding and writing live in src/features/new-releases.ts.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { api, type Album, type FilterInput, type Playlist } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, showError } from "../dom.js";
@@ -70,7 +71,7 @@ function onKeepUpdated(): void {
   const playlist = el<HTMLSelectElement>("releases-playlist").value;
   keepUpdated(fields, {
     include: [...include],
-    ...(fromPlaylist() && playlist !== "" && { playlistId: Number(playlist) }),
+    ...(fromPlaylist() && playlist !== "" && { playlistId: playlist as PlaylistId }),
   });
 }
 
@@ -143,7 +144,7 @@ async function onFind(): Promise<void> {
       showError(errorNode, "Choose a playlist.");
       return;
     }
-    source = { type: "playlist", playlistId: Number(id) };
+    source = { type: "playlist", playlistId: id as PlaylistId };
   }
   const since = el<HTMLInputElement>("releases-since").value;
   if (since === "") {

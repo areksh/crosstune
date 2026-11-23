@@ -520,7 +520,7 @@ export function assignSlots<T extends WordPlayCandidate>(
     .map((list, index) => ({ index, size: list.length }))
     .filter((entry) => entry.size > 0)
     .sort((a, b) => a.size - b.size || a.index - b.index);
-  const usedTracks = new Set<number>();
+  const usedTracks = new Set<TrackId>();
   const usedArtists = new Set<string>();
   for (const { index } of order) {
     const list = candidateLists[index]!;
@@ -593,9 +593,9 @@ function buildSplit(
 }
 
 /** The chosen songs' track ids in slot order, each once. */
-export function splitTrackIds(split: WordPlaySplit): number[] {
-  const ids: number[] = [];
-  const seen = new Set<number>();
+export function splitTrackIds(split: WordPlaySplit): TrackId[] {
+  const ids: TrackId[] = [];
+  const seen = new Set<TrackId>();
   for (const slot of split.slots) {
     const id = slot.chosen?.track.id;
     if (id !== undefined && !seen.has(id)) {
@@ -826,7 +826,7 @@ async function resolveSentence(
 
   // One pool of every result (in search order), so a run can match a title
   // another search found, indexed by whole-title key and stem key.
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   const byKey = new Map<string, Prepared[]>();
   const byStemKey = new Map<string, Prepared[]>();
   const excluded: Prepared[] = [];
@@ -1006,7 +1006,7 @@ async function resolveByTitle(
       ? matchWhole(prepared, phrase, options)
       : matchContains(prepared, phrase.words, options);
 
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   const matches: Ranked[] = [];
   let excludedCount = 0;
   let searches = 0;
@@ -1216,9 +1216,9 @@ export interface WordPlayCommitResult {
   playlist?: Playlist;
   playlistId: PlaylistId;
   /** Track ids written, in order. */
-  added: number[];
+  added: TrackId[];
   /** Track ids skipped: repeated, or already in an existing playlist. */
-  skipped: number[];
+  skipped: TrackId[];
 }
 
 /**
@@ -1238,9 +1238,9 @@ export async function commitWordPlay(
     });
     return { playlistId: target.playlistId, added, skipped };
   }
-  const added: number[] = [];
-  const skipped: number[] = [];
-  const seen = new Set<number>();
+  const added: TrackId[] = [];
+  const skipped: TrackId[] = [];
+  const seen = new Set<TrackId>();
   for (const id of options.trackIds) {
     if (seen.has(id)) {
       skipped.push(id);

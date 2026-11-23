@@ -11,10 +11,18 @@
  * runner. This module holds both shapes, their defaults and their validation:
  * every definition is checked on load, so a hand edit that breaks one job is
  * reported and the others still run. Version 1 files (one kind of job, the new
- * releases feed) are read into the version 2 shape; reading never rewrites.
+ * releases feed) and version 2 files (ids without their service) are read into
+ * the version 3 shape; reading never rewrites.
  */
 
-import type { ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import {
+  readId,
+  type AnyId,
+  type ArtistId,
+  type EntryId,
+  type PlaylistId,
+  type TrackId,
+} from "../services/ids.js";
 import { randomUUID } from "node:crypto";
 
 import { RELEASE_TYPES, type ReleaseType } from "../services/model.js";
@@ -43,7 +51,7 @@ export type Schedule =
 export type { ReleaseWindow };
 
 export interface ArtistRef {
-  id: number;
+  id: ArtistId;
   name: string;
 }
 
@@ -226,7 +234,7 @@ export type ManagedPlaylistJob = PlaylistJob;
 export type Job = PlaylistJob;
 
 export interface JobsFile {
-  version: 2;
+  version: 3;
   jobs: Job[];
 }
 
@@ -261,8 +269,8 @@ export interface RunResultSummary {
 
 /** Desired track `from` is satisfied by present track `to` (absent: left out). */
 export interface Substitution {
-  from: number;
-  to?: number;
+  from: TrackId;
+  to?: TrackId;
   /** The finding that made it, ignored if the user puts `from` back. */
   key: string;
 }
@@ -273,7 +281,7 @@ export type TidyChange =
   | { type: "remove"; trackId: TrackId; playlistTrackId?: EntryId }
   | {
       type: "dedupe";
-      keepTrackId: number;
+      keepTrackId: TrackId;
       remove: { trackId: TrackId; playlistTrackId?: EntryId }[];
     };
 
@@ -304,7 +312,7 @@ export interface RotationState {
 export interface SourceState {
   similar?: { takenAt: string; artists: ArtistRef[] };
   /** Archive: every track id seen, in first-seen order. */
-  seen?: number[];
+  seen?: TrackId[];
   /** Discovery: the current rotation's picks. */
   rotation?: RotationState;
   /** Discovery: what earlier rotations served, newest last. */
@@ -312,7 +320,7 @@ export interface SourceState {
 }
 
 export interface JobState {
-  version: 2;
+  version: 3;
   /** The playlist a `created` target made on its first pass. */
   playlistId?: PlaylistId;
   lastRunAt?: string;
@@ -322,14 +330,14 @@ export interface JobState {
   /** Entries this job added and that are still in the playlist. */
   owned: OwnedEntry[];
   /** Tracks the user took out; never added again (respect mode). */
-  dismissed: number[];
+  dismissed: TrackId[];
   /**
    * What a pass that failed part-way was writing: playlist-track ids it was
    * removing and track ids it was adding. The next pass settles them (see
    * settlePending), so a half-done write is neither mistaken for the user's
    * edits nor left unowned.
    */
-  pending?: { removed: number[]; added: number[] };
+  pending?: { removed: EntryId[]; added: TrackId[] };
   substitutions: Substitution[];
   tidy: TidyState;
   /** Finding keys applied without a substitution (exact duplicates, favourites). */
@@ -360,7 +368,7 @@ export function newJobId(): string {
 
 export function emptyJobState(): JobState {
   return {
-    version: 2,
+    version: 3,
     consecutiveFailures: 0,
     owned: [],
     dismissed: [],
@@ -373,7 +381,7 @@ export function emptyJobState(): JobState {
 }
 
 /** The managed playlist's id, once known (favourites have none). */
-export function playlistIdOf(job: Job, state: Pick<JobState, "playlistId">): number | undefined {
+export function playlistIdOf(job: Job, state: Pick<JobState, "playlistId">): PlaylistId | undefined {
   return job.target.type === "adopted" ? job.target.playlistId : job.target.type === "created" ? state.playlistId : undefined;
 }
 
@@ -383,7 +391,7 @@ export function capList<T>(items: readonly T[], cap: number): T[] {
 }
 
 /** What a source reads: playlist ids and whether it reads the favourite tracks. */
-export function sourceReads(source: SourceDef | undefined): { playlists: number[]; favourites: boolean } {
+export function sourceReads(source: SourceDef | undefined): { playlists: PlaylistId[]; favourites: boolean } {
   if (source === undefined) {
     return { playlists: [], favourites: false };
   }
@@ -428,6 +436,15 @@ function integer(value: unknown, what: string, min: number, max: number): number
     throw new Error(`${what} must be a whole number from ${min} to ${max}`);
   }
   return value;
+}
+
+/** An id, tagged or (before version 3) a bare one of Qobuz's. */
+function idOf<T extends AnyId>(value: unknown, what: string): T {
+  const id = readId<T>(value);
+  if (id === undefined) {
+    throw new Error(`${what} must be an id`);
+  }
+  return id;
 }
 
 function optionalInteger(value: unknown, what: string, min: number, max: number, fallback: number): number {
@@ -511,7 +528,7 @@ function artistRef(raw: unknown): ArtistRef {
   if (typeof name !== "string" || name.trim().length === 0) {
     throw new Error("each artist needs a name");
   }
-  return { id: integer(value["id"], "artist id", 1, ID_MAX), name };
+  return { id: idOf<ArtistId>(value["id"], "artist id"), name };
 }
 
 function artistList(raw: unknown, what: string, min: number): ArtistRef[] {
@@ -529,7 +546,7 @@ function feedArtists(raw: unknown, what: string): FeedArtists {
     case "favourites":
       return { type: "favourites" };
     case "playlist":
-      return { type: "playlist", playlistId: integer(value["playlistId"], `${what} playlistId`, 1, ID_MAX) };
+      return { type: "playlist", playlistId: idOf<PlaylistId>(value["playlistId"], `${what} playlistId`) };
     default:
       throw new Error(`${what} type must be list, favourites or playlist`);
   }
@@ -586,7 +603,7 @@ function playlistInputs(raw: unknown, what: string, min: number, max: number): P
       return { type: "favourites" };
     }
     if (value["type"] === "playlist") {
-      return { type: "playlist", playlistId: integer(value["playlistId"], `${what} playlistId`, 1, ID_MAX) };
+      return { type: "playlist", playlistId: idOf<PlaylistId>(value["playlistId"], `${what} playlistId`) };
     }
     throw new Error(`${what} entries must be a playlist or the favourites`);
   });
@@ -636,7 +653,7 @@ function combinedSource(value: Raw): CombinedSource {
 function followSource(value: Raw): FollowSource {
   return {
     type: "follow",
-    playlistId: integer(value["playlistId"], "source.playlistId", 1, ID_MAX),
+    playlistId: idOf<PlaylistId>(value["playlistId"], "source.playlistId"),
     keepRemoved: optionalBoolean(value["keepRemoved"], "source.keepRemoved", false),
   };
 }
@@ -806,7 +823,7 @@ function target(raw: unknown): Target {
     case "created":
       return { type: "created", isPublic: optionalBoolean(value["isPublic"], "target.isPublic", false) };
     case "adopted":
-      return { type: "adopted", playlistId: integer(value["playlistId"], "target.playlistId", 1, ID_MAX) };
+      return { type: "adopted", playlistId: idOf<PlaylistId>(value["playlistId"], "target.playlistId") };
     case "favourites":
       return { type: "favourites" };
     default:
@@ -900,11 +917,11 @@ function checkJob(job: Job): void {
 /**
  * Read a parsed `jobs.json`: valid jobs, and the invalid ones by index.
  *
- * @throws {Error} if it is not a version 1 or 2 jobs file at all.
+ * @throws {Error} if it is not a version 1 to 3 jobs file at all.
  */
 export function parseJobsFile(raw: unknown): { file: JobsFile; invalid: InvalidJob[] } {
   const value = record(raw, "jobs file");
-  if (value["version"] !== 1 && value["version"] !== 2) {
+  if (![1, 2, 3].includes(value["version"] as number)) {
     throw new Error(`unsupported jobs file version ${String(value["version"])}`);
   }
   const list = value["jobs"];
@@ -931,7 +948,7 @@ export function parseJobsFile(raw: unknown): { file: JobsFile; invalid: InvalidJ
       });
     }
   });
-  return { file: { version: 2, jobs }, invalid };
+  return { file: { version: 3, jobs }, invalid };
 }
 
 // --- state parsing ------------------------------------------------------------
@@ -946,8 +963,8 @@ function optionalString(value: unknown, what: string): string | undefined {
   return value;
 }
 
-function ids(raw: unknown, what: string): number[] {
-  return Array.isArray(raw) ? raw.map((id) => integer(id, what, 0, ID_MAX)) : [];
+function ids<T extends AnyId>(raw: unknown, what: string): T[] {
+  return Array.isArray(raw) ? raw.map((id) => idOf<T>(id, what)) : [];
 }
 
 function strings(raw: unknown): string[] {
@@ -971,8 +988,8 @@ function lenient<T>(raw: unknown, parse: (item: unknown) => T): T[] {
 function ownedEntry(raw: unknown): OwnedEntry {
   const value = record(raw, "owned entry");
   return {
-    playlistTrackId: integer(value["playlistTrackId"], "playlistTrackId", 0, ID_MAX),
-    trackId: integer(value["trackId"], "trackId", 0, ID_MAX),
+    playlistTrackId: idOf<EntryId>(value["playlistTrackId"], "playlistTrackId"),
+    trackId: idOf<TrackId>(value["trackId"], "trackId"),
   };
 }
 
@@ -1004,8 +1021,8 @@ function substitution(raw: unknown): Substitution {
   const value = record(raw, "substitution");
   const key = optionalString(value["key"], "key") ?? "";
   return {
-    from: integer(value["from"], "from", 0, ID_MAX),
-    ...(value["to"] !== undefined && { to: integer(value["to"], "to", 0, ID_MAX) }),
+    from: idOf<TrackId>(value["from"], "from"),
+    ...(value["to"] !== undefined && { to: idOf<TrackId>(value["to"], "to") }),
     key,
   };
 }
@@ -1015,25 +1032,25 @@ function tidyChange(raw: unknown): TidyChange {
   const entry = (item: Raw) =>
     item["playlistTrackId"] === undefined
       ? {}
-      : { playlistTrackId: integer(item["playlistTrackId"], "playlistTrackId", 0, ID_MAX) };
+      : { playlistTrackId: idOf<EntryId>(item["playlistTrackId"], "playlistTrackId") };
   switch (value["type"]) {
     case "replace":
       return {
         type: "replace",
-        trackId: integer(value["trackId"], "trackId", 0, ID_MAX),
-        newTrackId: integer(value["newTrackId"], "newTrackId", 0, ID_MAX),
+        trackId: idOf<TrackId>(value["trackId"], "trackId"),
+        newTrackId: idOf<TrackId>(value["newTrackId"], "newTrackId"),
         ...entry(value),
       };
     case "remove":
-      return { type: "remove", trackId: integer(value["trackId"], "trackId", 0, ID_MAX), ...entry(value) };
+      return { type: "remove", trackId: idOf<TrackId>(value["trackId"], "trackId"), ...entry(value) };
     case "dedupe": {
       const remove = Array.isArray(value["remove"]) ? value["remove"] : [];
       return {
         type: "dedupe",
-        keepTrackId: integer(value["keepTrackId"], "keepTrackId", 0, ID_MAX),
+        keepTrackId: idOf<TrackId>(value["keepTrackId"], "keepTrackId"),
         remove: remove.map((item: unknown) => {
           const copy = record(item, "copy");
-          return { trackId: integer(copy["trackId"], "trackId", 0, ID_MAX), ...entry(copy) };
+          return { trackId: idOf<TrackId>(copy["trackId"], "trackId"), ...entry(copy) };
         }),
       };
     }
@@ -1078,7 +1095,7 @@ function tidyState(raw: unknown): TidyState {
       ...lastRun(upgrade),
       checked: lenient(upgrade["checked"], (item) => {
         const value = record(item, "checked");
-        return { trackId: integer(value["trackId"], "trackId", 0, ID_MAX), at: optionalString(value["at"], "at") ?? "" };
+        return { trackId: idOf<TrackId>(value["trackId"], "trackId"), at: optionalString(value["at"], "at") ?? "" };
       }),
     };
   }
@@ -1097,7 +1114,7 @@ function similarSnapshot(raw: unknown): { takenAt: string; artists: ArtistRef[] 
 function desiredTrack(raw: unknown): RotationState["tracks"][number] {
   const value = record(raw, "track");
   return {
-    trackId: integer(value["trackId"], "trackId", 0, ID_MAX),
+    trackId: idOf<TrackId>(value["trackId"], "trackId"),
     source: optionalString(value["source"], "source") ?? "",
     ...(value["durationSeconds"] !== undefined && {
       durationSeconds: integer(value["durationSeconds"], "durationSeconds", 0, ID_MAX),
@@ -1136,15 +1153,15 @@ function sourceState(raw: unknown): SourceState | undefined {
   return out;
 }
 
-/** Read a parsed job state file (version 1 or 2); throws on anything else. */
+/** Read a parsed job state file (version 1 to 3); throws on anything else. */
 export function parseJobState(raw: unknown): JobState {
   const value = record(raw, "job state");
-  if (value["version"] !== 1 && value["version"] !== 2) {
+  if (![1, 2, 3].includes(value["version"] as number)) {
     throw new Error(`unsupported job state version ${String(value["version"])}`);
   }
   const state = emptyJobState();
   if (value["playlistId"] !== undefined) {
-    state.playlistId = integer(value["playlistId"], "playlistId", 1, ID_MAX);
+    state.playlistId = idOf<PlaylistId>(value["playlistId"], "playlistId");
   }
   const lastRunAt = optionalString(value["lastRunAt"], "lastRunAt");
   if (lastRunAt !== undefined) {
@@ -1191,7 +1208,7 @@ export function parseJobState(raw: unknown): JobState {
       if (at === undefined || Number.isNaN(Date.parse(at))) {
         throw new Error("favourite date needs a timestamp");
       }
-      return { trackId: integer(entry["trackId"], "trackId", 0, ID_MAX), at };
+      return { trackId: idOf<TrackId>(entry["trackId"], "trackId"), at };
     });
   }
   if (value["lastResult"] !== undefined) {

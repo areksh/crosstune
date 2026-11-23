@@ -5,6 +5,7 @@
  * stop matching.
  */
 
+import type { TrackId } from "../../services/ids.js";
 import type { Track } from "../../services/model.js";
 import { decadeOf, qualityOf } from "../../features/stats.js";
 import { normaliseArtistName } from "../../features/track-filter.js";
@@ -106,7 +107,7 @@ export async function resolveSmart(
     now: Date;
     jobId: string;
     /** Original dates of favourites a tidy-up replaced (see TidyState favouriteDates). */
-    favouriteDates?: ReadonlyMap<number, string>;
+    favouriteDates?: ReadonlyMap<TrackId, string>;
   },
 ): Promise<SourceResult> {
   const read = await readInputs(client, def.from);
@@ -115,7 +116,7 @@ export async function resolveSmart(
     .map((entry) => `Could not read ${describeInput(entry.input)} (${entry.error ?? "unknown error"}).`);
   // A track may be in a playlist and in the favourites: only the favourites
   // say when it was added, so carry that over to whichever copy comes first.
-  const favouritedAt = new Map<number, string>();
+  const favouritedAt = new Map<TrackId, string>();
   for (const entry of read) {
     if (entry.input.type === "favourites") {
       for (const track of entry.tracks ?? []) {
@@ -126,7 +127,7 @@ export async function resolveSmart(
       }
     }
   }
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   const candidates: Candidate[] = [];
   for (const entry of read) {
     for (const raw of entry.tracks ?? []) {

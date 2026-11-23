@@ -8,7 +8,7 @@
  * format.ts).
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import { shortId, type PlaylistId } from "../../services/ids.js";
 import {
   describeResult,
   describeSchedule,
@@ -22,7 +22,7 @@ import type { RefreshPreview } from "../../jobs/refresh.js";
 import type { AcceptOutcome, RunSummary } from "../../jobs/run-due.js";
 import type { JobView } from "../../jobs/service.js";
 import type { GlobalFlags, RunRecord } from "../../jobs/stores.js";
-import { playlistIdOf } from "../../features/qobuz-links.js";
+import { parsePlaylistId } from "../../features/qobuz-links.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
 import { storePrefill } from "../prefill.js";
@@ -84,7 +84,7 @@ export function initManagedView(): void {
     }
     const playlist = el<HTMLInputElement>("managed-prefill-playlist").value;
     if (playlist !== "") {
-      void selectIn("managed-playlist", Number(playlist));
+      void selectIn("managed-playlist", playlist as PlaylistId);
     }
     const inputs = el<HTMLInputElement>("managed-prefill-inputs").value;
     if (inputs !== "") {
@@ -129,10 +129,10 @@ function inputKey(input: PlaylistInput): string {
 }
 
 function inputOfKey(key: string): PlaylistInput {
-  return key === "favourites" ? { type: "favourites" } : { type: "playlist", playlistId: Number(key.slice(1)) };
+  return key === "favourites" ? { type: "favourites" } : { type: "playlist", playlistId: key.slice(1) as PlaylistId };
 }
 
-function names(): Map<number, string> {
+function names(): Map<PlaylistId, string> {
   return new Map(playlists.map((playlist) => [playlist.id, playlist.name]));
 }
 
@@ -809,7 +809,7 @@ async function readArtists(): Promise<unknown> {
     if (id === "") {
       throw new Error("Choose the playlist whose artists to use.");
     }
-    return { type: "playlist", playlistId: Number(id) };
+    return { type: "playlist", playlistId: id as PlaylistId };
   }
   return { type: "favourites" };
 }
@@ -863,8 +863,8 @@ async function readSource(kind: Kind): Promise<Record<string, unknown> | undefin
       };
     case "follow": {
       const raw = el<HTMLInputElement>("managed-follow").value.trim();
-      const playlistId = playlistIdOf(raw);
-      if (!Number.isInteger(playlistId) || playlistId <= 0) {
+      const playlistId = parsePlaylistId(raw);
+      if (playlistId === undefined) {
         throw new Error("Paste a Qobuz playlist link or id to follow.");
       }
       return { type: "follow", playlistId, keepRemoved: el<HTMLInputElement>("managed-follow-archive").checked };
@@ -964,9 +964,9 @@ async function readForm(): Promise<Record<string, unknown>> {
     if (id === "") {
       throw new Error("Choose which of your playlists to manage.");
     }
-    target = { type: "adopted", playlistId: Number(id) };
+    target = { type: "adopted", playlistId: id as PlaylistId };
     if (name === "") {
-      name = names().get(Number(id)) ?? `Playlist ${id}`;
+      name = names().get(id as PlaylistId) ?? `Playlist ${shortId(id as PlaylistId)}`;
     }
   } else if (targetType === "favourites") {
     target = { type: "favourites" };

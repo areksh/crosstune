@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import { emptyJobState, validateJob, type Job } from "./model.js";
 import { conflictWith, runOrder } from "./dependencies.js";
 
@@ -14,10 +15,10 @@ function job(id: string, raw: Record<string, unknown>): Job {
   });
 }
 
-const follow = (playlistId: number) => ({ type: "follow", playlistId });
-const withState = (j: Job, playlistId?: number) => ({
+const follow = (playlist: number) => ({ type: "follow", playlistId: qid(playlist) });
+const withState = (j: Job, playlist?: number) => ({
   job: j,
-  state: { ...emptyJobState(), ...(playlistId !== undefined && { playlistId }) },
+  state: { ...emptyJobState(), ...(playlist !== undefined && { playlistId: qid(playlist) }) },
 });
 
 describe("runOrder", () => {

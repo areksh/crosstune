@@ -8,7 +8,7 @@
  * fails the pass, which is then retried with backoff.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import { shortId, type PlaylistId } from "../../services/ids.js";
 import type { Track } from "../../services/model.js";
 import { combineTracks, type CombineInput } from "../../features/combine.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
@@ -23,7 +23,7 @@ export interface PlaylistInputsClient {
 }
 
 export function inputLabel(input: PlaylistInput): string {
-  return input.type === "favourites" ? "favourites" : `playlist:${input.playlistId}`;
+  return input.type === "favourites" ? "favourites" : `playlist:${shortId(input.playlistId)}`;
 }
 
 /** Read each input; failures are returned rather than thrown. */
@@ -45,7 +45,7 @@ export async function readInputs(
 }
 
 export function describeInput(input: PlaylistInput): string {
-  return input.type === "favourites" ? "the favourites" : `playlist ${input.playlistId}`;
+  return input.type === "favourites" ? "the favourites" : `playlist ${shortId(input.playlistId)}`;
 }
 
 export async function resolveCombined(

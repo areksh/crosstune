@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { shortId, type ArtistId } from "../services/ids.js";
+import { qid } from "../services/ids.test-support.js";
 import {
   type Album,
   type Artist,
@@ -42,7 +44,7 @@ function service(overrides: Partial<QobuzApiService> = {}): QobuzApiService {
     addFavoriteTracks: vi.fn(async () => {}),
     addFavoriteAlbums: vi.fn(async () => {}),
     addFavoriteArtists: vi.fn(async () => {}),
-    createPlaylist: vi.fn(async (name: string) => ({ id: 1, name })),
+    createPlaylist: vi.fn(async (name: string) => ({ id: qid(1), name })),
     addTracksToPlaylist: vi.fn(async () => {}),
     removeTracksFromPlaylist: vi.fn(async () => {}),
     removeFavoriteTracks: vi.fn(async () => {}),
@@ -99,7 +101,7 @@ describe("GET /api/session", () => {
 
 describe("GET /api/playlists", () => {
   it("returns the user's playlists", async () => {
-    const playlists = [{ id: 1, name: "Road Trip", trackCount: 5 }];
+    const playlists = [{ id: qid(1), name: "Road Trip", trackCount: 5 }];
     const res = await handleApi(
       request("GET", "/api/playlists"),
       deps({ service: service({ getUserPlaylists: vi.fn(async () => playlists) }) }),
@@ -112,8 +114,8 @@ describe("GET /api/playlists", () => {
 describe("POST /api/resolve", () => {
   it("resolves artists to their tracks", async () => {
     const svc = service({
-      searchArtists: vi.fn(async (q: string) => [{ id: 5, name: q }]),
-      getArtistTopTracks: vi.fn(async () => [{ id: 100, title: "Roads" }]),
+      searchArtists: vi.fn(async (q: string) => [{ id: qid(5), name: q }]),
+      getArtistTopTracks: vi.fn(async () => [{ id: qid(100), title: "Roads" }]),
     });
     const res = await handleApi(
       request("POST", "/api/resolve", { artists: ["Portishead"], tracksPerArtist: 3 }),
@@ -124,8 +126,8 @@ describe("POST /api/resolve", () => {
       resolvedArtists: [
         {
           query: "Portishead",
-          artist: { id: 5, name: "Portishead" },
-          tracks: [{ id: 100, title: "Roads" }],
+          artist: { id: qid(5), name: "Portishead" },
+          tracks: [{ id: qid(100), title: "Roads" }],
           excluded: [],
         },
       ],
@@ -133,15 +135,15 @@ describe("POST /api/resolve", () => {
       emptyArtists: [],
       // One of three requested tracks came back, so Portishead is under-filled.
       partialArtists: [
-        { query: "Portishead", artist: { id: 5, name: "Portishead" }, trackCount: 1, requested: 3 },
+        { query: "Portishead", artist: { id: qid(5), name: "Portishead" }, trackCount: 1, requested: 3 },
       ],
     });
-    expect(svc.getArtistTopTracks).toHaveBeenCalledWith(5, 3);
+    expect(svc.getArtistTopTracks).toHaveBeenCalledWith(qid(5), 3);
   });
 
   it("flags matched artists that return no tracks and excludes them", async () => {
     const svc = service({
-      searchArtists: vi.fn(async (q: string) => [{ id: 7, name: q }]),
+      searchArtists: vi.fn(async (q: string) => [{ id: qid(7), name: q }]),
       getArtistTopTracks: vi.fn(async () => []),
     });
     const res = await handleApi(
@@ -153,14 +155,14 @@ describe("POST /api/resolve", () => {
       resolvedArtists: [],
       unresolvedArtists: [],
       emptyArtists: [
-        { query: "Restricted", artist: { id: 7, name: "Restricted" }, trackCount: 0, requested: 5 },
+        { query: "Restricted", artist: { id: qid(7), name: "Restricted" }, trackCount: 0, requested: 5 },
       ],
       partialArtists: [],
     });
   });
 
   it("trims and drops blank artist lines", async () => {
-    const svc = service({ searchArtists: vi.fn(async (q: string) => [{ id: 1, name: q }]) });
+    const svc = service({ searchArtists: vi.fn(async (q: string) => [{ id: qid(1), name: q }]) });
     const res = await handleApi(
       request("POST", "/api/resolve", { artists: ["  Wire  ", "", "   "] }),
       deps({ service: svc }),
@@ -187,39 +189,39 @@ describe("POST /api/resolve", () => {
 
 describe("POST /api/commit", () => {
   it("creates a new playlist from the chosen tracks", async () => {
-    const svc = service({ createPlaylist: vi.fn(async () => ({ id: 9, name: "New" })) });
+    const svc = service({ createPlaylist: vi.fn(async () => ({ id: qid(9), name: "New" })) });
     const res = await handleApi(
       request("POST", "/api/commit", {
         target: { type: "new", name: "New", isPublic: true },
-        trackIds: [1, 2, 3],
+        trackIds: [qid(1), qid(2), qid(3)],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ playlist: { id: 9, name: "New" }, added: [1, 2, 3], skipped: [] });
+    expect(res.body).toEqual({ playlist: { id: qid(9), name: "New" }, added: [qid(1), qid(2), qid(3)], skipped: [] });
     expect(svc.createPlaylist).toHaveBeenCalledWith("New", { isPublic: true });
-    expect(svc.addTracksToPlaylist).toHaveBeenCalledWith(9, [1, 2, 3]);
+    expect(svc.addTracksToPlaylist).toHaveBeenCalledWith(qid(9), [qid(1), qid(2), qid(3)]);
   });
 
   it("adds to an existing playlist, skipping tracks already present", async () => {
     const svc = service({
-      getPlaylistTracks: vi.fn(async () => [{ id: 1, title: "present" }]),
+      getPlaylistTracks: vi.fn(async () => [{ id: qid(1), title: "present" }]),
     });
     const res = await handleApi(
       request("POST", "/api/commit", {
-        target: { type: "existing", playlistId: 55 },
-        trackIds: [1, 2, 3],
+        target: { type: "existing", playlistId: qid(55) },
+        trackIds: [qid(1), qid(2), qid(3)],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ playlistId: 55, added: [2, 3], skipped: [1] });
-    expect(svc.addTracksToPlaylist).toHaveBeenCalledWith(55, [2, 3]);
+    expect(res.body).toEqual({ playlistId: qid(55), added: [qid(2), qid(3)], skipped: [qid(1)] });
+    expect(svc.addTracksToPlaylist).toHaveBeenCalledWith(qid(55), [qid(2), qid(3)]);
   });
 
   it("rejects a new playlist with a blank name", async () => {
     const res = await handleApi(
-      request("POST", "/api/commit", { target: { type: "new", name: "  " }, trackIds: [1] }),
+      request("POST", "/api/commit", { target: { type: "new", name: "  " }, trackIds: [qid(1)] }),
       deps(),
     );
     expect(res.status).toBe(400);
@@ -227,7 +229,7 @@ describe("POST /api/commit", () => {
 
   it("rejects an empty track list", async () => {
     const res = await handleApi(
-      request("POST", "/api/commit", { target: { type: "existing", playlistId: 1 }, trackIds: [] }),
+      request("POST", "/api/commit", { target: { type: "existing", playlistId: qid(1) }, trackIds: [] }),
       deps(),
     );
     expect(res.status).toBe(400);
@@ -235,7 +237,7 @@ describe("POST /api/commit", () => {
 
   it("rejects an unknown target type", async () => {
     const res = await handleApi(
-      request("POST", "/api/commit", { target: { type: "nope" }, trackIds: [1] }),
+      request("POST", "/api/commit", { target: { type: "nope" }, trackIds: [qid(1)] }),
       deps(),
     );
     expect(res.status).toBe(400);
@@ -245,10 +247,10 @@ describe("POST /api/commit", () => {
 describe("filter in playlist requests", () => {
   it("applies a track filter when resolving artists", async () => {
     const svc = service({
-      searchArtists: vi.fn(async (q: string) => [{ id: 5, name: q }]),
+      searchArtists: vi.fn(async (q: string) => [{ id: qid(5), name: q }]),
       getArtistTopTracks: vi.fn(async () => [
-        { id: 100, title: "Roads", version: "Live" },
-        { id: 101, title: "Sour Times" },
+        { id: qid(100), title: "Roads", version: "Live" },
+        { id: qid(101), title: "Sour Times" },
       ]),
     });
     const res = await handleApi(
@@ -263,16 +265,16 @@ describe("filter in playlist requests", () => {
     const body = res.body as {
       resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ track: Track }> }>;
     };
-    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([101]);
-    expect(body.resolvedArtists[0]?.excluded.map((e) => e.track.id)).toEqual([100]);
+    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([qid(101)]);
+    expect(body.resolvedArtists[0]?.excluded.map((e) => e.track.id)).toEqual([qid(100)]);
   });
 
   it("applies an artist filter to the tracks' performers", async () => {
     const svc = service({
-      searchArtists: vi.fn(async (q: string) => [{ id: 5, name: q }]),
+      searchArtists: vi.fn(async (q: string) => [{ id: qid(5), name: q }]),
       getArtistTopTracks: vi.fn(async () => [
-        { id: 100, title: "Duet", artist: "Björk" },
-        { id: 101, title: "Sour Times", artist: "Portishead" },
+        { id: qid(100), title: "Duet", artist: "Björk" },
+        { id: qid(101), title: "Sour Times", artist: "Portishead" },
       ]),
     });
     const res = await handleApi(
@@ -287,7 +289,7 @@ describe("filter in playlist requests", () => {
     const body = res.body as {
       resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ exclusion: unknown }> }>;
     };
-    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([101]);
+    expect(body.resolvedArtists[0]?.tracks.map((t) => t.id)).toEqual([qid(101)]);
     expect(body.resolvedArtists[0]?.excluded.map((e) => e.exclusion)).toEqual([
       { kind: "artist", term: "bjork" },
     ]);
@@ -317,8 +319,8 @@ describe("filter in playlist requests", () => {
   it("marks tracks outside the disc list when fetching album tracks", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async () => [
-        { id: 1, title: "One", discNumber: 1 },
-        { id: 2, title: "Two", discNumber: 2 },
+        { id: qid(1), title: "One", discNumber: 1 },
+        { id: qid(2), title: "Two", discNumber: 2 },
       ]),
     });
     const res = await handleApi(
@@ -329,10 +331,10 @@ describe("filter in playlist requests", () => {
     expect(res.body).toEqual({
       fetched: [
         {
-          albumId: "a",
+          albumId: qid("a"),
           tracks: [
-            { track: { id: 1, title: "One", discNumber: 1 } },
-            { track: { id: 2, title: "Two", discNumber: 2 }, exclusion: { kind: "disc", disc: 2 } },
+            { track: { id: qid(1), title: "One", discNumber: 1 } },
+            { track: { id: qid(2), title: "Two", discNumber: 2 }, exclusion: { kind: "disc", disc: 2 } },
           ],
         },
       ],
@@ -388,18 +390,18 @@ describe("filter in playlist requests", () => {
 
 const similarService = () =>
   service({
-    searchArtists: vi.fn(async (q: string) => [{ id: 1, name: q }]),
+    searchArtists: vi.fn(async (q: string) => [{ id: qid(1), name: q }]),
     getSimilarArtists: vi.fn(async (id: number) =>
-      id === 1 ? [{ id: 11, name: "Mudhoney" }, { id: 12, name: "Hole" }] : [],
+      id === qid(1) ? [{ id: qid(11), name: "Mudhoney" }, { id: qid(12), name: "Hole" }] : [],
     ),
-    getArtistTopTracks: vi.fn(async (id: number, limit?: number) =>
-      Array.from({ length: 10 }, (_v, i) => ({ id: id * 100 + i, title: `t${i}` })).slice(
+    getArtistTopTracks: vi.fn(async (id: ArtistId, limit?: number) =>
+      Array.from({ length: 10 }, (_v, i) => ({ id: qid(Number(shortId(id)) * 100 + i), title: `t${i}` })).slice(
         0,
         limit,
       ),
     ),
     getPlaylistTracks: vi.fn(async () => [
-      { id: 5, title: "Lithium", artistId: 1, artist: "Nirvana" },
+      { id: qid(5), title: "Lithium", artistId: qid(1), artist: "Nirvana" },
     ]),
   });
 
@@ -419,13 +421,13 @@ describe("POST /api/similar/walk", () => {
       truncated: boolean;
     };
     // Defaults: 5 seed tracks, 3 similar per artist, depth 1.
-    expect(body.seeds.map((s) => [s.artist.id, s.tracks.length])).toEqual([[1, 5]]);
+    expect(body.seeds.map((s) => [s.artist.id, s.tracks.length])).toEqual([[qid(1), 5]]);
     expect(body.found.map((f) => [f.artist.id, f.level])).toEqual([
-      [11, 1],
-      [12, 1],
+      [qid(11), 1],
+      [qid(12), 1],
     ]);
-    expect(svc.getSimilarArtists).toHaveBeenCalledWith(1, 500);
-    expect(svc.getArtistTopTracks).not.toHaveBeenCalledWith(11, expect.anything());
+    expect(svc.getSimilarArtists).toHaveBeenCalledWith(qid(1), 500);
+    expect(svc.getArtistTopTracks).not.toHaveBeenCalledWith(qid(11), expect.anything());
     expect(body.truncated).toBe(false);
   });
 
@@ -433,7 +435,7 @@ describe("POST /api/similar/walk", () => {
     const svc = similarService();
     const res = await handleApi(
       request("POST", "/api/similar/walk", {
-        source: { type: "playlist", playlistId: 42, maxSeeds: 5 },
+        source: { type: "playlist", playlistId: qid(42), maxSeeds: 5 },
         similarPerArtist: 1,
         depth: 2,
       }),
@@ -444,13 +446,13 @@ describe("POST /api/similar/walk", () => {
       seeds: Array<{ artist: Artist; tracks: Track[] }>;
       found: Array<{ artist: Artist }>;
     };
-    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(42);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(qid(42));
     expect(body.seeds).toEqual([
-      { query: "Nirvana", artist: { id: 1, name: "Nirvana" }, tracks: [], excluded: [] },
+      { query: "Nirvana", artist: { id: qid(1), name: "Nirvana" }, tracks: [], excluded: [] },
     ]);
-    expect(body.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(body.found.map((f) => f.artist.id)).toEqual([qid(11)]);
     // Depth 2 looked up the level-1 artist too.
-    expect(svc.getSimilarArtists).toHaveBeenCalledWith(11, 500);
+    expect(svc.getSimilarArtists).toHaveBeenCalledWith(qid(11), 500);
   });
 
   it("accepts large counts, deep walks and a chosen artist cap", async () => {
@@ -473,11 +475,11 @@ describe("POST /api/similar/walk", () => {
     // Nirvana and Hole both list Mudhoney first.
     const svc = similarService();
     svc.getSimilarArtists = vi.fn(async (id: number) =>
-      id === 1
-        ? [{ id: 11, name: "Mudhoney" }]
-        : [{ id: 11, name: "Mudhoney" }, { id: 13, name: "Tad" }],
+      id === qid(1)
+        ? [{ id: qid(11), name: "Mudhoney" }]
+        : [{ id: qid(11), name: "Mudhoney" }, { id: qid(13), name: "Tad" }],
     );
-    svc.searchArtists = vi.fn(async (q: string) => [{ id: q === "Nirvana" ? 1 : 2, name: q }]);
+    svc.searchArtists = vi.fn(async (q: string) => [{ id: q === "Nirvana" ? qid(1) : qid(2), name: q }]);
     const walk = async (replaceRepeats?: boolean) =>
       (
         await handleApi(
@@ -494,13 +496,13 @@ describe("POST /api/similar/walk", () => {
       };
 
     const strict = await walk();
-    expect(strict.found.map((f) => f.artist.id)).toEqual([11]);
+    expect(strict.found.map((f) => f.artist.id)).toEqual([qid(11)]);
     expect(strict.appearances.map((a) => [a.seed.id, a.artist.id])).toEqual([
-      [1, 11],
-      [2, 11],
+      [qid(1), qid(11)],
+      [qid(2), qid(11)],
     ]);
     const replacing = await walk(true);
-    expect(replacing.found.map((f) => f.artist.id)).toEqual([11, 13]);
+    expect(replacing.found.map((f) => f.artist.id)).toEqual([qid(11), qid(13)]);
   });
 
   it("leaves out similar artists the filter excludes and reports them", async () => {
@@ -514,8 +516,8 @@ describe("POST /api/similar/walk", () => {
     );
     expect(res.status).toBe(200);
     const body = res.body as { found: Array<{ artist: Artist }>; excludedArtists: Artist[] };
-    expect(body.found.map((f) => f.artist.id)).toEqual([12]);
-    expect(body.excludedArtists).toEqual([{ id: 11, name: "Mudhoney" }]);
+    expect(body.found.map((f) => f.artist.id)).toEqual([qid(12)]);
+    expect(body.excludedArtists).toEqual([{ id: qid(11), name: "Mudhoney" }]);
   });
 
   it("accepts zero seed tracks", async () => {
@@ -537,8 +539,8 @@ describe("POST /api/similar/walk", () => {
     ["a bad playlist id", { source: { type: "playlist", playlistId: "x" } }],
     ["too many seed tracks", { source: { type: "artists", artists: ["A"], tracksPerSeed: 101 } }],
     ["negative seed tracks", { source: { type: "artists", artists: ["A"], tracksPerSeed: -1 } }],
-    ["zero seeds", { source: { type: "playlist", playlistId: 1, maxSeeds: 0 } }],
-    ["too many seeds", { source: { type: "playlist", playlistId: 1, maxSeeds: 51 } }],
+    ["zero seeds", { source: { type: "playlist", playlistId: qid(1), maxSeeds: 0 } }],
+    ["too many seeds", { source: { type: "playlist", playlistId: qid(1), maxSeeds: 51 } }],
     ["depth 0", { source: { type: "artists", artists: ["A"] }, depth: 0 }],
     ["0 similar per artist", { source: { type: "artists", artists: ["A"] }, similarPerArtist: 0 }],
     ["an artist cap of 0", { source: { type: "artists", artists: ["A"] }, maxArtists: 0 }],
@@ -555,10 +557,10 @@ describe("POST /api/similar/walk", () => {
 describe("POST /api/similar/tracks", () => {
   it("fetches a batch of artists' top tracks with the filter, flagging empty ones", async () => {
     const svc = similarService();
-    svc.getArtistTopTracks = vi.fn(async (id: number, limit?: number) =>
-      id === 12
+    svc.getArtistTopTracks = vi.fn(async (id: ArtistId, limit?: number) =>
+      id === qid(12)
         ? []
-        : Array.from({ length: 10 }, (_v, i) => ({ id: id * 100 + i, title: `t${i}` })).slice(
+        : Array.from({ length: 10 }, (_v, i) => ({ id: qid(Number(shortId(id)) * 100 + i), title: `t${i}` })).slice(
             0,
             limit,
           ),
@@ -566,8 +568,8 @@ describe("POST /api/similar/tracks", () => {
     const res = await handleApi(
       request("POST", "/api/similar/tracks", {
         artists: [
-          { id: 11, name: "Mudhoney" },
-          { id: 12, name: "Restricted" },
+          { id: qid(11), name: "Mudhoney" },
+          { id: qid(12), name: "Restricted" },
         ],
         tracksPerSimilar: 2,
         filter: { excludeTracks: ["t0"] },
@@ -580,18 +582,18 @@ describe("POST /api/similar/tracks", () => {
       emptyArtists: Array<{ artist: Artist }>;
     };
     expect(body.fetched.map((f) => [f.artist.id, f.tracks.map((t) => t.id)])).toEqual([
-      [11, [1101, 1102]],
+      [qid(11), [qid(1101), qid(1102)]],
     ]);
     expect(body.fetched[0]?.excluded).toHaveLength(1);
-    expect(body.emptyArtists.map((a) => a.artist.id)).toEqual([12]);
+    expect(body.emptyArtists.map((a) => a.artist.id)).toEqual([qid(12)]);
   });
 
   it.each([
     ["no artists", { artists: [] }],
     ["a malformed artist", { artists: [{ id: "x", name: "A" }] }],
     ["too many artists", { artists: Array.from({ length: 51 }, (_v, i) => ({ id: i + 1, name: "A" })) }],
-    ["31 tracks", { artists: [{ id: 1, name: "A" }], tracksPerSimilar: 31 }],
-    ["a bad filter", { artists: [{ id: 1, name: "A" }], filter: "live" }],
+    ["31 tracks", { artists: [{ id: qid(1), name: "A" }], tracksPerSimilar: 31 }],
+    ["a bad filter", { artists: [{ id: qid(1), name: "A" }], filter: "live" }],
   ])("rejects %s", async (_label, body) => {
     const res = await handleApi(request("POST", "/api/similar/tracks", body), deps());
     expect(res.status).toBe(400);
@@ -620,7 +622,7 @@ describe("POST /api/similar/estimate", () => {
   it("uses the seed cap as the seed count for a playlist, and flags a large run", async () => {
     const res = await handleApi(
       request("POST", "/api/similar/estimate", {
-        source: { type: "playlist", playlistId: 1, maxSeeds: 50 },
+        source: { type: "playlist", playlistId: qid(1), maxSeeds: 50 },
         similarPerArtist: 20,
         depth: 3,
         maxArtists: 5000,
@@ -693,9 +695,9 @@ describe("POST /api/album-tracks", () => {
   it("returns each album's tracks in request order, fetching without writing", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async (id: string) =>
-        id === "a"
-          ? [{ id: 1, title: "One" }, { id: 2, title: "Two" }]
-          : [{ id: 3, title: "Three" }],
+        id === qid("a")
+          ? [{ id: qid(1), title: "One" }, { id: qid(2), title: "Two" }]
+          : [{ id: qid(3), title: "Three" }],
       ),
     });
     const res = await handleApi(
@@ -706,10 +708,10 @@ describe("POST /api/album-tracks", () => {
     expect(res.body).toEqual({
       fetched: [
         {
-          albumId: "a",
-          tracks: [{ track: { id: 1, title: "One" } }, { track: { id: 2, title: "Two" } }],
+          albumId: qid("a"),
+          tracks: [{ track: { id: qid(1), title: "One" } }, { track: { id: qid(2), title: "Two" } }],
         },
-        { albumId: "b", tracks: [{ track: { id: 3, title: "Three" } }] },
+        { albumId: qid("b"), tracks: [{ track: { id: qid(3), title: "Three" } }] },
       ],
       failedAlbumIds: [],
     });
@@ -721,7 +723,7 @@ describe("POST /api/album-tracks", () => {
   it("passes cover URLs through to the page", async () => {
     const image = "https://static.qobuz.com/images/covers/a_230.jpg";
     const svc = service({
-      getAlbumTracks: vi.fn(async () => [{ id: 1, title: "One", image }]),
+      getAlbumTracks: vi.fn(async () => [{ id: qid(1), title: "One", image }]),
       searchAlbums: vi.fn(async () => [
         { id: "a", title: "OK Computer", artist: "Radiohead", image },
       ]),
@@ -731,7 +733,7 @@ describe("POST /api/album-tracks", () => {
       deps({ service: svc }),
     );
     expect(tracks.body).toMatchObject({
-      fetched: [{ albumId: "a", tracks: [{ track: { id: 1, title: "One", image } }] }],
+      fetched: [{ albumId: qid("a"), tracks: [{ track: { id: qid(1), title: "One", image } }] }],
     });
     const albums = await handleApi(
       request("POST", "/api/resolve-albums", { entries: ["Radiohead - OK Computer"] }),
@@ -743,10 +745,10 @@ describe("POST /api/album-tracks", () => {
   it("reports albums whose tracks could not be fetched", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async (id: string) => {
-        if (id === "bad") {
+        if (id === qid("bad")) {
           throw new Error("album/get failed with HTTP 404");
         }
-        return [{ id: 1, title: "One" }];
+        return [{ id: qid(1), title: "One" }];
       }),
     });
     const res = await handleApi(
@@ -755,8 +757,8 @@ describe("POST /api/album-tracks", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      fetched: [{ albumId: "a", tracks: [{ track: { id: 1, title: "One" } }] }],
-      failedAlbumIds: ["bad"],
+      fetched: [{ albumId: qid("a"), tracks: [{ track: { id: qid(1), title: "One" } }] }],
+      failedAlbumIds: [qid("bad")],
     });
   });
 
@@ -771,16 +773,16 @@ describe("POST /api/album-tracks", () => {
 
 describe("POST /api/deduplicate/scan", () => {
   const dupes: Track[] = [
-    { id: 1, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: 11 },
-    { id: 2, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: 12 },
-    { id: 3, title: "Iron Man", artist: "Black Sabbath" },
+    { id: qid(1), title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: qid(11) },
+    { id: qid(2), title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", playlistTrackId: qid(12) },
+    { id: qid(3), title: "Iron Man", artist: "Black Sabbath" },
   ];
 
   it("returns resolved duplicate groups for a playlist", async () => {
     const svc = service({ getPlaylistTracks: vi.fn(async () => dupes) });
     const res = await handleApi(
       request("POST", "/api/deduplicate/scan", {
-        source: { type: "playlist", playlistId: 55 },
+        source: { type: "playlist", playlistId: qid(55) },
         keep: "first-added",
       }),
       deps({ service: svc }),
@@ -788,9 +790,9 @@ describe("POST /api/deduplicate/scan", () => {
     expect(res.status).toBe(200);
     const body = res.body as { groups: Array<{ tracks: Track[]; keepId: number }> };
     expect(body.groups).toHaveLength(1);
-    expect(body.groups[0]?.keepId).toBe(1);
-    expect(body.groups[0]?.tracks.map((t) => t.id)).toEqual([1, 2]);
-    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(55);
+    expect(body.groups[0]?.keepId).toBe(qid(1));
+    expect(body.groups[0]?.tracks.map((t) => t.id)).toEqual([qid(1), qid(2)]);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(qid(55));
   });
 
   it("scans favourites when the source is favourites", async () => {
@@ -808,8 +810,8 @@ describe("POST /api/deduplicate/scan", () => {
 
   it("enriches release dates for date-based strategies", async () => {
     const withAlbums: Track[] = [
-      { id: 1, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a1" },
-      { id: 2, title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a2" },
+      { id: qid(1), title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a1" },
+      { id: qid(2), title: "Paranoid", artist: "Black Sabbath", isrc: "AAA", albumId: "a2" },
     ];
     const dates: Record<string, string> = { a1: "1970-01-01", a2: "2000-01-01" };
     const svc = service({
@@ -818,14 +820,14 @@ describe("POST /api/deduplicate/scan", () => {
     });
     const res = await handleApi(
       request("POST", "/api/deduplicate/scan", {
-        source: { type: "playlist", playlistId: 1 },
+        source: { type: "playlist", playlistId: qid(1) },
         keep: "oldest",
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     const body = res.body as { groups: Array<{ keepId: number }> };
-    expect(body.groups[0]?.keepId).toBe(1); // a1 is older
+    expect(body.groups[0]?.keepId).toBe(qid(1)); // a1 is older
     expect(svc.getAlbumReleaseDate).toHaveBeenCalled();
   });
 
@@ -852,9 +854,9 @@ describe("POST /api/deduplicate/scan", () => {
 describe("POST /api/deduplicate/scan (extras)", () => {
   it("breaks ties with a keep chain (array or comma string)", async () => {
     const tracks: Track[] = [
-      { id: 1, title: "Paranoid", artist: "Black Sabbath", bitDepth: 16, samplingRate: 44.1 },
-      { id: 2, title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
-      { id: 3, title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
+      { id: qid(1), title: "Paranoid", artist: "Black Sabbath", bitDepth: 16, samplingRate: 44.1 },
+      { id: qid(2), title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
+      { id: qid(3), title: "Paranoid", artist: "Black Sabbath", bitDepth: 24, samplingRate: 96 },
     ];
     for (const keep of [["highest-quality", "last-added"], "highest-quality,last-added"]) {
       const svc = service({ getFavoriteTracks: vi.fn(async () => tracks) });
@@ -863,7 +865,7 @@ describe("POST /api/deduplicate/scan (extras)", () => {
         deps({ service: svc }),
       );
       expect(res.status).toBe(200);
-      expect((res.body as { groups: Array<{ keepId: number }> }).groups[0]?.keepId).toBe(3);
+      expect((res.body as { groups: Array<{ keepId: number }> }).groups[0]?.keepId).toBe(qid(3));
     }
   });
 
@@ -880,11 +882,11 @@ describe("POST /api/deduplicate/scan (extras)", () => {
   it("scans all playlists: duplicates within each, and songs across them", async () => {
     const svc = service({
       getUserPlaylists: vi.fn(async () => [
-        { id: 1, name: "One" },
-        { id: 2, name: "Two" },
+        { id: qid(1), name: "One" },
+        { id: qid(2), name: "Two" },
       ]),
       getPlaylistTracks: vi.fn(async (id: number) => [
-        { id: 7, title: "Iron Man", artist: "Black Sabbath", playlistTrackId: id * 10 },
+        { id: qid(7), title: "Iron Man", artist: "Black Sabbath", playlistTrackId: id * 10 },
       ]),
     });
     const res = await handleApi(
@@ -899,7 +901,7 @@ describe("POST /api/deduplicate/scan (extras)", () => {
     };
     expect(body.within).toEqual([]);
     expect(body.playlistCount).toBe(2);
-    expect(body.across[0]?.playlists.map((p) => p.playlist.id)).toEqual([1, 2]);
+    expect(body.across[0]?.playlists.map((p) => p.playlist.id)).toEqual([qid(1), qid(2)]);
   });
 });
 
@@ -910,24 +912,24 @@ describe("POST /api/deduplicate/apply (all playlists)", () => {
       request("POST", "/api/deduplicate/apply", {
         source: { type: "all-playlists" },
         removals: [
-          { id: 7, playlistId: 1, playlistTrackId: 10 },
-          { id: 7, playlistId: 2, playlistTrackId: 20 },
-          { id: 8, playlistId: 1, playlistTrackId: 11 },
+          { id: qid(7), playlistId: qid(1), playlistTrackId: qid(10) },
+          { id: qid(7), playlistId: qid(2), playlistTrackId: qid(20) },
+          { id: qid(8), playlistId: qid(1), playlistTrackId: qid(11) },
         ],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ removed: 3 });
-    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(1, [10, 11]);
-    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(2, [20]);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(qid(1), [qid(10), qid(11)]);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(qid(2), [qid(20)]);
   });
 
   it("rejects a removal without its playlist", async () => {
     const res = await handleApi(
       request("POST", "/api/deduplicate/apply", {
         source: { type: "all-playlists" },
-        removals: [{ id: 7, playlistTrackId: 10 }],
+        removals: [{ id: qid(7), playlistTrackId: qid(10) }],
       }),
       deps(),
     );
@@ -940,17 +942,17 @@ describe("POST /api/deduplicate/apply", () => {
     const svc = service();
     const res = await handleApi(
       request("POST", "/api/deduplicate/apply", {
-        source: { type: "playlist", playlistId: 55 },
+        source: { type: "playlist", playlistId: qid(55) },
         removals: [
-          { id: 2, playlistTrackId: 12 },
-          { id: 3, playlistTrackId: 13 },
+          { id: qid(2), playlistTrackId: qid(12) },
+          { id: qid(3), playlistTrackId: qid(13) },
         ],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ removed: 2 });
-    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(55, [12, 13]);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(qid(55), [qid(12), qid(13)]);
   });
 
   it("removes favourite tracks by track id", async () => {
@@ -958,13 +960,13 @@ describe("POST /api/deduplicate/apply", () => {
     const res = await handleApi(
       request("POST", "/api/deduplicate/apply", {
         source: { type: "favourites" },
-        removals: [{ id: 7 }, { id: 8 }],
+        removals: [{ id: qid(7) }, { id: qid(8) }],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ removed: 2 });
-    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([7, 8]);
+    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([qid(7), qid(8)]);
   });
 
   it("rejects an empty removal list", async () => {
@@ -981,16 +983,16 @@ describe("POST /api/deduplicate/apply", () => {
 
 describe("POST /api/upgrade/resolve", () => {
   const cdTrack: Track = {
-    id: 1,
+    id: qid(1),
     title: "Teardrop",
     artist: "Massive Attack",
     isrc: "GBAAA9800001",
     streamable: true,
     bitDepth: 16,
     samplingRate: 44.1,
-    playlistTrackId: 11,
+    playlistTrackId: qid(11),
   };
-  const hires: Track = { ...cdTrack, id: 2, bitDepth: 24, samplingRate: 96 };
+  const hires: Track = { ...cdTrack, id: qid(2), bitDepth: 24, samplingRate: 96 };
 
   it("returns a plan for a playlist", async () => {
     const svc = service({
@@ -998,7 +1000,7 @@ describe("POST /api/upgrade/resolve", () => {
       searchTracks: vi.fn(async () => [hires]),
     });
     const res = await handleApi(
-      request("POST", "/api/upgrade/resolve", { source: { type: "playlist", playlistId: 55 } }),
+      request("POST", "/api/upgrade/resolve", { source: { type: "playlist", playlistId: qid(55) } }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
@@ -1006,16 +1008,16 @@ describe("POST /api/upgrade/resolve", () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({
       kind: "upgrade",
-      replacementId: 2,
-      location: { type: "playlist", playlistId: 55, playlistTrackId: 11 },
+      replacementId: qid(2),
+      location: { type: "playlist", playlistId: qid(55), playlistTrackId: qid(11) },
     });
-    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(55);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(qid(55));
   });
 
   it("scans every playlist and passes the options through", async () => {
     const gone: Track = { ...cdTrack, streamable: false, isrc: "GONE" };
     const svc = service({
-      getUserPlaylists: vi.fn(async () => [{ id: 1, name: "A" }]),
+      getUserPlaylists: vi.fn(async () => [{ id: qid(1), name: "A" }]),
       getPlaylistTracks: vi.fn(async () => [gone]),
     });
     const res = await handleApi(
@@ -1050,47 +1052,47 @@ describe("POST /api/upgrade/commit", () => {
     const res = await handleApi(
       request("POST", "/api/upgrade/commit", {
         changes: [
-          { action: "replace", location: { type: "favourites" }, trackId: 1, newTrackId: 2 },
-          { action: "remove", location: { type: "favourites" }, trackId: 3 },
+          { action: "replace", location: { type: "favourites" }, trackId: qid(1), newTrackId: qid(2) },
+          { action: "remove", location: { type: "favourites" }, trackId: qid(3) },
         ],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ replaced: 1, removed: 1, failed: [], movedToEnd: 0 });
-    expect(svc.addFavoriteTracks).toHaveBeenCalledWith([2]);
-    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([1, 3]);
+    expect(svc.addFavoriteTracks).toHaveBeenCalledWith([qid(2)]);
+    expect(svc.removeFavoriteTracks).toHaveBeenCalledWith([qid(1), qid(3)]);
   });
 
   it("removes a playlist entry by its playlist-track id", async () => {
     const svc = service({
-      getPlaylistTracks: vi.fn(async () => [{ id: 3, title: "T", playlistTrackId: 33 }]),
+      getPlaylistTracks: vi.fn(async () => [{ id: qid(3), title: "T", playlistTrackId: qid(33) }]),
     });
     const res = await handleApi(
       request("POST", "/api/upgrade/commit", {
         changes: [
           {
             action: "remove",
-            location: { type: "playlist", playlistId: 9, playlistTrackId: 33 },
-            trackId: 3,
+            location: { type: "playlist", playlistId: qid(9), playlistTrackId: qid(33) },
+            trackId: qid(3),
           },
         ],
       }),
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
-    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(9, [33]);
+    expect(svc.removeTracksFromPlaylist).toHaveBeenCalledWith(qid(9), [qid(33)]);
   });
 
   it("rejects an empty list or any malformed change", async () => {
     const fav = { type: "favourites" };
     for (const changes of [
       [],
-      [{ action: "replace", location: fav, trackId: 1 }],
-      [{ action: "replace", location: fav, trackId: 1, newTrackId: 1 }],
-      [{ action: "remove", location: { type: "playlist", playlistId: 9 }, trackId: 1 }],
-      [{ action: "leave", location: fav, trackId: 1 }],
-      [{ action: "remove", location: fav, trackId: 1 }, "junk"],
+      [{ action: "replace", location: fav, trackId: qid(1) }],
+      [{ action: "replace", location: fav, trackId: qid(1), newTrackId: qid(1) }],
+      [{ action: "remove", location: { type: "playlist", playlistId: qid(9) }, trackId: qid(1) }],
+      [{ action: "leave", location: fav, trackId: qid(1) }],
+      [{ action: "remove", location: fav, trackId: qid(1) }, "junk"],
     ]) {
       const res = await handleApi(request("POST", "/api/upgrade/commit", { changes }), deps());
       expect(res.status).toBe(400);
@@ -1141,7 +1143,7 @@ describe("POST /api/export", () => {
   it("exports favourite tracks as CSV with a filename", async () => {
     const svc = service({
       getFavoriteTracks: vi.fn(async () => [
-        { id: 1, title: "Roads", artist: "Portishead" },
+        { id: qid(1), title: "Roads", artist: "Portishead" },
       ]),
     });
     const res = await handleApi(
@@ -1158,11 +1160,11 @@ describe("POST /api/export", () => {
 
   it("exports a playlist to M3U", async () => {
     const svc = service({
-      getPlaylistTracks: vi.fn(async () => [{ id: 9, title: "T", artist: "A" }]),
+      getPlaylistTracks: vi.fn(async () => [{ id: qid(9), title: "T", artist: "A" }]),
     });
     const res = await handleApi(
       request("POST", "/api/export", {
-        source: { type: "playlist", playlistId: 7 },
+        source: { type: "playlist", playlistId: qid(7) },
         format: "m3u",
       }),
       deps({ service: svc }),
@@ -1185,8 +1187,8 @@ describe("POST /api/export", () => {
 
   it("exports the whole account as a JSON backup", async () => {
     const svc = service({
-      getFavoriteTracks: vi.fn(async () => [{ id: 1, title: "R" }]),
-      getUserPlaylists: vi.fn(async () => [{ id: 3, name: "P" }]),
+      getFavoriteTracks: vi.fn(async () => [{ id: qid(1), title: "R" }]),
+      getUserPlaylists: vi.fn(async () => [{ id: qid(3), name: "P" }]),
     });
     const res = await handleApi(
       request("POST", "/api/export", { source: { type: "account" } }),
@@ -1209,8 +1211,8 @@ describe("POST /api/export", () => {
   it("exports every playlist as one zip download, a file per playlist", async () => {
     const svc = service({
       getUserPlaylists: vi.fn(async () => [
-        { id: 3, name: "Chill/Out" },
-        { id: 4, name: "chill/out" },
+        { id: qid(3), name: "Chill/Out" },
+        { id: qid(4), name: "chill/out" },
       ]),
       getPlaylistTracks: vi.fn(async (id: number) => [
         { id: id * 10, title: "T", artist: "A" },
@@ -1243,7 +1245,7 @@ describe("POST /api/export", () => {
 describe("POST /api/import/resolve", () => {
   it("resolves text tracks to a plan by search", async () => {
     const svc = service({
-      searchTracks: vi.fn(async () => [{ id: 1, title: "Roads", artist: "Portishead" }]),
+      searchTracks: vi.fn(async () => [{ id: qid(1), title: "Roads", artist: "Portishead" }]),
     });
     const res = await handleApi(
       request("POST", "/api/import/resolve", {
@@ -1256,14 +1258,14 @@ describe("POST /api/import/resolve", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       kind: "tracks",
-      matched: [{ label: "Portishead - Roads", id: 1 }],
+      matched: [{ label: "Portishead - Roads", id: qid(1) }],
     });
   });
 
   it("reads an Exportify CSV as a Spotify export, matching by ISRC", async () => {
     const searchTracks = vi.fn(async (query: string) =>
       query === "GBAAA0000001"
-        ? [{ id: 1, title: "Roads", artist: "Portishead", isrc: "GBAAA0000001" }]
+        ? [{ id: qid(1), title: "Roads", artist: "Portishead", isrc: "GBAAA0000001" }]
         : [],
     );
     const res = await handleApi(
@@ -1277,7 +1279,7 @@ describe("POST /api/import/resolve", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       format: "spotify",
-      matched: [{ label: "Portishead - Roads", id: 1, via: "isrc" }],
+      matched: [{ label: "Portishead - Roads", id: qid(1), via: "isrc" }],
     });
   });
 
@@ -1324,13 +1326,13 @@ describe("POST /api/import/commit", () => {
     const addFavoriteTracks = vi.fn(async () => {});
     const res = await handleApi(
       request("POST", "/api/import/commit", {
-        plan: { kind: "tracks", matched: [{ label: "a", id: 1 }, { label: "b", id: 2 }] },
+        plan: { kind: "tracks", matched: [{ label: "a", id: qid(1) }, { label: "b", id: qid(2) }] },
         target: { type: "favourites" },
       }),
       deps({ service: service({ addFavoriteTracks }) }),
     );
     expect(res.status).toBe(200);
-    expect(addFavoriteTracks).toHaveBeenCalledWith([1, 2]);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([qid(1), qid(2)]);
     expect(res.body).toMatchObject({ written: 2 });
   });
 
@@ -1360,23 +1362,23 @@ describe("POST /api/import/commit", () => {
 describe("POST /api/restore", () => {
   it("restores a backup document", async () => {
     const addFavoriteTracks = vi.fn(async () => {});
-    const createPlaylist = vi.fn(async (name: string) => ({ id: 5, name }));
+    const createPlaylist = vi.fn(async (name: string) => ({ id: qid(5), name }));
     const backup = {
       formatVersion: 1,
       exportedAt: "2026-07-07T00:00:00.000Z",
       favourites: {
-        tracks: [{ id: 1, title: "a" }],
+        tracks: [{ id: qid(1), title: "a" }],
         albums: [],
         artists: [],
       },
-      playlists: [{ name: "P", tracks: [{ id: 9, title: "c" }] }],
+      playlists: [{ name: "P", tracks: [{ id: qid(9), title: "c" }] }],
     };
     const res = await handleApi(
       request("POST", "/api/restore", { content: JSON.stringify(backup) }),
       deps({ service: service({ addFavoriteTracks, createPlaylist }) }),
     );
     expect(res.status).toBe(200);
-    expect(addFavoriteTracks).toHaveBeenCalledWith([1]);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([qid(1)]);
     expect(createPlaylist).toHaveBeenCalledWith("P", { isPublic: false });
     expect(res.body).toMatchObject({ favouriteTracks: 1 });
   });
@@ -1391,13 +1393,13 @@ describe("POST /api/restore", () => {
 });
 
 describe("POST /api/combine/resolve", () => {
-  const roads = { id: 1, title: "Roads", artist: "Portishead" };
-  const glory = { id: 2, title: "Glory Box", artist: "Portishead" };
-  const angel = { id: 3, title: "Angel", artist: "Massive Attack" };
+  const roads = { id: qid(1), title: "Roads", artist: "Portishead" };
+  const glory = { id: qid(2), title: "Glory Box", artist: "Portishead" };
+  const angel = { id: qid(3), title: "Angel", artist: "Massive Attack" };
 
   function combineService() {
     return service({
-      getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
+      getUserPlaylists: vi.fn(async () => [{ id: qid(7), name: "Road Trip" }]),
       getPlaylistTracks: vi.fn(async () => [roads, glory]),
       getFavoriteTracks: vi.fn(async () => [glory, angel]),
     });
@@ -1406,7 +1408,7 @@ describe("POST /api/combine/resolve", () => {
   it("returns the plan for the chosen sources and mode", async () => {
     const res = await handleApi(
       request("POST", "/api/combine/resolve", {
-        sources: [{ type: "playlist", playlistId: 7 }, { type: "favourites" }],
+        sources: [{ type: "playlist", playlistId: qid(7) }, { type: "favourites" }],
         mode: "common",
       }),
       deps({ service: combineService() }),
@@ -1423,17 +1425,17 @@ describe("POST /api/combine/resolve", () => {
   it("merges by default, in input order", async () => {
     const res = await handleApi(
       request("POST", "/api/combine/resolve", {
-        sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }],
+        sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }],
       }),
       deps({ service: combineService() }),
     );
     const body = res.body as { tracks: { track: { id: number } }[] };
-    expect(body.tracks.map((t) => t.track.id)).toEqual([2, 3, 1]);
+    expect(body.tracks.map((t) => t.track.id)).toEqual([qid(2), qid(3), qid(1)]);
   });
 
   it("shuffles reproducibly with a seed", async () => {
     const body = {
-      sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }],
+      sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }],
       order: "shuffle",
       seed: 123,
     };
@@ -1447,11 +1449,11 @@ describe("POST /api/combine/resolve", () => {
     [{ sources: [{ type: "favourites" }, { type: "favourites" }] }, /only once/],
     [{ sources: [{ type: "playlist" }, { type: "favourites" }] }, /each source/],
     [{ sources: "x" }, /sources must be an array/],
-    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], mode: "x" }, /mode/],
-    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], order: 1 }, /order/],
-    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], keep: "x" }, /keep/],
-    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], matchSongs: "no" }, /matchSongs/],
-    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: 7 }], seed: 1.5 }, /seed/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }], mode: "x" }, /mode/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }], order: 1 }, /order/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }], keep: "x" }, /keep/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }], matchSongs: "no" }, /matchSongs/],
+    [{ sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(7) }], seed: 1.5 }, /seed/],
   ])("rejects invalid input %#", async (body, error) => {
     const res = await handleApi(request("POST", "/api/combine/resolve", body), deps());
     expect(res.status).toBe(400);
@@ -1461,8 +1463,8 @@ describe("POST /api/combine/resolve", () => {
 
 describe("POST /api/stats", () => {
   const tracks = [
-    { id: 1, title: "Roads", artist: "Portishead", releaseDate: "1994-08-22", duration: 300 },
-    { id: 2, title: "Angel", artist: "Massive Attack", releaseDate: "1998-04-20", bitDepth: 24, samplingRate: 96 },
+    { id: qid(1), title: "Roads", artist: "Portishead", releaseDate: "1994-08-22", duration: 300 },
+    { id: qid(2), title: "Angel", artist: "Massive Attack", releaseDate: "1998-04-20", bitDepth: 24, samplingRate: 96 },
   ];
 
   it("returns the stats of favourites, with each bucket's track ids", async () => {
@@ -1476,7 +1478,7 @@ describe("POST /api/stats", () => {
       trackCount: 2,
       artistCount: 2,
       quality: { hires: 1, cd: 0, unknown: 1 },
-      decades: [{ key: "1990s", count: 2, trackIds: [1, 2], suggestedName: "Favourites: 1990s" }],
+      decades: [{ key: "1990s", count: 2, trackIds: [qid(1), qid(2)], suggestedName: "Favourites: 1990s" }],
       headline: "2 favourite tracks by 2 artists. 5 minutes of music.",
     });
   });
@@ -1484,15 +1486,15 @@ describe("POST /api/stats", () => {
   it("reads a playlist under its name", async () => {
     const getPlaylistTracks = vi.fn(async () => tracks);
     const res = await handleApi(
-      request("POST", "/api/stats", { source: { type: "playlist", playlistId: 7 } }),
+      request("POST", "/api/stats", { source: { type: "playlist", playlistId: qid(7) } }),
       deps({
         service: service({
           getPlaylistTracks,
-          getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
+          getUserPlaylists: vi.fn(async () => [{ id: qid(7), name: "Road Trip" }]),
         }),
       }),
     );
-    expect(getPlaylistTracks).toHaveBeenCalledWith(7);
+    expect(getPlaylistTracks).toHaveBeenCalledWith(qid(7));
     expect(res.body).toMatchObject({ label: "Road Trip", trackCount: 2 });
   });
 
@@ -1502,8 +1504,8 @@ describe("POST /api/stats", () => {
       deps({
         service: service({
           getFavoriteTracks: vi.fn(async () => tracks),
-          getUserPlaylists: vi.fn(async () => [{ id: 7, name: "Road Trip" }]),
-          getPlaylistTracks: vi.fn(async () => [tracks[0]!, { id: 3, title: "New" }]),
+          getUserPlaylists: vi.fn(async () => [{ id: qid(7), name: "Road Trip" }]),
+          getPlaylistTracks: vi.fn(async () => [tracks[0]!, { id: qid(3), title: "New" }]),
         }),
       }),
     );
@@ -1522,8 +1524,8 @@ describe("POST /api/stats", () => {
 describe("POST /api/word-play/resolve", () => {
   it("splits a sentence into song titles", async () => {
     const titles: Record<string, Track> = {
-      lazy: { id: 1, title: "Lazy", artist: "Deep Purple" },
-      dog: { id: 2, title: "Dog.", artist: "Band" },
+      lazy: { id: qid(1), title: "Lazy", artist: "Deep Purple" },
+      dog: { id: qid(2), title: "Dog.", artist: "Band" },
     };
     const searchTracks = vi.fn(async (query: string) => {
       const hit = titles[query];
@@ -1543,16 +1545,16 @@ describe("POST /api/word-play/resolve", () => {
       suggestedName: string;
     };
     expect(body.splits[0]!.slots.map((s) => [s.label, s.chosen?.track.id])).toEqual([
-      ["lazy", 1],
-      ["dog", 2],
+      ["lazy", qid(1)],
+      ["dog", qid(2)],
     ]);
     expect(body.suggestedName).toBe("Lazy Dog");
   });
 
   it("passes the match options and filter through", async () => {
     const searchTracks = vi.fn(async () => [
-      { id: 1, title: "Jump", artist: "Van Halen" },
-      { id: 2, title: "Jump", artist: "Kris Kross" },
+      { id: qid(1), title: "Jump", artist: "Van Halen" },
+      { id: qid(2), title: "Jump", artist: "Kris Kross" },
     ]);
     const res = await handleApi(
       request("POST", "/api/word-play/resolve", {
@@ -1568,23 +1570,23 @@ describe("POST /api/word-play/resolve", () => {
       splits: { slots: { chosen?: { track: Track; closeForm: boolean } }[] }[];
       excludedCount: number;
     };
-    expect(body.splits[0]!.slots.map((s) => s.chosen?.track.id)).toEqual([2]);
+    expect(body.splits[0]!.slots.map((s) => s.chosen?.track.id)).toEqual([qid(2)]);
     expect(body.splits[0]!.slots[0]!.chosen?.closeForm).toBe(true);
     expect(body.excludedCount).toBe(1);
   });
 
   it("reads an acrostic's source playlist", async () => {
-    const getPlaylistTracks = vi.fn(async () => [{ id: 7, title: "Hello", artist: "Adele" }]);
+    const getPlaylistTracks = vi.fn(async () => [{ id: qid(7), title: "Hello", artist: "Adele" }]);
     const res = await handleApi(
       request("POST", "/api/word-play/resolve", {
         mode: "acrostic",
         text: "hi",
-        source: { type: "playlist", playlistId: 42 },
+        source: { type: "playlist", playlistId: qid(42) },
       }),
       deps({ service: service({ getPlaylistTracks }) }),
     );
     expect(res.status).toBe(200);
-    expect(getPlaylistTracks).toHaveBeenCalledWith(42);
+    expect(getPlaylistTracks).toHaveBeenCalledWith(qid(42));
     expect((res.body as { splits: { unmatched: string[] }[] }).splits[0]!.unmatched).toEqual([
       "I",
     ]);
@@ -1622,31 +1624,31 @@ describe("POST /api/word-play/resolve", () => {
 
 describe("POST /api/word-play/commit", () => {
   it("creates a playlist with the songs in order", async () => {
-    const createPlaylist = vi.fn(async (name: string) => ({ id: 3, name }));
+    const createPlaylist = vi.fn(async (name: string) => ({ id: qid(3), name }));
     const addTracksToPlaylist = vi.fn(async () => {});
     const res = await handleApi(
       request("POST", "/api/word-play/commit", {
         target: { type: "new", name: "Lazy Dog" },
-        trackIds: [2, 1, 2],
+        trackIds: [qid(2), qid(1), qid(2)],
       }),
       deps({ service: service({ createPlaylist, addTracksToPlaylist }) }),
     );
     expect(res.status).toBe(200);
-    expect(addTracksToPlaylist).toHaveBeenCalledWith(3, [2, 1]);
-    expect(res.body).toMatchObject({ playlistId: 3, added: [2, 1], skipped: [2] });
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(qid(3), [qid(2), qid(1)]);
+    expect(res.body).toMatchObject({ playlistId: qid(3), added: [qid(2), qid(1)], skipped: [qid(2)] });
   });
 
   it("adds to an existing playlist", async () => {
     const addTracksToPlaylist = vi.fn(async () => {});
     const res = await handleApi(
       request("POST", "/api/word-play/commit", {
-        target: { type: "existing", playlistId: 8 },
-        trackIds: [5],
+        target: { type: "existing", playlistId: qid(8) },
+        trackIds: [qid(5)],
       }),
       deps({ service: service({ addTracksToPlaylist }) }),
     );
     expect(res.status).toBe(200);
-    expect(addTracksToPlaylist).toHaveBeenCalledWith(8, [5]);
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(qid(8), [qid(5)]);
   });
 
   it("rejects a commit without tracks or a name", async () => {
@@ -1656,7 +1658,7 @@ describe("POST /api/word-play/commit", () => {
     );
     expect(noTracks.status).toBe(400);
     const noName = await handleApi(
-      request("POST", "/api/word-play/commit", { target: { type: "new" }, trackIds: [1] }),
+      request("POST", "/api/word-play/commit", { target: { type: "new" }, trackIds: [qid(1)] }),
       deps(),
     );
     expect(noName.status).toBe(400);
@@ -1665,13 +1667,13 @@ describe("POST /api/word-play/commit", () => {
 
 describe("POST /api/resolve-discography", () => {
   const releases: Release[] = [
-    { id: "d25", title: "Dummy (Deluxe)", artist: "Portishead", artistId: 42, releaseType: "album", releaseDate: "2019-01-01" },
-    { id: "live", title: "Roseland NYC Live", artist: "Portishead", artistId: 42, releaseType: "live", releaseDate: "1998-11-02" },
-    { id: "d", title: "Dummy", artist: "Portishead", artistId: 42, releaseType: "album", releaseDate: "1994-08-22" },
+    { id: "d25", title: "Dummy (Deluxe)", artist: "Portishead", artistId: qid(42), releaseType: "album", releaseDate: "2019-01-01" },
+    { id: "live", title: "Roseland NYC Live", artist: "Portishead", artistId: qid(42), releaseType: "live", releaseDate: "1998-11-02" },
+    { id: "d", title: "Dummy", artist: "Portishead", artistId: qid(42), releaseType: "album", releaseDate: "1994-08-22" },
   ];
   const svc = () =>
     service({
-      searchArtists: vi.fn(async () => [{ id: 42, name: "Portishead" }]),
+      searchArtists: vi.fn(async () => [{ id: qid(42), name: "Portishead" }]),
       getArtistReleases: vi.fn(async () => ({ releases, truncated: false })),
     });
 
@@ -1682,7 +1684,7 @@ describe("POST /api/resolve-discography", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      artist: { id: 42, name: "Portishead" },
+      artist: { id: qid(42), name: "Portishead" },
       resolvedAlbums: [{ query: "Portishead - Dummy", versions: [{ id: "d" }, { id: "d25" }] }],
       unresolvedAlbums: [],
       excludedAlbums: [],
@@ -1722,12 +1724,12 @@ describe("POST /api/new-releases", () => {
   const recent = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
   const svc = () =>
     service({
-      getFavoriteArtists: vi.fn(async () => [{ id: 1, name: "Tricky" }]),
+      getFavoriteArtists: vi.fn(async () => [{ id: qid(1), name: "Tricky" }]),
       getArtistReleases: vi.fn(async () => ({
         releases: [
-          { id: "ep", title: "Hell EP", artist: "Tricky", artistId: 1, releaseType: "ep-single", releaseDate: recent },
-          { id: "live", title: "Live", artist: "Tricky", artistId: 1, releaseType: "live", releaseDate: recent },
-          { id: "old", title: "Maxinquaye", artist: "Tricky", artistId: 1, releaseType: "album", releaseDate: "1995-02-20" },
+          { id: "ep", title: "Hell EP", artist: "Tricky", artistId: qid(1), releaseType: "ep-single", releaseDate: recent },
+          { id: "live", title: "Live", artist: "Tricky", artistId: qid(1), releaseType: "live", releaseDate: recent },
+          { id: "old", title: "Maxinquaye", artist: "Tricky", artistId: qid(1), releaseType: "album", releaseDate: "1995-02-20" },
         ] as Release[],
         truncated: false,
       })),
@@ -1750,11 +1752,11 @@ describe("POST /api/new-releases", () => {
   it("takes a playlist source, a start date and kinds", async () => {
     const service_ = svc();
     service_.getPlaylistTracks = vi.fn(async () => [
-      { id: 5, title: "x", artistId: 1, artist: "Tricky" },
+      { id: qid(5), title: "x", artistId: qid(1), artist: "Tricky" },
     ]);
     const res = await handleApi(
       request("POST", "/api/new-releases", {
-        source: { type: "playlist", playlistId: 9 },
+        source: { type: "playlist", playlistId: qid(9) },
         since: "1990-01-01",
         include: ["album", "live"],
       }),
@@ -1763,7 +1765,7 @@ describe("POST /api/new-releases", () => {
     const body = res.body as { releases: { id: string }[]; since: string };
     expect(body.since).toBe("1990-01-01");
     expect(body.releases.map((r) => r.id)).toEqual(["live", "old"]);
-    expect(service_.getPlaylistTracks).toHaveBeenCalledWith(9);
+    expect(service_.getPlaylistTracks).toHaveBeenCalledWith(qid(9));
   });
 
   it("validates its input", async () => {
@@ -1785,7 +1787,7 @@ describe("POST /api/new-releases/commit", () => {
   it("creates a playlist of the releases' tracks", async () => {
     const addTracksToPlaylist = vi.fn(async () => {});
     const svc = service({
-      getAlbumTracks: vi.fn(async (id: string) => [{ id: id === "a" ? 1 : 2, title: id }]),
+      getAlbumTracks: vi.fn(async (id: string) => [{ id: id === qid("a") ? qid(1) : qid(2), title: id }]),
       addTracksToPlaylist,
     });
     const res = await handleApi(
@@ -1797,7 +1799,7 @@ describe("POST /api/new-releases/commit", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ type: "playlist", trackCount: 2, failedAlbumIds: [] });
-    expect(addTracksToPlaylist).toHaveBeenCalledWith(1, [2, 1]);
+    expect(addTracksToPlaylist).toHaveBeenCalledWith(qid(1), [qid(2), qid(1)]);
   });
 
   it("adds the releases to favourite albums", async () => {
@@ -1810,7 +1812,7 @@ describe("POST /api/new-releases/commit", () => {
       deps({ service: service({ addFavoriteAlbums }) }),
     );
     expect(res.body).toEqual({ type: "favourite-albums", added: 1 });
-    expect(addFavoriteAlbums).toHaveBeenCalledWith(["a"]);
+    expect(addFavoriteAlbums).toHaveBeenCalledWith([qid("a")]);
   });
 
   it("validates its input", async () => {
@@ -1830,17 +1832,17 @@ describe("POST /api/new-releases/commit", () => {
 });
 
 describe("playlist plan options", () => {
-  const fav: Track = { id: 100, title: "Roads", artist: "Portishead" };
+  const fav: Track = { id: qid(100), title: "Roads", artist: "Portishead" };
 
   it("skips favourites and repeats when resolving artists, fetching favourites once", async () => {
     const svc = service({
       searchArtists: vi.fn(async (q: string) => [{ id: q === "A" ? 1 : 2, name: q }]),
       getArtistTopTracks: vi.fn(async (id: number) =>
         id === 1
-          ? [fav, { id: 101, title: "Glory Box", artist: "Portishead", isrc: "G" }]
+          ? [fav, { id: qid(101), title: "Glory Box", artist: "Portishead", isrc: "G" }]
           : [
-              { id: 201, title: "Glory Box (Live)", artist: "Other", isrc: "G" },
-              { id: 202, title: "Teardrop", artist: "Other" },
+              { id: qid(201), title: "Glory Box (Live)", artist: "Other", isrc: "G" },
+              { id: qid(202), title: "Teardrop", artist: "Other" },
             ],
       ),
       getFavoriteTracks: vi.fn(async () => [fav]),
@@ -1858,7 +1860,7 @@ describe("playlist plan options", () => {
     const body = res.body as {
       resolvedArtists: Array<{ tracks: Track[]; excluded: Array<{ exclusion: unknown }> }>;
     };
-    expect(body.resolvedArtists.map((r) => r.tracks.map((t) => t.id))).toEqual([[101], [202]]);
+    expect(body.resolvedArtists.map((r) => r.tracks.map((t) => t.id))).toEqual([[qid(101)], [qid(202)]]);
     expect(body.resolvedArtists.map((r) => r.excluded.map((e) => e.exclusion))).toEqual([
       [{ kind: "favourite" }],
       [{ kind: "repeat", of: "Glory Box" }],
@@ -1874,8 +1876,8 @@ describe("playlist plan options", () => {
 
   it("returns the picker from a similar walk and carries it through track batches", async () => {
     const svc = similarService();
-    svc.getFavoriteTracks = vi.fn(async () => [{ id: 1100, title: "t0" }]);
-    svc.getFavoriteArtists = vi.fn(async () => [{ id: 11, name: "Mudhoney" }]);
+    svc.getFavoriteTracks = vi.fn(async () => [{ id: qid(1100), title: "t0" }]);
+    svc.getFavoriteArtists = vi.fn(async () => [{ id: qid(11), name: "Mudhoney" }]);
     const walk = await handleApi(
       request("POST", "/api/similar/walk", {
         source: { type: "artists", artists: ["Nirvana"], tracksPerSeed: 1 },
@@ -1890,12 +1892,12 @@ describe("playlist plan options", () => {
     expect(walk.status).toBe(200);
     const walked = walk.body as { found: Array<{ artist: Artist }>; picker: unknown };
     // Mudhoney is a favourite artist, so Hole takes its place.
-    expect(walked.found.map((f) => f.artist.id)).toEqual([12]);
+    expect(walked.found.map((f) => f.artist.id)).toEqual([qid(12)]);
     expect(walked.picker).toMatchObject({ oneCopy: true });
 
     const batch = await handleApi(
       request("POST", "/api/similar/tracks", {
-        artists: [{ id: 11, name: "Mudhoney" }],
+        artists: [{ id: qid(11), name: "Mudhoney" }],
         tracksPerSimilar: 1,
         picker: walked.picker,
       }),
@@ -1907,7 +1909,7 @@ describe("playlist plan options", () => {
       picker: { seen: unknown[] };
     };
     // 1100 is a favourite (from the walk's state), so 1101 replaces it.
-    expect(fetched.fetched[0]?.tracks.map((t) => t.id)).toEqual([1101]);
+    expect(fetched.fetched[0]?.tracks.map((t) => t.id)).toEqual([qid(1101)]);
     expect(fetched.fetched[0]?.excluded.map((e) => e.exclusion)).toEqual([{ kind: "favourite" }]);
     expect(fetched.picker.seen.length).toBeGreaterThan(0);
     // Favourites were fetched once, by the walk.
@@ -1917,9 +1919,9 @@ describe("playlist plan options", () => {
   it("marks favourites and repeats in album tracks and returns the picker", async () => {
     const svc = service({
       getAlbumTracks: vi.fn(async (id: string) =>
-        id === "a"
-          ? [fav, { id: 2, title: "Song", artist: "X" }]
-          : [{ id: 3, title: "Song", artist: "X" }],
+        id === qid("a")
+          ? [fav, { id: qid(2), title: "Song", artist: "X" }]
+          : [{ id: qid(3), title: "Song", artist: "X" }],
       ),
       getFavoriteTracks: vi.fn(async () => [fav]),
     });
@@ -1955,7 +1957,7 @@ describe("playlist plan options", () => {
     ["/api/resolve", { artists: ["A"], skipFavourites: "yes" }],
     ["/api/resolve", { artists: ["A"], oneCopy: 1 }],
     ["/api/album-tracks", { albumIds: ["a"], picker: { oneCopy: "no" } }],
-    ["/api/similar/tracks", { artists: [{ id: 1, name: "A" }], picker: [] }],
+    ["/api/similar/tracks", { artists: [{ id: qid(1), name: "A" }], picker: [] }],
     [
       "/api/similar/walk",
       { source: { type: "artists", artists: ["A"] }, skipFavouriteArtists: "on" },
@@ -1970,7 +1972,7 @@ describe("Qobuz links in lists", () => {
   it("resolves an artist link by id and reports a link of another kind", async () => {
     const svc = service({
       getArtist: vi.fn(async (id: number) => ({ id, name: "Portishead" })),
-      getArtistTopTracks: vi.fn(async () => [{ id: 1, title: "Roads" }]),
+      getArtistTopTracks: vi.fn(async () => [{ id: qid(1), title: "Roads" }]),
     });
     const res = await handleApi(
       request("POST", "/api/resolve", {
@@ -2011,7 +2013,7 @@ describe("Qobuz links in lists", () => {
       unresolvedAlbums: string[];
     };
     expect(body.resolvedAlbums.map((r) => [r.query, r.versions.map((v) => v.id)])).toEqual([
-      ["Massive Attack - Mezzanine", ["pvsb64n704d0b"]],
+      ["Massive Attack - Mezzanine", [qid("pvsb64n704d0b")]],
     ]);
     expect(body.unresolvedAlbums).toEqual([
       "https://play.qobuz.com/artist/41259 (an artist link, not an album)",
@@ -2027,7 +2029,7 @@ describe("Qobuz links in lists", () => {
       deps({ service: svc }),
     );
     expect(res.status).toBe(200);
-    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(777);
+    expect(svc.getPlaylistTracks).toHaveBeenCalledWith(qid(777));
 
     const bad = await handleApi(
       request("POST", "/api/similar/walk", {
@@ -2070,11 +2072,11 @@ function historyDeps() {
 describe("history of web commits", () => {
   it("records each write route as one entry named after its tool", async () => {
     const { journal, account, deps: d } = historyDeps();
-    account.favourites.tracks = [1, 2];
+    account.favourites.tracks = [qid(1), qid(2)];
     const res = await handleApi(
       request("POST", "/api/deduplicate/apply", {
         source: { type: "favourites" },
-        removals: [{ id: 2 }],
+        removals: [{ id: qid(2) }],
       }),
       d,
     );
@@ -2094,7 +2096,7 @@ describe("history of web commits", () => {
       request("POST", "/api/commit", {
         tool: "combine",
         target: { type: "new", name: "A + B" },
-        trackIds: [5, 6],
+        trackIds: [qid(5), qid(6)],
       }),
       d,
     );
@@ -2107,7 +2109,7 @@ describe("history of web commits", () => {
       request("POST", "/api/commit", {
         tool: "rm -rf",
         target: { type: "new", name: "x" },
-        trackIds: [5],
+        trackIds: [qid(5)],
       }),
       historyDeps().deps,
     );
@@ -2123,8 +2125,8 @@ describe("GET /api/history", () => {
 
   it("lists entries newest first, as summaries", async () => {
     const { journal, deps: d } = historyDeps();
-    journal.record({ kind: "add-favourites", type: "tracks", ids: [1, 2] });
-    journal.record({ kind: "remove-favourites", type: "tracks", ids: [3] });
+    journal.record({ kind: "add-favourites", type: "tracks", ids: [qid(1), qid(2)] });
+    journal.record({ kind: "remove-favourites", type: "tracks", ids: [qid(3)] });
     const res = await handleApi(request("GET", "/api/history"), d);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
@@ -2152,7 +2154,7 @@ describe("POST /api/history/plan and /api/history/undo", () => {
       request("POST", "/api/commit", {
         tool: "playlist-from-artists",
         target: { type: "new", name: "Road Trip" },
-        trackIds: [5, 6],
+        trackIds: [qid(5), qid(6)],
       }),
       h.deps,
     );
@@ -2195,7 +2197,7 @@ describe("POST /api/history/plan and /api/history/undo", () => {
     const { deps: d } = historyDeps();
     expect((await handleApi(request("POST", "/api/history/plan", {}), d)).status).toBe(400);
     expect((await handleApi(request("POST", "/api/history/plan", { id: "nope" }), d)).status).toBe(404);
-    expect((await handleApi(request("POST", "/api/history/undo", { id: 7 }), d)).status).toBe(400);
+    expect((await handleApi(request("POST", "/api/history/undo", { id: qid(7) }), d)).status).toBe(400);
   });
 });
 
@@ -2207,7 +2209,7 @@ describe("job routes", () => {
     target: { type: "created" },
     source: {
       type: "new-releases",
-      artists: { type: "list", artists: [{ id: 1, name: "Air" }] },
+      artists: { type: "list", artists: [{ id: qid(1), name: "Air" }] },
       window: { type: "last-days", days: 30 },
     },
   };
@@ -2318,9 +2320,9 @@ describe("job routes", () => {
 
   it("looks up artists for a job", async () => {
     const { d } = jobDeps();
-    d.service.searchArtists = vi.fn(async (q: string) => (q === "Air" ? [{ id: 1, name: "Air" }] : []));
+    d.service.searchArtists = vi.fn(async (q: string) => (q === "Air" ? [{ id: qid(1), name: "Air" }] : []));
     const res = await handleApi(request("POST", "/api/jobs/artists", { queries: ["Air", "Nobody"] }), d);
-    expect(res.body).toEqual({ artists: [{ id: 1, name: "Air" }], problems: ["Nobody"] });
+    expect(res.body).toEqual({ artists: [{ id: qid(1), name: "Air" }], problems: ["Nobody"] });
   });
 
   it("accepts and ignores suggestions", async () => {
@@ -2328,7 +2330,7 @@ describe("job routes", () => {
     await handleApi(request("POST", "/api/jobs", { job: { ...input, tidy: { upgrade: { mode: "suggest" } } } }), d);
     states.set("00000001", {
       ...emptyJobState(),
-      suggestions: [{ key: "upgrade:1>2", tidy: "upgrade", summary: "s", change: { type: "replace", trackId: 1, newTrackId: 2 }, foundAt: "x" }],
+      suggestions: [{ key: "upgrade:1>2", tidy: "upgrade", summary: "s", change: { type: "replace", trackId: qid(1), newTrackId: qid(2) }, foundAt: "x" }],
     });
     const accepted = await handleApi(request("POST", "/api/jobs/00000001/suggestions", { accept: ["upgrade:1>2"] }), d);
     expect(accepted.body).toMatchObject({ outcome: { status: "accepted", applied: 1 } });
@@ -2349,7 +2351,7 @@ describe("job routes", () => {
 
   it("never deletes a playlist the job adopted", async () => {
     const { d, account } = jobDeps();
-    const playlistId = account.seedPlaylist("Mine", [1]);
+    const playlistId = account.seedPlaylist("Mine", [qid(1)]);
     const created = await handleApi(request("POST", "/api/jobs", { job: { ...input, target: { type: "adopted", playlistId } } }), d);
     expect(created.status).toBe(200);
     const res = await handleApi(request("DELETE", "/api/jobs/00000001", { deletePlaylist: true }), d);
@@ -2360,7 +2362,7 @@ describe("job routes", () => {
   it("deletes the playlist too when asked, as a history entry", async () => {
     const { d, states, account, journal } = jobDeps();
     await handleApi(request("POST", "/api/jobs", { job: input }), d);
-    const playlistId = account.seedPlaylist("Fresh", [1, 2]);
+    const playlistId = account.seedPlaylist("Fresh", [qid(1), qid(2)]);
     states.set("00000001", { ...emptyJobState(), playlistId });
     const res = await handleApi(request("DELETE", "/api/jobs/00000001", { deletePlaylist: true }), d);
     expect(res.body).toMatchObject({ playlistId, playlistDeleted: true });
@@ -2371,19 +2373,56 @@ describe("job routes", () => {
 
 describe("POST /api/deduplicate/scan with versions", () => {
   const tracks = [
-    { id: 1, title: "Roads", artist: "Portishead" },
-    { id: 2, title: "Roads", artist: "Portishead", version: "Live" },
+    { id: qid(1), title: "Roads", artist: "Portishead" },
+    { id: qid(2), title: "Roads", artist: "Portishead", version: "Live" },
   ];
   const scan = (body: unknown) =>
     handleApi(request("POST", "/api/deduplicate/scan", body), deps({ service: service({ getFavoriteTracks: vi.fn(async () => tracks) }) }));
 
   it("points versions out, or counts them as duplicates when asked", async () => {
     const source = { type: "favourites" };
-    expect((await scan({ source })).body).toMatchObject({ groups: [], versions: [[{ id: 1 }, { id: 2, version: "Live" }]] });
+    expect((await scan({ source })).body).toMatchObject({ groups: [], versions: [[{ id: qid(1) }, { id: qid(2), version: "Live" }]] });
     expect((await scan({ source, includeVersions: true })).body).toMatchObject({
-      groups: [{ tracks: [{ id: 1 }, { id: 2 }], keepId: 1 }],
+      groups: [{ tracks: [{ id: qid(1) }, { id: qid(2) }], keepId: qid(1) }],
       versions: [],
     });
     expect((await scan({ source, includeVersions: "yes" })).status).toBe(400);
+  });
+});
+
+describe("ids in requests", () => {
+  it("takes another service's ids whole, and a bare number as Qobuz's", async () => {
+    const getPlaylistTracks = vi.fn(async () => [] as Track[]);
+    for (const playlistId of ["tidal:a-b", "qobuz:5", 5]) {
+      const res = await handleApi(
+        request("POST", "/api/deduplicate/scan", { source: { type: "playlist", playlistId }, keep: "first" }),
+        deps({ service: service({ getPlaylistTracks }) }),
+      );
+      expect(res.status, String(playlistId)).not.toBe(500);
+    }
+    const res = await handleApi(
+      request("POST", "/api/combine/resolve", {
+        sources: [{ type: "playlist", playlistId: "tidal:a-b" }, { type: "playlist", playlistId: 5 }],
+      }),
+      deps({ service: service({ getPlaylistTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(getPlaylistTracks.mock.calls.map((call) => (call as unknown[])[0])).toEqual(
+      expect.arrayContaining(["tidal:a-b", "qobuz:5"]),
+    );
+  });
+
+  it.each(["qobuz:", "nope:1", "", 12.5, 0, -3, null])("refuses %j as a playlist", async (playlistId) => {
+    const svc = service();
+    for (const [path, body] of [
+      ["/api/deduplicate/scan", { source: { type: "playlist", playlistId } }],
+      ["/api/stats", { source: { type: "playlist", playlistId } }],
+      ["/api/commit", { trackIds: ["qobuz:1"], target: { type: "existing", playlistId } }],
+      ["/api/export", { source: { type: "playlist", playlistId }, format: "csv" }],
+    ] as const) {
+      const res = await handleApi(request("POST", path, body), deps({ service: svc }));
+      expect(res.status, path).toBe(400);
+    }
+    expect(svc.getPlaylistTracks).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,14 @@
  * router runs each write as one history entry (WRITE_ROUTES).
  */
 
+import {
+  readId,
+  shortId,
+  type AnyId,
+  type EntryId,
+  type PlaylistId,
+  type TrackId,
+} from "../services/ids.js";
 import { managedKey, readKeys } from "../jobs/dependencies.js";
 import { addConfirmed } from "../features/playlist-add.js";
 import type { Destination } from "../features/playlist-draft.js";
@@ -118,11 +126,11 @@ async function read(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     }
     case "POST remove-artists/resolve": {
       const body = record(req.body);
-      const ids = positiveIds(body["playlistIds"], "playlistIds");
+      const ids = someIds<PlaylistId>(body["playlistIds"], "playlistIds");
       const names = new Map((await service.getUserPlaylists()).map((p) => [p.id, p.name]));
       const plan = await resolveRemoveArtists(
         service,
-        [...new Set(ids)].map((id) => ({ id, name: names.get(id) ?? `playlist ${id}` })),
+        [...new Set(ids)].map((id) => ({ id, name: names.get(id) ?? `playlist ${shortId(id)}` })),
         lines(body),
       );
       return { status: 200, body: plan };
@@ -150,12 +158,12 @@ async function write(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
       return { status: 200, body: await savePlaylist(service, { ...request, moves }) };
     }
     case "copy": {
-      const ids = positiveIds(body["trackIds"], "trackIds");
+      const ids = someIds<TrackId>(body["trackIds"], "trackIds");
       const to = await allowedDestination(deps, destination(body["destination"]));
       return { status: 200, body: await addConfirmed(service, to, ids) };
     }
     case "favourite": {
-      const ids = [...new Set(positiveIds(body["trackIds"], "trackIds"))];
+      const ids = [...new Set(someIds<TrackId>(body["trackIds"], "trackIds"))];
       // Only what is new: re-adding a favourite re-dates it, and undoing would remove it.
       const known = new Set((await service.getFavoriteTracks()).map((track) => track.id));
       const added = ids.filter((id) => !known.has(id));
@@ -262,7 +270,7 @@ function describe(playlist: Playlist, deps: ApiDeps, jobs: JobInfo): ManagerPlay
   };
 }
 
-async function ownPlaylist(deps: ApiDeps, id: number): Promise<Playlist> {
+async function ownPlaylist(deps: ApiDeps, id: PlaylistId): Promise<Playlist> {
   const playlist = await deps.service.getPlaylist(id);
   if (!isOwned(playlist, deps)) {
     throw new RouteError(403, `"${playlist.name}" belongs to someone else, so it cannot be changed.`);
@@ -307,27 +315,24 @@ function record(value: unknown): Record<string, unknown> {
   return value;
 }
 
-function isPositiveId(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function playlistId(body: Record<string, unknown>): number {
-  const id = body["playlistId"];
-  if (!isPositiveId(id)) {
+function playlistId(body: Record<string, unknown>): PlaylistId {
+  const id = readId<PlaylistId>(body["playlistId"]);
+  if (id === undefined) {
     throw bad("a playlistId is required");
   }
   return id;
 }
 
-function idList(value: unknown, what: string): number[] {
-  if (!Array.isArray(value) || !value.every(isPositiveId)) {
+function idList<T extends AnyId>(value: unknown, what: string): T[] {
+  const ids = Array.isArray(value) ? value.map((id) => readId<T>(id)) : [undefined];
+  if (!ids.every((id) => id !== undefined)) {
     throw bad(`${what} must be a list of ids`);
   }
-  return value;
+  return ids;
 }
 
-function positiveIds(value: unknown, what: string): number[] {
-  const ids = idList(value, what);
+function someIds<T extends AnyId>(value: unknown, what: string): T[] {
+  const ids = idList<T>(value, what);
   if (ids.length === 0) {
     throw bad(`${what} must not be empty`);
   }
@@ -394,7 +399,7 @@ function saveRequest(body: Record<string, unknown>): SaveRequest {
       const item = record(move);
       return {
         destination: destination(item["destination"]),
-        entries: positiveIds(item["entries"], "entries"),
+        entries: someIds<EntryId>(item["entries"], "entries"),
       };
     }),
   };
@@ -406,6 +411,6 @@ function parseRemovals(value: unknown): PlaylistRemoval[] {
   }
   return value.map((item) => {
     const removal = record(item);
-    return { playlistId: playlistId(removal), entries: positiveIds(removal["entries"], "entries") };
+    return { playlistId: playlistId(removal), entries: someIds<EntryId>(removal["entries"], "entries") };
   });
 }

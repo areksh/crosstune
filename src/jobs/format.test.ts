@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import {
   describeResult,
   describeSchedule,
@@ -21,7 +22,7 @@ const job = validateJob({
   tidy: { dedupe: {}, upgrade: { mode: "suggest" } },
   source: {
     type: "new-releases",
-    artists: { type: "list", artists: [{ id: 1, name: "Air" }, { id: 2, name: "Bonobo" }] },
+    artists: { type: "list", artists: [{ id: qid(1), name: "Air" }, { id: qid(2), name: "Bonobo" }] },
     similar: { perArtist: 3, refreshDays: 30 },
     window: { type: "last-days", days: 30 },
   },
@@ -73,7 +74,7 @@ describe("formatJobList", () => {
           job,
           state: {
             ...emptyJobState(),
-            playlistId: 77,
+            playlistId: qid(77),
             nextRunAt: "2026-11-06T07:30:00.000Z",
             lastResult: { at: "2026-10-30T07:30:00.000Z", status: "ok", added: 3, removed: 0, dismissed: 0, notes: [] },
           },
@@ -140,9 +141,9 @@ describe("formatPreview", () => {
     const text = formatPreview("Fresh", {
       createsPlaylist: true,
       add: [
-        { trackId: 1, source: "album:x" },
-        { trackId: 2, source: "album:x" },
-        { trackId: 3, source: "album:y" },
+        { trackId: qid(1), source: "album:x" },
+        { trackId: qid(2), source: "album:x" },
+        { trackId: qid(3), source: "album:y" },
       ],
       remove: [],
       newlyDismissed: [],
@@ -164,7 +165,7 @@ describe("formatPreview", () => {
     expect(
       formatPreview("Fresh", {
         createsPlaylist: false,
-        add: [{ trackId: 1, source: "playlist:4" }],
+        add: [{ trackId: qid(1), source: "playlist:4" }],
         remove: [],
         newlyDismissed: [],
         withheldRemovals: 0,
@@ -178,15 +179,15 @@ describe("formatPreview", () => {
 
 describe("describeSource", () => {
   it("words each kind of source", () => {
-    const names = new Map([[4, "Road trip"]]);
+    const names = new Map([[qid(4), "Road trip"]]);
     expect(describeSource(undefined)).toBe("No source: only tidied");
     expect(
       describeSource(
-        { type: "combined", inputs: [{ type: "playlist", playlistId: 4 }, { type: "favourites" }], mode: "merge", keep: "first", order: "shuffle", matchSongs: true },
+        { type: "combined", inputs: [{ type: "playlist", playlistId: qid(4) }, { type: "favourites" }], mode: "merge", keep: "first", order: "shuffle", matchSongs: true },
         names,
       ),
     ).toBe("Combined: Road trip + Favourites (merged, shuffled)");
-    expect(describeSource({ type: "follow", playlistId: 4, keepRemoved: true }, names)).toBe("Archive of Road trip");
+    expect(describeSource({ type: "follow", playlistId: qid(4), keepRemoved: true }, names)).toBe("Archive of Road trip");
     expect(
       describeSource({
         type: "smart",

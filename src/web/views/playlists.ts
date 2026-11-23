@@ -6,18 +6,18 @@
  * the server.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import { readId, shortId, type EntryId, type PlaylistId } from "../../services/ids.js";
 import type { ArtistHit, ManagerPlaylist, RemovalReport, RemoveArtistsPlan } from "../../features/playlist-manager.js";
 import { formatDuration } from "../../features/playlist-shape.js";
 import { api } from "../api.js";
 import { dialogField, openDialog, textInput } from "../dialog.js";
 import { el, showError } from "../dom.js";
 import { groupHead, titleOf, trackText } from "../tracks.js";
-import { confirmDelete, editDetails, managedNotice, songCount } from "./playlist-actions.js";
+import { confirmDelete, editDetails, managedNotice, playlistHash, songCount } from "./playlist-actions.js";
 import { closeEditor, initPlaylistEditor, onDeleted, openEditor } from "./playlist-editor.js";
 
 let playlists: ManagerPlaylist[] = [];
-const ticked = new Set<number>();
+const ticked = new Set<PlaylistId>();
 let request = 0;
 let plan: RemoveArtistsPlan | undefined;
 
@@ -49,7 +49,7 @@ function route(): void {
     closeEditor();
     return;
   }
-  const open = id !== undefined && /^[1-9]\d*$/.test(id) ? Number(id) : undefined;
+  const open = id === undefined ? undefined : readId<PlaylistId>(decodeURIComponent(id));
   el("pl-list-page").hidden = open !== undefined;
   el("pl-editor").hidden = open === undefined;
   if (open !== undefined) {
@@ -140,7 +140,7 @@ function renderRow(playlist: ManagerPlaylist): HTMLElement {
 
   const link = document.createElement("a");
   link.className = "pl-item-name";
-  link.href = `#/playlists/${playlist.id}`;
+  link.href = playlistHash(playlist.id);
   link.textContent = playlist.name;
 
   const facts = document.createElement("span");
@@ -388,11 +388,11 @@ function renderHit({ entry, as, names }: ArtistHit, playlistId: PlaylistId): HTM
   return row;
 }
 
-function tickedHits(): Map<number, number[]> {
-  const removals = new Map<number, number[]>();
+function tickedHits(): Map<PlaylistId, EntryId[]> {
+  const removals = new Map<PlaylistId, EntryId[]>();
   for (const box of document.querySelectorAll<HTMLInputElement>("#pl-artists-hits .pl-hit:checked")) {
-    const id = Number(box.dataset["playlist"]);
-    removals.set(id, [...(removals.get(id) ?? []), Number(box.dataset["entry"])]);
+    const id = box.dataset["playlist"] as PlaylistId;
+    removals.set(id, [...(removals.get(id) ?? []), box.dataset["entry"] as EntryId]);
   }
   return removals;
 }
@@ -439,7 +439,7 @@ async function removeArtists(): Promise<void> {
     await load();
     say(removed === 0 ? "Nothing was removed." : `Removed ${songCount(removed)}. You can undo this in History.`);
     if (failed.length > 0) {
-      const nameOf = (id: number): string => playlists.find((p) => p.id === id)?.name ?? `playlist ${id}`;
+      const nameOf = (id: PlaylistId): string => playlists.find((p) => p.id === id)?.name ?? `playlist ${shortId(id)}`;
       showError(el("pl-error"), failed.map((f) => `${nameOf(f.playlistId)}: ${f.error}`).join(" "));
     }
     el("pl-result").scrollIntoView({ block: "center" });

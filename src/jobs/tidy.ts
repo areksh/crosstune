@@ -10,7 +10,7 @@
  * user's edit (see ./substitutions.ts).
  */
 
-import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { compareIds, shortId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Track } from "../services/model.js";
 import {
   findDuplicateGroups,
@@ -79,11 +79,12 @@ function quality(track: Pick<Track, "bitDepth" | "samplingRate">): string {
 }
 
 export function dedupeKey(trackIds: readonly TrackId[]): string {
-  return `dedupe:${[...trackIds].sort((a, b) => a - b).join(",")}`;
+  // Short ids, so the keys jobs stored before ids were tagged still hold.
+  return `dedupe:${[...trackIds].sort(compareIds).map(shortId).join(",")}`;
 }
 
 /** The favourites in the order they were added, by their (carried-over) dates. */
-function inAddedOrder(tracks: readonly Track[], favouriteDates: ReadonlyMap<number, string>): Track[] {
+function inAddedOrder(tracks: readonly Track[], favouriteDates: ReadonlyMap<TrackId, string>): Track[] {
   const at = (track: Track) => favouriteDates.get(track.id) ?? track.favouritedAt;
   if (!tracks.some((track) => at(track) !== undefined)) {
     return [...tracks];
@@ -100,7 +101,7 @@ function dedupeFindings(
   tracks: readonly Track[],
   def: DedupeTidy,
   target: TidyTarget,
-  favouriteDates: ReadonlyMap<number, string>,
+  favouriteDates: ReadonlyMap<TrackId, string>,
 ): Finding[] {
   const ordered = target.type === "favourites" ? inAddedOrder(tracks, favouriteDates) : tracks;
   const groups = resolveDuplicateGroups(findDuplicateGroups(ordered.map(toDedupTrack)), def.keep);
@@ -135,14 +136,14 @@ function upgradeFinding(item: UpgradeItem): Finding | undefined {
   if (item.action === "replace" && best !== undefined) {
     if (item.kind === "upgrade") {
       return {
-        key: `upgrade:${A}>${best.track.id}`,
+        key: `upgrade:${shortId(A)}>${shortId(best.track.id)}`,
         tidy: "upgrade",
         summary: `${label(item.track)}: ${quality(item.track)} -> ${quality(best.track)}${best.match === "signature" ? " (same song, maybe another recording)" : ""}`,
         change: { type: "replace", trackId: A, newTrackId: best.track.id, ...pid },
       };
     }
     return {
-      key: `repair:${A}`,
+      key: `repair:${shortId(A)}`,
       tidy: "repair",
       summary: `${label(item.track)} is no longer playable: replace it with another copy${best.track.album === undefined ? "" : ` (${best.track.album})`}`,
       change: { type: "replace", trackId: A, newTrackId: best.track.id, ...pid },
@@ -150,7 +151,7 @@ function upgradeFinding(item: UpgradeItem): Finding | undefined {
   }
   if (item.kind === "unplayable" && item.action === "remove") {
     return {
-      key: `repair:${A}`,
+      key: `repair:${shortId(A)}`,
       tidy: "repair",
       summary: `${label(item.track)} is no longer playable and has no other copy: remove it`,
       change: { type: "remove", trackId: A, ...pid },
@@ -164,7 +165,7 @@ export interface FindResult {
   /** The upgrade tidy-up's checked list after this run. */
   checked?: { trackId: TrackId; at: string }[];
   /** Tracks whose upgrade or repair search ran this time. */
-  searched: number[];
+  searched: TrackId[];
   notes: string[];
 }
 
@@ -175,12 +176,12 @@ export async function findTidyFindings(
   kinds: readonly TidyKind[],
   target: TidyTarget,
   tracks: readonly Track[],
-  ctx: { now: Date; state: TidyState; favouriteDates: ReadonlyMap<number, string> },
+  ctx: { now: Date; state: TidyState; favouriteDates: ReadonlyMap<TrackId, string> },
 ): Promise<FindResult> {
   const findings: Finding[] = [];
   const notes: string[] = [];
   let checked: FindResult["checked"];
-  let searched: number[] = [];
+  let searched: TrackId[] = [];
   const wantsUpgrade = kinds.includes("upgrade") && tidy.upgrade !== undefined;
   const wantsRepair = kinds.includes("repair") && tidy.repair !== undefined;
   if (wantsUpgrade || wantsRepair) {
@@ -263,7 +264,7 @@ export interface TidyBook {
   substitutions: Substitution[];
   applied: string[];
   ignored: string[];
-  favouriteDates: Map<number, string>;
+  favouriteDates: Map<TrackId, string>;
 }
 
 export interface ApplyResult {

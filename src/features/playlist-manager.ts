@@ -11,7 +11,7 @@
  * cannot play without an error.
  */
 
-import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { shortId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
 import {
   linkLines,
@@ -216,7 +216,7 @@ async function moveOut(
   destination: Destination,
   entries: readonly Entry[],
   created: Array<{ destination: Destination; playlistId: PlaylistId }>,
-): Promise<{ add?: ConfirmedAdd; arrived: Set<number> }> {
+): Promise<{ add?: ConfirmedAdd; arrived: Set<TrackId> }> {
   // No playlist is made for songs that will not arrive.
   if (destination.type === "new" && entries.every((entry) => entry.streamable === false)) {
     return { arrived: new Set() };
@@ -275,7 +275,7 @@ export async function resolveArtistLinks(
 
 /** A playlist the removal looks in. */
 export interface PlaylistRef {
-  id: number;
+  id: PlaylistId;
   name: string;
 }
 
@@ -356,7 +356,7 @@ function hitsIn(entries: readonly Entry[], terms: ParsedArtistTerms["terms"]): A
 /** Entries to take out of one playlist. */
 export interface PlaylistRemoval {
   playlistId: PlaylistId;
-  entries: readonly number[];
+  entries: readonly EntryId[];
 }
 
 export interface RemovalReport {
@@ -378,11 +378,11 @@ export async function commitRemovals(
 ): Promise<RemovalReport[]> {
   const reports: RemovalReport[] = [];
   for (const { playlistId, entries } of removals) {
-    const present = async (): Promise<number[]> => {
+    const present = async (): Promise<EntryId[]> => {
       const here = new Set(toEntries(await client.getPlaylistTracks(playlistId)).map((e) => e.playlistTrackId));
       return entries.filter((id) => here.has(id));
     };
-    let going: number[] = [];
+    let going: EntryId[] = [];
     try {
       going = await present();
       await client.removeTracksFromPlaylist(playlistId, going);
@@ -421,13 +421,13 @@ export function formatRemoveArtists(plan: RemoveArtistsPlan, includeGuests: bool
   plan.problems.forEach(({ line, reason }) => lines.push(`${line}: ${reason}`));
   for (const { playlist, hits, error } of plan.playlists) {
     if (error !== undefined) {
-      lines.push("", `"${playlist.name}" (id ${playlist.id}): could not be read (${error})`);
+      lines.push("", `"${playlist.name}" (id ${shortId(playlist.id)}): could not be read (${error})`);
       continue;
     }
     if (hits.length === 0) {
       continue;
     }
-    lines.push("", `"${playlist.name}" (id ${playlist.id}):`);
+    lines.push("", `"${playlist.name}" (id ${shortId(playlist.id)}):`);
     for (const { entry, as } of hits) {
       const marker = as === "main" || includeGuests ? "drop" : "keep";
       const title = entry.version === undefined ? entry.title : `${entry.title} (${entry.version})`;

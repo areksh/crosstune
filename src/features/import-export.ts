@@ -22,7 +22,16 @@
  * for hand-editing or moving lists between services.
  */
 
-import type { AlbumId, ArtistId, PlaylistId, TrackId } from "../services/ids.js";
+import {
+  readAlbumId,
+  readId,
+  shortId,
+  type AlbumId,
+  type AnyId,
+  type ArtistId,
+  type PlaylistId,
+  type TrackId,
+} from "../services/ids.js";
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
@@ -57,7 +66,7 @@ export const BACKUP_FORMAT_VERSION = 1;
 
 /** A track as it appears in an export (a subset of {@link Track}). */
 export interface ExportTrack {
-  id: number;
+  id: TrackId;
   title: string;
   artist?: string;
   album?: string;
@@ -66,14 +75,14 @@ export interface ExportTrack {
 
 /** An album as it appears in an export. */
 export interface ExportAlbum {
-  id: string;
+  id: AlbumId;
   title: string;
   artist?: string;
 }
 
 /** An artist as it appears in an export. */
 export interface ExportArtist {
-  id: number;
+  id: ArtistId;
   name: string;
 }
 
@@ -155,11 +164,43 @@ export function serializeCollection(
 
 /** Serialise a full backup (JSON only -- it is the lossless format). */
 export function serializeBackup(backup: LibraryBackup): string {
-  return `${JSON.stringify(backup, null, 2)}\n`;
+  const { favourites, playlists, ...rest } = backup;
+  const document = {
+    ...rest,
+    favourites: {
+      tracks: favourites.tracks.map(toFileItem),
+      albums: favourites.albums.map(toFileAlbum),
+      artists: favourites.artists.map(toFileItem),
+    },
+    playlists: playlists.map(({ tracks, ...playlist }) => ({ ...playlist, tracks: tracks.map(toFileItem) })),
+  };
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/** A track or artist as a file holds it: Qobuz's id as the number Qobuz has. */
+function toFileItem<T extends { id: TrackId | ArtistId }>(item: T): Omit<T, "id"> & { id: string | number } {
+  const short = shortId(item.id);
+  return { ...item, id: /^\d+$/.test(short) ? Number(short) : short };
+}
+
+/** An album as a file holds it: Qobuz's id is text, leading zeros and all. */
+function toFileAlbum(album: ExportAlbum): Omit<ExportAlbum, "id"> & { id: string } {
+  return { ...album, id: shortId(album.id) };
+}
+
+function toFileItems(collection: Collection): object[] {
+  switch (collection.kind) {
+    case "tracks":
+      return collection.items.map(toFileItem);
+    case "albums":
+      return collection.items.map(toFileAlbum);
+    case "artists":
+      return collection.items.map(toFileItem);
+  }
 }
 
 function serializeCollectionJson(collection: Collection): string {
-  const body = { [collection.kind]: collection.items };
+  const body = { [collection.kind]: toFileItems(collection) };
   return `${JSON.stringify(body, null, 2)}\n`;
 }
 
@@ -173,8 +214,8 @@ const CSV_COLUMNS = {
 function serializeCollectionCsv(collection: Collection): string {
   const columns = CSV_COLUMNS[collection.kind];
   const rows: string[] = [columns.map(csvEscape).join(",")];
-  for (const item of collection.items) {
-    const record = item as unknown as Record<string, unknown>;
+  for (const item of toFileItems(collection)) {
+    const record = item as Record<string, unknown>;
     rows.push(
       columns
         .map((column) => csvEscape(stringField(record[column])))
@@ -203,7 +244,7 @@ function serializeTracksM3u(tracks: readonly ExportTrack[]): string {
   const lines = ["#EXTM3U"];
   for (const track of tracks) {
     lines.push(`#EXTINF:-1,${artistTitleLine(track)}`);
-    lines.push(`qobuz://track/${track.id}`);
+    lines.push(`qobuz://track/${shortId(track.id)}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -231,7 +272,7 @@ function csvEscape(field: string): string {
 
 /** A parsed track that may carry a Qobuz id or only metadata to resolve. */
 export interface ParsedTrack {
-  id?: number;
+  id?: TrackId;
   title?: string;
   /** The artist credit as displayed (several artists joined with ", "). */
   artist?: string;
@@ -243,14 +284,14 @@ export interface ParsedTrack {
 
 /** A parsed album that may carry a Qobuz id or only metadata to resolve. */
 export interface ParsedAlbum {
-  id?: string;
+  id?: AlbumId;
   title?: string;
   artist?: string;
 }
 
 /** A parsed artist that may carry a Qobuz id or only a name to resolve. */
 export interface ParsedArtist {
-  id?: number;
+  id?: ArtistId;
   name?: string;
 }
 
@@ -423,7 +464,7 @@ function parseCollectionCsv(
     return {
       kind,
       items: body.map((row) => ({
-        ...numberIf(at(row, "id"), "id"),
+        ...idIf(readId<TrackId>(at(row, "id"))),
         ...stringIf(at(row, "title"), "title"),
         ...stringIf(at(row, "artist"), "artist"),
         ...stringIf(at(row, "album"), "album"),
@@ -435,7 +476,7 @@ function parseCollectionCsv(
     return {
       kind,
       items: body.map((row) => ({
-        ...stringIf(at(row, "id"), "id"),
+        ...idIf(readAlbumId(at(row, "id"))),
         ...stringIf(at(row, "title"), "title"),
         ...stringIf(at(row, "artist"), "artist"),
       })),
@@ -444,7 +485,7 @@ function parseCollectionCsv(
   return {
     kind,
     items: body.map((row) => ({
-      ...numberIf(at(row, "id"), "id"),
+      ...idIf(readId<ArtistId>(at(row, "id"))),
       ...stringIf(at(row, "name"), "name"),
     })),
   };
@@ -486,7 +527,8 @@ function parseTracksM3u(content: string): ParsedTrack[] {
     }
     const match = /^qobuz:\/\/track\/(\d+)$/.exec(line);
     const item: ParsedTrack = {};
-    if (match) item.id = Number(match[1]);
+    const id = readId<TrackId>(match?.[1]);
+    if (id !== undefined) item.id = id;
     if (pending?.artist !== undefined) item.artist = pending.artist;
     if (pending?.title !== undefined) item.title = pending.title;
     // A bare non-comment line with no Qobuz URI is treated as "Artist - Title".
@@ -517,9 +559,9 @@ export function parseBackup(content: string): LibraryBackup {
     exportedAt:
       typeof data["exportedAt"] === "string" ? data["exportedAt"] : "",
     favourites: {
-      tracks: arrayOf(favourites["tracks"]).map(exportTrackFromJson),
-      albums: arrayOf(favourites["albums"]).map(exportAlbumFromJson),
-      artists: arrayOf(favourites["artists"]).map(exportArtistFromJson),
+      tracks: arrayOf(favourites["tracks"]).flatMap(exportTrackFromJson),
+      albums: arrayOf(favourites["albums"]).flatMap(exportAlbumFromJson),
+      artists: arrayOf(favourites["artists"]).flatMap(exportArtistFromJson),
     },
     playlists: playlistsRaw.map(exportPlaylistFromJson),
   };
@@ -544,7 +586,7 @@ export type MatchMethod = "id" | "isrc" | "search";
 /** A single matched item: its display label and the Qobuz id it resolved to. */
 export interface MatchedItem {
   label: string;
-  id: number | string;
+  id: AnyId;
   /** How it was matched (always set by {@link resolveImport}). */
   via?: MatchMethod;
 }
@@ -660,7 +702,7 @@ export async function resolveImport(
 
 /** A resolved Qobuz id and how it was found. */
 interface Match {
-  id: number | string;
+  id: AnyId;
   via: MatchMethod;
 }
 
@@ -897,7 +939,7 @@ export async function commitImport(
   if (plan.kind !== "tracks") {
     throw new Error("only tracks can be added to a playlist");
   }
-  const trackIds = plan.matched.map((m) => m.id as number);
+  const trackIds = plan.matched.map((m) => m.id as TrackId);
   if (target.type === "playlist-new") {
     const playlist = await createPlaylistWithTracks(client, {
       name: target.name,
@@ -919,16 +961,16 @@ async function commitToFavourites(
   plan: ImportPlan,
 ): Promise<CommitResult> {
   if (plan.kind === "tracks") {
-    const ids = plan.matched.map((m) => m.id as number);
+    const ids = plan.matched.map((m) => m.id as TrackId);
     await client.addFavoriteTracks(ids);
     return { written: ids.length };
   }
   if (plan.kind === "albums") {
-    const ids = plan.matched.map((m) => m.id as string);
+    const ids = plan.matched.map((m) => m.id as AlbumId);
     await client.addFavoriteAlbums(ids);
     return { written: ids.length };
   }
-  const ids = plan.matched.map((m) => m.id as number);
+  const ids = plan.matched.map((m) => m.id as ArtistId);
   await client.addFavoriteArtists(ids);
   return { written: ids.length };
 }
@@ -1252,7 +1294,7 @@ function emptyParsed(kind: CollectionKind): ParsedCollection {
 function parsedTrackFromJson(item: unknown): ParsedTrack {
   const out: ParsedTrack = {};
   if (!isRecord(item)) return out;
-  if (typeof item["id"] === "number") out.id = item["id"];
+  Object.assign(out, idIf(readId<TrackId>(item["id"])));
   if (typeof item["title"] === "string") out.title = item["title"];
   if (typeof item["artist"] === "string") out.artist = item["artist"];
   if (typeof item["album"] === "string") out.album = item["album"];
@@ -1263,7 +1305,7 @@ function parsedTrackFromJson(item: unknown): ParsedTrack {
 function parsedAlbumFromJson(item: unknown): ParsedAlbum {
   const out: ParsedAlbum = {};
   if (!isRecord(item)) return out;
-  if (typeof item["id"] === "string") out.id = item["id"];
+  Object.assign(out, idIf(readAlbumId(item["id"])));
   if (typeof item["title"] === "string") out.title = item["title"];
   if (typeof item["artist"] === "string") out.artist = item["artist"];
   return out;
@@ -1272,30 +1314,33 @@ function parsedAlbumFromJson(item: unknown): ParsedAlbum {
 function parsedArtistFromJson(item: unknown): ParsedArtist {
   const out: ParsedArtist = {};
   if (!isRecord(item)) return out;
-  if (typeof item["id"] === "number") out.id = item["id"];
+  Object.assign(out, idIf(readId<ArtistId>(item["id"])));
   if (typeof item["name"] === "string") out.name = item["name"];
   return out;
 }
 
-function exportTrackFromJson(item: unknown): ExportTrack {
+/** A backup's track; none without an id, as a restore writes ids. */
+function exportTrackFromJson(item: unknown): ExportTrack[] {
   const parsed = parsedTrackFromJson(item);
-  const out: ExportTrack = { id: parsed.id ?? 0, title: parsed.title ?? "" };
+  if (parsed.id === undefined) return [];
+  const out: ExportTrack = { id: parsed.id, title: parsed.title ?? "" };
   if (parsed.artist !== undefined) out.artist = parsed.artist;
   if (parsed.album !== undefined) out.album = parsed.album;
   if (parsed.isrc !== undefined) out.isrc = parsed.isrc;
-  return out;
+  return [out];
 }
 
-function exportAlbumFromJson(item: unknown): ExportAlbum {
+function exportAlbumFromJson(item: unknown): ExportAlbum[] {
   const parsed = parsedAlbumFromJson(item);
-  const out: ExportAlbum = { id: parsed.id ?? "", title: parsed.title ?? "" };
+  if (parsed.id === undefined) return [];
+  const out: ExportAlbum = { id: parsed.id, title: parsed.title ?? "" };
   if (parsed.artist !== undefined) out.artist = parsed.artist;
-  return out;
+  return [out];
 }
 
-function exportArtistFromJson(item: unknown): ExportArtist {
+function exportArtistFromJson(item: unknown): ExportArtist[] {
   const parsed = parsedArtistFromJson(item);
-  return { id: parsed.id ?? 0, name: parsed.name ?? "" };
+  return parsed.id === undefined ? [] : [{ id: parsed.id, name: parsed.name ?? "" }];
 }
 
 function exportPlaylistFromJson(item: unknown): ExportPlaylist {
@@ -1304,7 +1349,7 @@ function exportPlaylistFromJson(item: unknown): ExportPlaylist {
   }
   const out: ExportPlaylist = {
     name: typeof item["name"] === "string" ? item["name"] : "",
-    tracks: arrayOf(item["tracks"]).map(exportTrackFromJson),
+    tracks: arrayOf(item["tracks"]).flatMap(exportTrackFromJson),
   };
   if (typeof item["description"] === "string") out.description = item["description"];
   if (typeof item["isPublic"] === "boolean") out.isPublic = item["isPublic"];
@@ -1313,10 +1358,8 @@ function exportPlaylistFromJson(item: unknown): ExportPlaylist {
 
 // --- Misc helpers ----------------------------------------------------------
 
-function numberIf(value: string | undefined, key: string): Record<string, number> {
-  if (value === undefined) return {};
-  const n = Number(value);
-  return Number.isFinite(n) ? { [key]: n } : {};
+function idIf<T extends AnyId>(id: T | undefined): { id?: T } {
+  return id === undefined ? {} : { id };
 }
 
 function stringIf(value: string | undefined, key: string): Record<string, string> {

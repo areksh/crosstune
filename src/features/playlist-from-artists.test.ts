@@ -558,18 +558,18 @@ describe("resolveArtistTracks with a song picker", () => {
 
 describe("resolveArtistTracks with Qobuz links", () => {
   it("resolves an artist link by id instead of searching, marking it", async () => {
-    const client = stubClient({ tracksByArtist: { 41259: [{ id: 1, title: "Roads" }] } });
+    const client = stubClient({ tracksByArtist: { "qobuz:41259": [{ id: 1, title: "Roads" }] } });
     client.getArtist = vi.fn(async (id: number) => ({ id, name: "Portishead" }));
     const link = "https://play.qobuz.com/artist/41259";
 
     const result = await resolveArtistTracks(client, { artists: [link], tracksPerArtist: 1 });
 
-    expect(client.getArtist).toHaveBeenCalledWith(41259);
+    expect(client.getArtist).toHaveBeenCalledWith("qobuz:41259");
     expect(client.searchArtists).not.toHaveBeenCalled();
     expect(result.resolvedArtists).toEqual([
       {
         query: link,
-        artist: { id: 41259, name: "Portishead" },
+        artist: { id: "qobuz:41259", name: "Portishead" },
         fromLink: true,
         tracks: [{ id: 1, title: "Roads" }],
         excluded: [],

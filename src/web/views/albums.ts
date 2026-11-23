@@ -13,7 +13,7 @@
  * chosen release.
  */
 
-import type { AlbumId, PlaylistId } from "../../services/ids.js";
+import type { AlbumId, ArtistId, PlaylistId, TrackId } from "../../services/ids.js";
 import {
   api,
   type Album,
@@ -43,7 +43,7 @@ interface ResolveResponse {
   unresolvedAlbums: string[];
   excludedAlbums: string[];
   /** Discography only: the artist the name matched, if any. */
-  artist?: { id: number; name: string };
+  artist?: { id: ArtistId; name: string };
   /** Discography only: the artist has more releases than were fetched. */
   truncated?: boolean;
 }
@@ -505,8 +505,8 @@ async function onCommit(): Promise<void> {
 /** Fetch every pending album's chosen version and show its tracks for review. */
 async function fetchPending(button: HTMLButtonElement, resultNode: HTMLElement): Promise<void> {
   const toFetch = pendingGroups()
-    .map((group) => ({ group, id: selectOf(group).value }))
-    .filter((item) => item.id !== "");
+    .filter((group) => selectOf(group).value !== "")
+    .map((group) => ({ group, id: selectOf(group).value as AlbumId }));
   if (toFetch.length === 0) {
     return;
   }
@@ -559,7 +559,7 @@ async function writePlaylist(node: HTMLElement): Promise<void> {
   }
 
   el<HTMLButtonElement>("commit-albums").textContent = "Saving...";
-  const result = await api<{ playlist?: Playlist; added: number[]; skipped: number[] }>(
+  const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
     "POST",
     "/api/commit",
     { tool: "playlist-from-albums", target, trackIds },
@@ -719,7 +719,7 @@ function buildTarget(): CommitTarget | undefined {
   if (value === "") {
     return undefined;
   }
-  return { type: "existing", playlistId: Number(value) };
+  return { type: "existing", playlistId: value as PlaylistId };
 }
 
 /**
@@ -749,7 +749,7 @@ function reportFetchProgress(node: HTMLElement): void {
 function reportWrite(
   node: HTMLElement,
   target: CommitTarget,
-  result: { playlist?: Playlist; added: number[]; skipped: number[] },
+  result: { playlist?: Playlist; added: TrackId[]; skipped: TrackId[] },
 ): void {
   node.hidden = false;
   const added = result.added.length;

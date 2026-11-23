@@ -1,7 +1,18 @@
 /** What the playlists list and the editor share: wording, and dialogs about a playlist. */
 
+import { serviceOf, shortId, type PlaylistId } from "../../services/ids.js";
 import type { ManagerPlaylist } from "../../features/playlist-manager.js";
 import { dialogField, openDialog, textInput } from "../dialog.js";
+
+/** The page address of a playlist (Qobuz's keep the short form they always had). */
+export function playlistHash(id: PlaylistId): string {
+  return `#/playlists/${encodeURIComponent(shortId(id))}`;
+}
+
+/** A playlist as text a tool's link box takes: a link where one is known, else its id. */
+export function playlistLink(id: PlaylistId): string {
+  return serviceOf(id) === "qobuz" ? `https://play.qobuz.com/playlist/${shortId(id)}` : id;
+}
 
 export function songCount(count: number): string {
   return `${count.toLocaleString()} song${count === 1 ? "" : "s"}`;

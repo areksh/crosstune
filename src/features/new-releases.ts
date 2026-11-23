@@ -22,7 +22,7 @@
  * {@link MAX_ARTISTS}; the plan says when the cap cut the list short.
  */
 
-import type { AlbumId, PlaylistId, TrackId } from "../services/ids.js";
+import type { AlbumId, ArtistId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Album, Artist, Playlist, Release, ReleaseType, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { editionKey, isByArtist, type ArtistReleasesClient } from "./discography.js";
@@ -263,7 +263,7 @@ async function artistsOf(client: NewReleasesClient, source: ArtistSource): Promi
       : source.type === "artists"
         ? source.artists
         : seedsFromPlaylist(await client.getPlaylistTracks(source.playlistId), Infinity).seeds;
-  const seen = new Set<number>();
+  const seen = new Set<ArtistId>();
   return artists.filter((artist) => !seen.has(artist.id) && seen.add(artist.id));
 }
 
@@ -349,7 +349,7 @@ export type CommitNewReleasesResult =
       /** Tracks the filter's track (or artist, or disc) terms left out. */
       excludedCount: number;
       /** Releases whose tracks could not be fetched (left out). */
-      failedAlbumIds: string[];
+      failedAlbumIds: AlbumId[];
     }
   | { type: "favourite-albums"; added: number };
 
@@ -377,7 +377,7 @@ export async function commitNewReleases(
 
   const { fetched, failedAlbumIds } = await fetchAlbumTracks(client, albumIds, options.filter);
   const trackIds: TrackId[] = [];
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   let excludedCount = 0;
   for (const album of fetched) {
     for (const { track, exclusion } of album.tracks) {

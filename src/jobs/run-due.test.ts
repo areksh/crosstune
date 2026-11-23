@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import { QobuzError } from "../services/qobuz/index.js";
 import { tryAcquireLock } from "../cli/file-lock.js";
 import {
@@ -37,7 +38,7 @@ const ok = (overrides: Partial<RunResultSummary> = {}): RunResultSummary => ({
   status: "ok",
   added: 1,
   removed: 0,
-  dismissed: 0,
+  dismissed: qid(0),
   notes: [],
   ...overrides,
 });
@@ -256,26 +257,26 @@ describe("runDue", () => {
 
   it("saves the partial state a refresh that failed mid-write carries", async () => {
     const { deps, states } = setup([job("aaaaaaaa", { schedule: { every: "day" } })]);
-    const partial = { ...emptyJobState(), playlistId: 42, pending: { removed: [], added: [7] } };
+    const partial = { ...emptyJobState(), playlistId: qid(42), pending: { removed: [], added: [qid(7)] } };
     deps.refresh.mockRejectedValueOnce(new RefreshWriteError(new Error("Qobuz 500"), partial));
     const summary = await runDue(deps, NOW);
     expect(summary.reports[0]?.result).toMatchObject({ status: "failed", error: "Qobuz 500" });
-    expect(states.get("aaaaaaaa")).toMatchObject({ playlistId: 42, pending: { added: [7] }, consecutiveFailures: 1 });
+    expect(states.get("aaaaaaaa")).toMatchObject({ playlistId: qid(42), pending: { added: [qid(7)] }, consecutiveFailures: 1 });
   });
 
   it("saves the partial state when the session is rejected mid-write", async () => {
     const { deps, states } = setup([job("aaaaaaaa")]);
-    const partial = { ...emptyJobState(), playlistId: 42 };
+    const partial = { ...emptyJobState(), playlistId: qid(42) };
     deps.refresh.mockRejectedValueOnce(
       new RefreshWriteError(new QobuzError("authentication", "expired"), partial),
     );
     const summary = await runDue(deps, NOW);
     expect(summary.status).toBe("needs-sign-in");
-    expect(states.get("aaaaaaaa")?.playlistId).toBe(42);
+    expect(states.get("aaaaaaaa")?.playlistId).toBe(qid(42));
   });
 
   it("runs a job after the job managing a playlist it reads, passing the favourites' carried dates", async () => {
-    const reader = job("aaaaaaaa", { kind: "playlist", recipe: undefined, target: { type: "created" }, source: { type: "follow", playlistId: 10 } });
+    const reader = job("aaaaaaaa", { kind: "playlist", recipe: undefined, target: { type: "created" }, source: { type: "follow", playlistId: qid(10) } });
     const feed = job("bbbbbbbb");
     const favourites = validateJob({
       id: "cccccccc",
@@ -288,15 +289,15 @@ describe("runDue", () => {
     });
     const { deps, order } = setup([reader, feed, favourites], {
       states: {
-        aaaaaaaa: { nextRunAt: "2026-11-02T04:00:00.000Z", playlistId: 20 },
-        bbbbbbbb: { nextRunAt: "2026-11-02T05:00:00.000Z", playlistId: 10 },
-        cccccccc: { nextRunAt: "2026-11-02T05:30:00.000Z", favouriteDates: [{ trackId: 2, at: "2019-01-01T00:00:00.000Z" }] },
+        aaaaaaaa: { nextRunAt: "2026-11-02T04:00:00.000Z", playlistId: qid(20) },
+        bbbbbbbb: { nextRunAt: "2026-11-02T05:00:00.000Z", playlistId: qid(10) },
+        cccccccc: { nextRunAt: "2026-11-02T05:30:00.000Z", favouriteDates: [{ trackId: qid(2), at: "2019-01-01T00:00:00.000Z" }] },
       },
     });
     await runDue(deps, NOW);
     expect(order).toEqual(["bbbbbbbb", "aaaaaaaa", "cccccccc"]);
     const options = deps.refresh.mock.calls.map((call) => call[3]);
-    expect(options[0]?.favouriteDates).toEqual(new Map([[2, "2019-01-01T00:00:00.000Z"]]));
+    expect(options[0]?.favouriteDates).toEqual(new Map([[qid(2), "2019-01-01T00:00:00.000Z"]]));
     expect(options[2]?.favouriteDates).toBeUndefined();
   });
 });

@@ -40,7 +40,7 @@ import {
   type AlbumOrder,
   type PlaylistOrder,
 } from "../features/playlist-shape.js";
-import { playlistIdOf } from "../features/qobuz-links.js";
+import { parsePlaylistId } from "../features/qobuz-links.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import type { StatsSource } from "../features/stats.js";
 import type { UpgradeSource } from "../features/upgrade.js";
@@ -366,8 +366,8 @@ export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
     if (arg === "--playlist") {
       const raw = argv[i + 1];
       i += 1;
-      const value = playlistIdOf(raw);
-      if (!Number.isInteger(value) || value <= 0) {
+      const value = parsePlaylistId(raw);
+      if (value === undefined) {
         throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
       }
       playlistId = value;
@@ -657,8 +657,8 @@ export function parseExportArgs(argv: readonly string[]): ExportArgs {
       case "--playlist": {
         const raw = argv[i + 1];
         i += 1;
-        const value = playlistIdOf(raw);
-        if (!Number.isInteger(value) || value <= 0) {
+        const value = parsePlaylistId(raw);
+        if (value === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
         }
         sources.push({ type: "playlist", playlistId: value });
@@ -765,8 +765,8 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
       case "--playlist": {
         const raw = argv[i + 1];
         i += 1;
-        const value = playlistIdOf(raw);
-        if (!Number.isInteger(value) || value <= 0) {
+        const value = parsePlaylistId(raw);
+        if (value === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
         }
         targets.push({ type: "playlist-existing", playlistId: value });
@@ -919,8 +919,8 @@ export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
         i += 1;
         break;
       case "--playlist": {
-        const id = playlistIdOf(value);
-        if (!Number.isInteger(id) || id <= 0) {
+        const id = parsePlaylistId(value);
+        if (id === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
         }
         playlistId = id;
@@ -1069,8 +1069,8 @@ export function parseCombineArgs(argv: readonly string[]): CombineArgs {
     const value = argv[i + 1];
     switch (arg) {
       case "--playlist": {
-        const id = playlistIdOf(value);
-        if (!Number.isInteger(id) || id <= 0) {
+        const id = parsePlaylistId(value);
+        if (id === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
         }
         sources.push({ type: "playlist", playlistId: id });
@@ -1183,8 +1183,8 @@ export function parseStatsArgs(argv: readonly string[]): StatsArgs {
         sources.push({ type: "everything" });
         break;
       case "--playlist": {
-        const id = playlistIdOf(value);
-        if (!Number.isInteger(id) || id <= 0) {
+        const id = parsePlaylistId(value);
+        if (id === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
         }
         sources.push({ type: "playlist", playlistId: id });
@@ -1259,7 +1259,7 @@ export interface WordPlayArgs {
   /** Name for a new playlist; absent uses the plan's suggested name. */
   name?: string;
   /** Add to this existing playlist instead of creating one. */
-  addTo?: number;
+  addTo?: PlaylistId;
   isPublic: boolean;
   /** Whether to actually write (otherwise resolve and report only). */
   apply: boolean;
@@ -1302,7 +1302,7 @@ export function parseWordPlayArgs(argv: readonly string[]): WordPlayArgs {
   let maxSpan: number | undefined;
   let count: number | undefined;
   let name: string | undefined;
-  let addTo: number | undefined;
+  let addTo: PlaylistId | undefined;
   let isPublic = false;
   let apply = false;
   const filter = new FilterFlags(false);
@@ -1313,9 +1313,9 @@ export function parseWordPlayArgs(argv: readonly string[]): WordPlayArgs {
     }
     return value;
   };
-  const idOf = (flag: string, value: string | undefined): number => {
-    const id = playlistIdOf(value);
-    if (!Number.isInteger(id) || id <= 0) {
+  const idOf = (flag: string, value: string | undefined): PlaylistId => {
+    const id = parsePlaylistId(value);
+    if (id === undefined) {
       throw new Error(`${flag} must be a numeric id or a playlist link, got "${value}"`);
     }
     return id;
@@ -1519,8 +1519,8 @@ export function parseNewReleasesArgs(argv: readonly string[]): NewReleasesArgs {
       }
       case "--playlist": {
         i += 1;
-        const id = playlistIdOf(value);
-        if (!Number.isInteger(id) || id <= 0) {
+        const id = parsePlaylistId(value);
+        if (id === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${value}"`);
         }
         playlistId = id;
@@ -1624,8 +1624,8 @@ export function parseUpgradeArgs(argv: readonly string[]): UpgradeArgs {
       case "--playlist": {
         const raw = argv[i + 1];
         i += 1;
-        const value = playlistIdOf(raw);
-        if (!Number.isInteger(value) || value <= 0) {
+        const value = parsePlaylistId(raw);
+        if (value === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
         }
         sources.push({ type: "playlist", playlistId: value });
@@ -1655,7 +1655,7 @@ export function parseUpgradeArgs(argv: readonly string[]): UpgradeArgs {
 }
 
 export interface RemoveArtistsArgs {
-  playlists: { type: "all" } | { type: "some"; ids: number[] };
+  playlists: { type: "all" } | { type: "some"; ids: PlaylistId[] };
   /** Names, links or /regexes/ given as arguments (more may come on stdin). */
   artists: string[];
   /** Also take songs where they are only a guest. */
@@ -1673,7 +1673,7 @@ export interface RemoveArtistsArgs {
  *   unknown option.
  */
 export function parseRemoveArtistsArgs(argv: readonly string[]): RemoveArtistsArgs {
-  const ids: number[] = [];
+  const ids: PlaylistId[] = [];
   const artists: string[] = [];
   let all = false;
   let includeGuests = false;
@@ -1684,8 +1684,8 @@ export function parseRemoveArtistsArgs(argv: readonly string[]): RemoveArtistsAr
       case "--playlist": {
         const raw = argv[i + 1];
         i += 1;
-        const id = playlistIdOf(raw);
-        if (!Number.isInteger(id) || id <= 0) {
+        const id = parsePlaylistId(raw);
+        if (id === undefined) {
           throw new Error(`--playlist must be a numeric id or a playlist link, got "${raw}"`);
         }
         if (!ids.includes(id)) {
@@ -1936,8 +1936,8 @@ function playlistInput(raw: string, flag: string): { type: "favourites" } | { ty
   if (raw === "favourites" || raw === "favorites") {
     return { type: "favourites" };
   }
-  const id = playlistIdOf(raw);
-  if (!Number.isInteger(id) || id <= 0) {
+  const id = parsePlaylistId(raw);
+  if (id === undefined) {
     throw new Error(`${flag} must be a numeric playlist id, a playlist link or "favourites", got "${raw}"`);
   }
   return { type: "playlist", playlistId: id };
@@ -2011,9 +2011,9 @@ export function parseJobCreate(argv: readonly string[]): JobCreateArgs {
   const positionals: string[] = [];
   const inputs: ({ type: "favourites" } | { type: "playlist"; playlistId: PlaylistId })[] = [];
   let favourites = false;
-  let seedPlaylist: number | undefined;
+  let seedPlaylist: PlaylistId | undefined;
   let name: string | undefined;
-  let into: number | undefined;
+  let into: PlaylistId | undefined;
   let similar: number | undefined;
   let window: ReleaseWindow = { type: "last-days", days: 30 };
   let include: ReleaseType[] = [...DEFAULT_NEW_RELEASE_INCLUDE];

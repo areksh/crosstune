@@ -179,7 +179,7 @@
  * stderr instead (see src/cli/output.ts).
  */
 
-import type { PlaylistId, UserId } from "./services/ids.js";
+import { shortId, type ArtistId, type PlaylistId, type UserId } from "./services/ids.js";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -361,7 +361,9 @@ import {
   formatUndoResult,
   planUndo,
 } from "./features/undo.js";
-import { QobuzClient, QobuzError, type UserSession } from "./services/qobuz/index.js";
+import { QobuzClient, QobuzError } from "./services/qobuz/index.js";
+import { QobuzService } from "./services/qobuz/service.js";
+import type { Account, MusicService } from "./services/service.js";
 
 /**
  * Whether the current run was primed from cached bundle credentials. Tracked so
@@ -466,7 +468,7 @@ async function main(): Promise<void> {
   // Resolve the command and validate its arguments *before* any network or
   // sign-in, so bad input fails fast without opening a browser. `login` just
   // establishes (and persists) a session, so its action is a no-op.
-  let run: (client: QobuzClient, session: UserSession) => Promise<void>;
+  let run: (client: MusicService, signedIn: SignedIn) => Promise<void>;
   let printLoginUrl = false;
   switch (command) {
     case "login":
@@ -475,7 +477,7 @@ async function main(): Promise<void> {
       break;
     case "serve": {
       const serveArgs = parseServeArgs(args.slice(1));
-      run = (client, session) => runServe(client, session, serveArgs);
+      run = (client, signedIn) => runServe(client, signedIn, serveArgs);
       break;
     }
     case "jobs": {
@@ -487,7 +489,7 @@ async function main(): Promise<void> {
       break;
     }
     case "check":
-      run = runCheck;
+      run = (_client, { qobuz }) => runCheck(qobuz);
       break;
     case "ui":
       run = runUi;
@@ -518,7 +520,7 @@ async function main(): Promise<void> {
       if (parsed.artists.length === 0) {
         throw new Error("No artists given. Pass them as arguments or pipe them on stdin.");
       }
-      run = (client, session) => runRemoveArtists(client, session, parsed);
+      run = (client, { account }) => runRemoveArtists(client, account, parsed);
       break;
     }
     case "upgrade": {
@@ -589,18 +591,30 @@ async function main(): Promise<void> {
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,
   );
 
+  const service = new QobuzService(client);
+  const account = service.account();
+  if (account === undefined) {
+    throw new Error("unreachable: not signed in");
+  }
+  const signedIn: SignedIn = { account, qobuz: client };
   if (command === "ui" || command === "serve") {
     // The server records each web commit into a journal of its own.
-    await run(client, session);
+    await run(service, signedIn);
   } else {
     // The command sees a client that records every change it makes, all of it
     // one history entry (an undo records its own "Undid: ..." entry).
-    const recorded = recordingClient(client, journal);
+    const recorded = recordingClient<MusicService>(service, journal);
     await (command === "undo"
-      ? run(recorded, session)
-      : journal.run({ tool: command === "jobs" ? "managed" : command }, () => run(recorded, session)));
+      ? run(recorded, signedIn)
+      : journal.run({ tool: command === "jobs" ? "managed" : command }, () => run(recorded, signedIn)));
   }
   output.flush();
+}
+
+/** Who is signed in, and Qobuz's client for what only it can do. */
+interface SignedIn {
+  account: Account;
+  qobuz: QobuzClient;
 }
 
 /** The history journal, writing to the history file beside the session. */
@@ -619,7 +633,7 @@ function openJournal(source: HistorySource): Journal {
  * Executor for `undo`: show how the chosen entry would be reversed, and with
  * --apply reverse it (recorded as an entry of its own).
  */
-async function runUndo(client: QobuzClient, journal: Journal, args: UndoArgs): Promise<void> {
+async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): Promise<void> {
   const items = journal.items();
   const item = selectEntry(items, args.id);
   if (item === undefined) {
@@ -666,19 +680,16 @@ async function runUndo(client: QobuzClient, journal: Journal, args: UndoArgs): P
  * signed in) is the API's Qobuz backend; the server runs until interrupted.
  * Every change the UI commits is recorded in the history, as web entries.
  */
-async function runUi(client: QobuzClient, session: UserSession): Promise<void> {
+async function runUi(client: MusicService, { account }: SignedIn): Promise<void> {
   const journal = openJournal("web");
   const recorded = recordingClient(client, journal);
   const server = await startServer({
     service: recorded,
     history: { journal },
     jobs: jobsApi(journal, recorded),
-    ownerId: session.userId,
+    ownerId: account.id,
     acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
-    session: {
-      displayName: session.displayName,
-      subscriptionLabel: session.subscriptionLabel,
-    },
+    session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "" },
   });
   logger.info(`\nWeb UI running at ${server.url}`);
   logger.info("Open it in your browser (it should open automatically).");
@@ -776,7 +787,7 @@ async function connectUnattended(journal: Journal): Promise<ConnectResult> {
     }
     throw error;
   }
-  return { ok: true, client: recordingClient(client, journal) };
+  return { ok: true, client: recordingClient<MusicService>(new QobuzService(client), journal) };
 }
 
 function errorMessage(error: unknown): string {
@@ -862,7 +873,7 @@ function runJobsOffline(args: JobsArgs): boolean {
 }
 
 /** `jobs` actions that talk to Qobuz: create (with a preview), run, remove a playlist. */
-async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsArgs): Promise<void> {
+async function runJobsOnline(client: MusicService, journal: Journal, args: JobsArgs): Promise<void> {
   const service = openJobsService();
   if (args.action === "remove") {
     const { job, playlistId } = service.remove(args.id);
@@ -904,7 +915,7 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
 
   const definition: Record<string, unknown> = { ...args.definition };
   if (args.artistQueries.length > 0) {
-    const found: { id: number; name: string }[] = [];
+    const found: { id: ArtistId; name: string }[] = [];
     const problems: string[] = [];
     for (const query of args.artistQueries) {
       const match = await lookUpArtist(client, query);
@@ -925,9 +936,9 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
     // A job on an existing playlist is named after it.
     const target = definition["target"] as { type: string; playlistId?: PlaylistId };
     definition["name"] =
-      target.type === "favourites"
+      target.type === "favourites" || target.playlistId === undefined
         ? "Favourites"
-        : (await client.getPlaylist(target.playlistId ?? 0)).name;
+        : (await client.getPlaylist(target.playlistId)).name;
   }
   const now = new Date();
   // Validate and preview the first refresh before saving anything.
@@ -974,8 +985,8 @@ function jobsApi(journal: Journal, client: RefreshClient): NonNullable<ApiDeps["
  * interrupted. Meant to stay up on an always-on machine.
  */
 async function runServe(
-  client: QobuzClient,
-  session: UserSession,
+  client: MusicService,
+  { account, qobuz }: SignedIn,
   options: { open: boolean; port?: number },
 ): Promise<void> {
   const journal = openJournal("web");
@@ -984,12 +995,9 @@ async function runServe(
     service: recorded,
     history: { journal },
     jobs: jobsApi(journal, recorded),
-    ownerId: session.userId,
+    ownerId: account.id,
     acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
-    session: {
-      displayName: session.displayName,
-      subscriptionLabel: session.subscriptionLabel,
-    },
+    session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "" },
     ...(options.port !== undefined && { port: options.port }),
   });
   logger.info(`\nWeb UI running at ${server.url}`);
@@ -1002,7 +1010,7 @@ async function runServe(
   const deps = jobRunnerDeps(journal, async () => {
     if (fileGlobalStore().load().needsSignIn !== undefined) {
       try {
-        await restoreOrLogin(client, fileTokenStore(), async () => {
+        await restoreOrLogin(qobuz, fileTokenStore(), async () => {
           throw new QobuzError("authentication", "not signed in; run qobuz-helper login");
         });
       } catch (error) {
@@ -1055,7 +1063,7 @@ async function runCheck(client: QobuzClient): Promise<void> {
  */
 function planPlaylistFromArtists(
   argv: string[],
-): (client: QobuzClient) => Promise<void> {
+): (client: MusicService) => Promise<void> {
   const parsed = parsePlaylistArgs(argv);
   const artists =
     parsed.artists.length > 0 ? parsed.artists : readLinesFromStdin();
@@ -1065,7 +1073,7 @@ function planPlaylistFromArtists(
     );
   }
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     logger.info(
       `Building playlist "${parsed.playlistName}" from ${count(artists.length, "artist")}...`,
     );
@@ -1082,7 +1090,7 @@ function planPlaylistFromArtists(
     output.assign({ applied: true, order: parsed.plan?.order ?? "by-artist", result });
 
     logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
+      `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
     );
     for (const resolved of result.resolvedArtists) {
       logger.info(
@@ -1114,11 +1122,11 @@ function planPlaylistFromArtists(
  */
 function planPlaylistFromAlbums(
   argv: string[],
-): (client: QobuzClient) => Promise<void> {
+): (client: MusicService) => Promise<void> {
   const parsed = parseAlbumArgs(argv);
   const { discography } = parsed;
   if (discography !== undefined) {
-    return async (client: QobuzClient): Promise<void> => {
+    return async (client: MusicService): Promise<void> => {
       const versions = discography.allVersions
         ? "every version"
         : `one version each, preferring ${parsed.preference}`;
@@ -1168,7 +1176,7 @@ function planPlaylistFromAlbums(
     );
   }
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     if (malformed.length > 0) {
       logger.warn(`ignored (not "Artist - Album" or an album link): ${malformed.join(", ")}`);
     }
@@ -1191,7 +1199,7 @@ function planPlaylistFromAlbums(
 function reportAlbumPlaylist(result: BuildAlbumPlaylistResult, fitMinutes?: number): void {
   output.assign({ applied: true, result });
   logger.info(
-    `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
+    `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.trackCount, "track")} (${formatDuration(result.durationSeconds)}):`,
   );
   for (const resolved of result.resolvedAlbums) {
     const version =
@@ -1220,7 +1228,7 @@ function reportAlbumPlaylist(result: BuildAlbumPlaylistResult, fitMinutes?: numb
  */
 function planSimilarArtists(
   argv: string[],
-): (client: QobuzClient) => Promise<void> {
+): (client: MusicService) => Promise<void> {
   const parsed = parseSimilarArgs(argv);
   const { source } = parsed;
   const artists =
@@ -1253,7 +1261,7 @@ function planSimilarArtists(
     );
   }
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     if (estimate.large) {
       logger.warn(`large run: ${describeEstimate(estimate)}`);
     }
@@ -1314,7 +1322,7 @@ function planSimilarArtists(
       });
       output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
       logger.info(
-        `\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(trackIds.length, "track")} (${formatDuration(shaped.seconds)}).`,
+        `\nCreated "${playlist.name}" (id ${shortId(playlist.id)}) with ${count(trackIds.length, "track")} (${formatDuration(shaped.seconds)}).`,
       );
       return;
     }
@@ -1342,14 +1350,14 @@ function reportSimilarPlan(
   maxArtists: number,
 ): void {
   const byArtist = new Map(plan.similar.map((entry) => [entry.artist.id, entry]));
-  const shown = new Set<number>();
+  const shown = new Set<ArtistId>();
   for (const seed of plan.seeds) {
     logger.info(
       showSeedTracks
         ? `  ${seed.artist.name}: ${count(seed.tracks.length, "track")}${excludedNote(seed.excluded.length)}`
         : `  ${seed.artist.name}`,
     );
-    const listed = new Set<number>();
+    const listed = new Set<ArtistId>();
     for (const appearance of plan.appearances.filter((a) => a.seed.id === seed.artist.id)) {
       const entry = byArtist.get(appearance.artist.id);
       if (entry === undefined) {
@@ -1410,16 +1418,16 @@ function excludedNote(count: number): string {
  */
 function planDeduplicate(
   argv: string[],
-): (client: QobuzClient) => Promise<void> {
+): (client: MusicService) => Promise<void> {
   const { source, keep, apply, includeVersions } = parseDedupeArgs(argv);
   if (source.type === "all-playlists") {
     return planDeduplicateAllPlaylists(keep, apply, includeVersions);
   }
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     const where =
       source.type === "playlist"
-        ? `playlist ${source.playlistId}`
+        ? `playlist ${shortId(source.playlistId)}`
         : "your favourites";
     logger.info(`Fetching tracks from ${where}...`);
     const tracks =
@@ -1467,8 +1475,8 @@ function planDeduplicateAllPlaylists(
   keep: readonly KeepStrategy[],
   apply: boolean,
   includeVersions: boolean,
-): (client: QobuzClient) => Promise<void> {
-  return async (client: QobuzClient): Promise<void> => {
+): (client: MusicService) => Promise<void> {
+  return async (client: MusicService): Promise<void> => {
     logger.info("Fetching all your playlists...");
     const scan = await scanAllPlaylists(client, keep, { includeVersions });
     output.assign({
@@ -1486,7 +1494,7 @@ function planDeduplicateAllPlaylists(
       logger.info("No duplicates within any playlist.");
     }
     for (const { playlist, groups, versions } of scan.within) {
-      logger.info(`"${playlist.name}" (id ${playlist.id}):`);
+      logger.info(`"${playlist.name}" (id ${shortId(playlist.id)}):`);
       logger.info(`${formatResolutionReport(groups)}\n`);
       if (versions.length > 0) {
         logger.info(`${formatOtherVersions(versions)}\n`);
@@ -1525,14 +1533,14 @@ function planDeduplicateAllPlaylists(
 
 /** `remove-artists`: report (or, with --apply, remove) artists' songs from playlists. */
 async function runRemoveArtists(
-  client: QobuzClient,
-  session: UserSession,
+  client: MusicService,
+  account: Account,
   args: RemoveArtistsArgs,
 ): Promise<void> {
   const { artists } = args;
   const mine = await client.getUserPlaylists();
-  const isMine = (ownerId: UserId | undefined): boolean => ownerId === undefined || ownerId === session.userId;
-  let playlists: Array<{ id: number; name: string }>;
+  const isMine = (ownerId: UserId | undefined): boolean => ownerId === undefined || ownerId === account.id;
+  let playlists: Array<{ id: PlaylistId; name: string }>;
   if (args.playlists.type === "all") {
     playlists = mine.filter((p) => isMine(p.ownerId));
     for (const other of mine.filter((p) => !isMine(p.ownerId))) {
@@ -1542,7 +1550,7 @@ async function runRemoveArtists(
     playlists = args.playlists.ids.map((id) => {
       const known = mine.find((p) => p.id === id);
       if (known === undefined || !isMine(known.ownerId)) {
-        throw new Error(`${known === undefined ? `Playlist ${id}` : `"${known.name}"`} is not one of your playlists`);
+        throw new Error(`${known === undefined ? `Playlist ${shortId(id)}` : `"${known.name}"`} is not one of your playlists`);
       }
       return known;
     });
@@ -1576,7 +1584,7 @@ async function runRemoveArtists(
     output.assign({ applied: true, removed, reports });
     for (const { playlistId, error } of reports) {
       if (error !== undefined) {
-        logger.warn(`Playlist ${playlistId}: ${error}`);
+        logger.warn(`Playlist ${shortId(playlistId)}: ${error}`);
       }
     }
     logger.info(`\nRemoved ${count(removed, "song")}. (qobuz-helper undo puts them back)`);
@@ -1590,7 +1598,7 @@ async function runRemoveArtists(
 
 /** Execute the removals for an --apply run, using the id each source needs. */
 async function applyRemovals(
-  client: QobuzClient,
+  client: MusicService,
   source: Exclude<DedupeSource, { type: "all-playlists" }>,
   removals: readonly DedupTrack[],
 ): Promise<void> {
@@ -1603,7 +1611,7 @@ async function applyRemovals(
   if (source.type === "playlist") {
     const ids = removals
       .map((track) => track.playlistTrackId)
-      .filter((id): id is number => id !== undefined);
+      .filter((id) => id !== undefined);
     const skipped = removals.length - ids.length;
     if (skipped > 0) {
       logger.warn(`skipped ${skipped} track(s) with no playlist-track id`);
@@ -1621,13 +1629,13 @@ async function applyRemovals(
  * Validate the upgrade command's arguments up front, returning an executor that
  * resolves the plan, reports it, and (with --apply) writes it.
  */
-function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planUpgrade(argv: string[]): (client: MusicService) => Promise<void> {
   const args = parseUpgradeArgs(argv);
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     const where =
       args.source.type === "playlist"
-        ? `playlist ${args.source.playlistId}`
+        ? `playlist ${shortId(args.source.playlistId)}`
         : args.source.type === "all-playlists"
           ? "all your playlists"
           : "your favourites";
@@ -1662,7 +1670,7 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
       );
     }
     for (const failure of result.failed) {
-      logger.warn(`track ${failure.change.trackId}: ${failure.reason}`);
+      logger.warn(`track ${shortId(failure.change.trackId)}: ${failure.reason}`);
     }
   };
 }
@@ -1674,7 +1682,7 @@ function planUpgrade(argv: string[]): (client: QobuzClient) => Promise<void> {
  * When streaming to stdout the content is the only thing written there, so it
  * pipes cleanly; progress notes are shown only when writing to a file.
  */
-function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planExport(argv: string[]): (client: MusicService) => Promise<void> {
   const args = parseExportArgs(argv);
   const { source } = args;
   if (output.json && args.out === undefined && args.outDir === undefined) {
@@ -1691,7 +1699,7 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
     if (toFile) logger.info(message);
   };
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     let content: string;
     if (source.type === "account") {
       note("Backing up your account...");
@@ -1737,8 +1745,8 @@ function planExport(argv: string[]): (client: QobuzClient) => Promise<void> {
 function planExportAllPlaylists(
   format: Format,
   outDir: string,
-): (client: QobuzClient) => Promise<void> {
-  return async (client: QobuzClient): Promise<void> => {
+): (client: MusicService) => Promise<void> {
+  return async (client: MusicService): Promise<void> => {
     logger.info(`Exporting every playlist as ${format}...`);
     const files = await exportAllPlaylists(client, format);
     mkdirSync(outDir, { recursive: true });
@@ -1774,7 +1782,7 @@ function resolveExportFormat(args: ExportArgs): Format {
  * an executor. Resolving to Qobuz ids and (with `--apply`) writing happen once
  * the client is signed in; without `--apply` it resolves and reports only.
  */
-function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planImport(argv: string[]): (client: MusicService) => Promise<void> {
   const args = parseImportArgs(argv);
   const content = readFileSync(args.file, "utf8");
   output.assign({ file: args.file, target: args.target });
@@ -1794,7 +1802,7 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
   // Parse before signing in, so a malformed file fails fast.
   const parsed = parseCollection(content, format, kind);
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     if (format === "spotify") {
       logger.info("Reading a Spotify (Exportify) export: matching by ISRC first.");
     }
@@ -1826,7 +1834,7 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
     output.assign({ applied: true, result });
     if (result.playlist !== undefined) {
       logger.info(
-        `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.written, "track")}.`,
+        `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.written, "track")}.`,
       );
     } else {
       logger.info(`\nImported ${result.written} ${kind}.`);
@@ -1838,9 +1846,9 @@ function planImport(argv: string[]): (client: QobuzClient) => Promise<void> {
 function planRestore(
   content: string,
   apply: boolean,
-): (client: QobuzClient) => Promise<void> {
+): (client: MusicService) => Promise<void> {
   const backup = parseBackup(content);
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     const counts =
       `${backup.favourites.tracks.length} favourite tracks, ` +
       `${backup.favourites.albums.length} albums, ` +
@@ -1915,9 +1923,9 @@ function toImportTarget(target: ImportTargetArg, isPublic: boolean): ImportTarge
  * Validate the combine command's arguments up front, returning an executor that
  * reports the combined result and (with `--apply`) saves it as a new playlist.
  */
-function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planCombine(argv: string[]): (client: MusicService) => Promise<void> {
   const args = parseCombineArgs(argv);
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     logger.info(`Fetching ${args.sources.length} track lists...`);
     const plan = await resolveCombine(client, args.sources, {
       mode: args.mode,
@@ -1946,7 +1954,7 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
       isPublic: args.isPublic,
     });
     output.assign({ applied: true, result: { playlist, trackCount: trackIds.length } });
-    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(trackIds.length, "track")}.`);
+    logger.info(`\nCreated "${playlist.name}" (id ${shortId(playlist.id)}) with ${count(trackIds.length, "track")}.`);
   };
 }
 
@@ -1955,9 +1963,9 @@ function planCombine(argv: string[]): (client: QobuzClient) => Promise<void> {
  * prints the stats (a report, or JSON on stdout) and, with --decade-playlist,
  * makes a playlist of one decade's tracks (only with --apply).
  */
-function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planStats(argv: string[]): (client: MusicService) => Promise<void> {
   const args = parseStatsArgs(argv);
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     const stats = computeStats(await collectLibrary(client, args.source));
     // The stats are the document's top-level fields (as `stats --json` has
     // always printed them); the buckets' track ids are for making playlists,
@@ -1992,7 +2000,7 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
       isPublic: request.isPublic,
     });
     output.set("decadePlaylist", { ...decadePlaylist, applied: true, playlist });
-    logger.info(`\nCreated "${playlist.name}" (id ${playlist.id}) with ${count(bucket.count, "track")}.`);
+    logger.info(`\nCreated "${playlist.name}" (id ${shortId(playlist.id)}) with ${count(bucket.count, "track")}.`);
   };
 }
 
@@ -2000,11 +2008,11 @@ function planStats(argv: string[]): (client: QobuzClient) => Promise<void> {
  * Validate the new-releases command's arguments up front, returning an
  * executor that reports the new releases and, with --apply, writes them.
  */
-function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planNewReleases(argv: string[]): (client: MusicService) => Promise<void> {
   const parsed = parseNewReleasesArgs(argv);
   const filter = parsed.filter === undefined ? undefined : compileTrackFilter(parsed.filter);
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     const now = new Date();
     const since = parsed.since ?? daysBefore(now, parsed.days ?? DEFAULT_WINDOW_DAYS);
     logger.info(
@@ -2083,10 +2091,10 @@ function planNewReleases(argv: string[]): (client: QobuzClient) => Promise<void>
       return;
     }
     logger.info(
-      `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.trackCount, "track")}${excludedNote(result.excludedCount)}.`,
+      `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.trackCount, "track")}${excludedNote(result.excludedCount)}.`,
     );
     if (result.failedAlbumIds.length > 0) {
-      logger.warn(`could not fetch tracks for releases: ${result.failedAlbumIds.join(", ")}`);
+      logger.warn(`could not fetch tracks for releases: ${result.failedAlbumIds.map(shortId).join(", ")}`);
     }
   };
 }
@@ -2110,12 +2118,12 @@ function readLinesFromStdin(): string[] {
  * Validate the word-play command's arguments up front, returning an executor
  * that resolves the plan, reports it, and writes it only with --apply.
  */
-function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
+function planWordPlay(argv: string[]): (client: MusicService) => Promise<void> {
   const parsed = parseWordPlayArgs(argv);
   const filter =
     parsed.filter === undefined ? undefined : compileTrackFilter(parsed.filter);
 
-  return async (client: QobuzClient): Promise<void> => {
+  return async (client: MusicService): Promise<void> => {
     logger.info("Finding songs...");
     const plan = await resolveWordPlay(client, parsed.request, {
       match: parsed.match,
@@ -2135,7 +2143,7 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
       logger.info(
         parsed.addTo === undefined
           ? `\n(dry run -- pass --apply to create "${name}" with ${count(trackIds.length, "song")})`
-          : `\n(dry run -- pass --apply to add ${count(trackIds.length, "song")} to playlist ${parsed.addTo})`,
+          : `\n(dry run -- pass --apply to add ${count(trackIds.length, "song")} to playlist ${shortId(parsed.addTo)})`,
       );
       return;
     }
@@ -2150,7 +2158,7 @@ function planWordPlay(argv: string[]): (client: QobuzClient) => Promise<void> {
     logger.info(
       result.playlist === undefined
         ? `\nAdded ${count(result.added.length, "song")} to the playlist${result.skipped.length > 0 ? ` (${result.skipped.length} already present, skipped)` : ""}.`
-        : `\nCreated "${result.playlist.name}" (id ${result.playlist.id}) with ${count(result.added.length, "song")}.`,
+        : `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.added.length, "song")}.`,
     );
   };
 }

@@ -13,17 +13,22 @@
  *     `gb-en`, may be missing, as in the API's own relative URLs).
  *
  * The scheme may be missing, and trailing slashes, query strings and fragments
- * are ignored. Album ids are strings (often alphanumeric, such as
+ * are ignored. Album ids are text (often alphanumeric, such as
  * `pvsb64n704d0b`, sometimes a long number); the others are numbers.
  *
  * Pure and free of Node dependencies, so the web UI's home paste box uses it
  * ({@link classifyPaste}) as well as the server and the CLI.
  */
 
+import { readId, tagId, type AlbumId, type ArtistId, type PlaylistId, type TrackId } from "../services/ids.js";
+
 /** A link to one Qobuz item. */
 export type QobuzLink =
-  | { kind: "album"; id: string }
-  | { kind: "artist" | "playlist" | "track" | "label"; id: number };
+  | { kind: "album"; id: AlbumId }
+  | { kind: "artist"; id: ArtistId }
+  | { kind: "playlist"; id: PlaylistId }
+  | { kind: "track"; id: TrackId }
+  | { kind: "label"; id: string };
 
 export type QobuzLinkKind = QobuzLink["kind"];
 
@@ -78,30 +83,33 @@ function toLink(kind: string | undefined, id: string | undefined): QobuzLink | u
     return undefined;
   }
   if (kind === "album") {
-    return ALBUM_ID.test(id) ? { kind, id } : undefined;
+    return ALBUM_ID.test(id) ? { kind, id: tagId<AlbumId>("qobuz", id) } : undefined;
   }
-  if (kind === "artist" || kind === "playlist" || kind === "track" || kind === "label") {
-    return NUMERIC_ID.test(id) ? { kind, id: Number(id) } : undefined;
+  if (!NUMERIC_ID.test(id)) {
+    return undefined;
   }
-  return undefined;
-}
-
-/** A playlist id typed as a number or pasted as a playlist link, or undefined. */
-export function parsePlaylistId(raw: string): number | undefined {
-  const text = raw.trim();
-  if (NUMERIC_ID.test(text)) {
-    return Number(text);
+  switch (kind) {
+    case "artist":
+      return { kind, id: tagId<ArtistId>("qobuz", id) };
+    case "playlist":
+      return { kind, id: tagId<PlaylistId>("qobuz", id) };
+    case "track":
+      return { kind, id: tagId<TrackId>("qobuz", id) };
+    case "label":
+      return { kind, id };
+    default:
+      return undefined;
   }
-  const link = parseQobuzLink(text);
-  return link?.kind === "playlist" ? link.id : undefined;
 }
 
 /**
- * {@link parsePlaylistId} for numeric checks: the id, or NaN when the value
- * is missing or neither an id nor a playlist link.
+ * A playlist id -- a number of Qobuz's, or one that names its service -- or a
+ * pasted playlist link; undefined when it is neither.
  */
-export function playlistIdOf(raw: string | undefined): number {
-  return raw === undefined ? NaN : (parsePlaylistId(raw) ?? NaN);
+export function parsePlaylistId(raw: string | undefined): PlaylistId | undefined {
+  const text = raw?.trim() ?? "";
+  const link = parseQobuzLink(text);
+  return link?.kind === "playlist" ? link.id : readId<PlaylistId>(text);
 }
 
 const ARTICLE: Record<QobuzLinkKind, string> = {
@@ -124,7 +132,7 @@ export interface PasteSummary {
   /** Album links and "Artist - Album" lines, for the albums tool. */
   albums: string[];
   /** Playlist links, with their ids. */
-  playlists: { line: string; id: number }[];
+  playlists: { line: string; id: PlaylistId }[];
   /** Track links (no tool takes them yet). */
   tracks: string[];
   /** Other Qobuz links (labels). */

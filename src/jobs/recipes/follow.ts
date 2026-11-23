@@ -4,7 +4,7 @@
  * leave it upstream stay here.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import { shortId, type PlaylistId } from "../../services/ids.js";
 import type { Track } from "../../services/model.js";
 import { capList, CHECKED_CAP, type FollowSource, type SourceState } from "../model.js";
 import type { DesiredTrack } from "../reconcile.js";
@@ -18,13 +18,13 @@ export async function resolveFollow(
   def: FollowSource,
   ctx: { state: SourceState },
 ): Promise<SourceResult> {
-  const source = `playlist:${def.playlistId}`;
+  const source = `playlist:${shortId(def.playlistId)}`;
   const previous = ctx.state.seen ?? [];
   let tracks: Track[];
   try {
     tracks = await client.getPlaylistTracks(def.playlistId);
   } catch (error) {
-    const note = `Could not read playlist ${def.playlistId} (${message(error)}).`;
+    const note = `Could not read playlist ${shortId(def.playlistId)} (${message(error)}).`;
     return {
       tracks: def.keepRemoved ? previous.map((trackId) => ({ trackId, source })) : [],
       complete: false,

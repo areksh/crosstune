@@ -12,7 +12,19 @@
  * browser); upstream Qobuz failures map to 502 so the UI can surface them.
  */
 
-import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId, UserId } from "../services/ids.js";
+import {
+  readAlbumId,
+  readId,
+  serviceOf,
+  shortId,
+  type AlbumId,
+  type AnyId,
+  type ArtistId,
+  type EntryId,
+  type PlaylistId,
+  type TrackId,
+  type UserId,
+} from "../services/ids.js";
 import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes } from "./playlist-routes.js";
 import {
   RELEASE_TYPES,
@@ -79,7 +91,7 @@ import {
   type MatchedItem,
 } from "../features/import-export.js";
 import { createZip } from "../features/zip.js";
-import { playlistIdOf } from "../features/qobuz-links.js";
+import { parsePlaylistId } from "../features/qobuz-links.js";
 import {
   createSongPicker,
   parseSongPickerState,
@@ -144,6 +156,7 @@ import {
 import { HISTORY_TOOLS, toSummary } from "../features/history.js";
 import type { Journal } from "../features/journal.js";
 import { applyUndo, describeStep, planUndo } from "../features/undo.js";
+import type { ArtistRef } from "../jobs/model.js";
 import type { RefreshPreview } from "../jobs/refresh.js";
 import type { AcceptOutcome, RunSummary } from "../jobs/run-due.js";
 import { UnknownJobError, type JobsService } from "../jobs/service.js";
@@ -617,11 +630,11 @@ async function similarTracks(body: unknown, deps: ApiDeps): Promise<ApiResponse>
     return { status: 400, body: { error: "expected a JSON object" } };
   }
   const raw = body["artists"];
-  const artists = Array.isArray(raw)
-    ? raw.filter(
-        (a): a is Artist =>
-          isRecord(a) && Number.isSafeInteger(a["id"]) && typeof a["name"] === "string",
-      )
+  const artists: Artist[] = Array.isArray(raw)
+    ? raw.flatMap((a: unknown) => {
+        const id = isRecord(a) ? readId<ArtistId>(a["id"]) : undefined;
+        return isRecord(a) && id !== undefined && typeof a["name"] === "string" ? [{ id, name: a["name"] }] : [];
+      })
     : [];
   if (!Array.isArray(raw) || artists.length === 0 || artists.length !== raw.length) {
     return { status: 400, body: { error: "artists must be a non-empty array of { id, name }" } };
@@ -787,7 +800,7 @@ async function apply(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (source.type === "playlist") {
     const ids = removals
       .map((removal) => removal.playlistTrackId)
-      .filter((id): id is number => id !== undefined);
+      .filter((id) => id !== undefined);
     await deps.service.removeTracksFromPlaylist(source.playlistId, ids);
     return { status: 200, body: { removed: ids.length } };
   }
@@ -1059,8 +1072,8 @@ function parseSimilarInput(body: unknown): Parsed<SimilarInput> {
   } else if (rawSource["type"] === "playlist") {
     // A playlist id, or a pasted playlist link (any playlist, not only yours).
     const raw = rawSource["playlistId"];
-    const playlistId = typeof raw === "string" ? playlistIdOf(raw) : raw;
-    if (typeof playlistId !== "number" || !Number.isInteger(playlistId) || playlistId <= 0) {
+    const playlistId = typeof raw === "string" ? parsePlaylistId(raw) : readId<PlaylistId>(raw);
+    if (playlistId === undefined) {
       return { ok: false, error: "source.playlistId must be a playlist id or a playlist link" };
     }
     const maxSeeds = intField(rawSource, "maxSeeds", "source.maxSeeds", SIMILAR_SETTINGS.maxSeeds);
@@ -1185,9 +1198,7 @@ function parseCommitInput(body: unknown): Parsed<CommitInput> {
     return { ok: false, error: "expected a JSON object" };
   }
   const trackIds = Array.isArray(body["trackIds"])
-    ? body["trackIds"].filter(
-        (id): id is number => typeof id === "number" && Number.isFinite(id),
-      )
+    ? body["trackIds"].flatMap((id: unknown) => readId<TrackId>(id) ?? [])
     : undefined;
   if (trackIds === undefined || trackIds.length === 0) {
     return { ok: false, error: "at least one track id is required" };
@@ -1220,10 +1231,11 @@ function parseCommitTarget(value: unknown): Parsed<CommitTarget> {
     return { ok: true, value: target };
   }
   if (value["type"] === "existing") {
-    if (typeof value["playlistId"] !== "number") {
+    const playlistId = readId<PlaylistId>(value["playlistId"]);
+    if (playlistId === undefined) {
       return { ok: false, error: "playlistId is required" };
     }
-    return { ok: true, value: { type: "existing", playlistId: value["playlistId"] } };
+    return { ok: true, value: { type: "existing", playlistId } };
   }
   return { ok: false, error: "target.type must be 'new' or 'existing'" };
 }
@@ -1282,9 +1294,7 @@ function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
     return { ok: false, error: "expected a JSON object" };
   }
   const albumIds = Array.isArray(body["albumIds"])
-    ? body["albumIds"].filter(
-        (id): id is string => typeof id === "string" && id.length > 0,
-      )
+    ? body["albumIds"].flatMap((id: unknown) => readAlbumId(id) ?? [])
     : undefined;
   if (albumIds === undefined || albumIds.length === 0) {
     return { ok: false, error: "at least one album id is required" };
@@ -1310,10 +1320,11 @@ function parseSource(value: unknown): Parsed<DedupeSource> {
     return { ok: true, value: { type: value["type"] } };
   }
   if (value["type"] === "playlist") {
-    if (typeof value["playlistId"] !== "number") {
+    const playlistId = readId<PlaylistId>(value["playlistId"]);
+    if (playlistId === undefined) {
       return { ok: false, error: "playlistId is required" };
     }
-    return { ok: true, value: { type: "playlist", playlistId: value["playlistId"] } };
+    return { ok: true, value: { type: "playlist", playlistId } };
   }
   return { ok: false, error: "source.type must be 'playlist', 'favourites' or 'all-playlists'" };
 }
@@ -1356,7 +1367,7 @@ function parseScanInput(body: unknown): Parsed<ScanInput> {
 }
 
 interface Removal {
-  id: number;
+  id: TrackId;
   playlistTrackId?: EntryId;
   /** The playlist an entry is in (all-playlists removals). */
   playlistId?: PlaylistId;
@@ -1380,15 +1391,18 @@ function parseApplyInput(body: unknown): Parsed<ApplyInput> {
   }
   const removals: Removal[] = [];
   for (const item of body["removals"]) {
-    if (!isRecord(item) || typeof item["id"] !== "number") {
+    const id = isRecord(item) ? readId<TrackId>(item["id"]) : undefined;
+    if (!isRecord(item) || id === undefined) {
       continue;
     }
-    const removal: Removal = { id: item["id"] };
-    if (typeof item["playlistTrackId"] === "number") {
-      removal.playlistTrackId = item["playlistTrackId"];
+    const removal: Removal = { id };
+    const playlistTrackId = readId<EntryId>(item["playlistTrackId"]);
+    if (playlistTrackId !== undefined) {
+      removal.playlistTrackId = playlistTrackId;
     }
-    if (typeof item["playlistId"] === "number") {
-      removal.playlistId = item["playlistId"];
+    const playlistId = readId<PlaylistId>(item["playlistId"]);
+    if (playlistId !== undefined) {
+      removal.playlistId = playlistId;
     }
     if (
       source.value.type === "all-playlists" &&
@@ -1424,10 +1438,11 @@ function parseUpgradeResolveInput(body: unknown): Parsed<UpgradeResolveInput> {
   } else if (raw["type"] === "favourites" || raw["type"] === "all-playlists") {
     source = { type: raw["type"] };
   } else if (raw["type"] === "playlist") {
-    if (!isPositiveInteger(raw["playlistId"])) {
+    const playlistId = readId<PlaylistId>(raw["playlistId"]);
+    if (playlistId === undefined) {
       return { ok: false, error: "source.playlistId must be a playlist id" };
     }
-    source = { type: "playlist", playlistId: raw["playlistId"] };
+    source = { type: "playlist", playlistId };
   } else {
     return {
       ok: false,
@@ -1466,22 +1481,20 @@ function parseUpgradeCommitInput(body: unknown): Parsed<UpgradeChange[]> {
 }
 
 function parseUpgradeChange(item: unknown): UpgradeChange | undefined {
-  if (!isRecord(item) || !isPositiveInteger(item["trackId"])) {
+  const trackId = isRecord(item) ? readId<TrackId>(item["trackId"]) : undefined;
+  if (!isRecord(item) || trackId === undefined) {
     return undefined;
   }
   const location = parseTrackLocation(item["location"]);
   if (location === undefined) {
     return undefined;
   }
-  const trackId = item["trackId"];
   if (item["action"] === "remove") {
     return { action: "remove", location, trackId };
   }
-  if (item["action"] === "replace" && isPositiveInteger(item["newTrackId"])) {
-    if (item["newTrackId"] === trackId) {
-      return undefined;
-    }
-    return { action: "replace", location, trackId, newTrackId: item["newTrackId"] };
+  const newTrackId = readId<TrackId>(item["newTrackId"]);
+  if (item["action"] === "replace" && newTrackId !== undefined && newTrackId !== trackId) {
+    return { action: "replace", location, trackId, newTrackId };
   }
   return undefined;
 }
@@ -1493,22 +1506,11 @@ function parseTrackLocation(value: unknown): TrackLocation | undefined {
   if (value["type"] === "favourites") {
     return { type: "favourites" };
   }
-  if (
-    value["type"] === "playlist" &&
-    isPositiveInteger(value["playlistId"]) &&
-    isPositiveInteger(value["playlistTrackId"])
-  ) {
-    return {
-      type: "playlist",
-      playlistId: value["playlistId"],
-      playlistTrackId: value["playlistTrackId"],
-    };
-  }
-  return undefined;
-}
-
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+  const playlistId = readId<PlaylistId>(value["playlistId"]);
+  const playlistTrackId = readId<EntryId>(value["playlistTrackId"]);
+  return value["type"] === "playlist" && playlistId !== undefined && playlistTrackId !== undefined
+    ? { type: "playlist", playlistId, playlistTrackId }
+    : undefined;
 }
 
 interface ExportInput {
@@ -1547,10 +1549,11 @@ function parseExportSource(value: unknown): Parsed<ExportInput["source"]> {
     case "all-playlists":
       return { ok: true, value: { type: value["type"] } };
     case "playlist":
-      if (typeof value["playlistId"] !== "number") {
+      const playlistId = readId<PlaylistId>(value["playlistId"]);
+      if (playlistId === undefined) {
         return { ok: false, error: "playlistId is required" };
       }
-      return { ok: true, value: { type: "playlist", playlistId: value["playlistId"] } };
+      return { ok: true, value: { type: "playlist", playlistId } };
     default:
       return {
         ok: false,
@@ -1619,12 +1622,11 @@ function parseImportPlan(value: unknown): Parsed<ImportPlan> {
     if (!isRecord(item)) {
       continue;
     }
-    const id = item["id"];
-    // Track and artist ids are numbers; album ids are strings.
-    if (typeof id !== "number" && typeof id !== "string") {
+    const id = kind === "albums" ? readAlbumId(item["id"]) : readId<AnyId>(item["id"]);
+    if (id === undefined) {
       continue;
     }
-    const label = typeof item["label"] === "string" ? item["label"] : String(id);
+    const label = typeof item["label"] === "string" ? item["label"] : shortId(id);
     matched.push({ label, id });
   }
   if (matched.length === 0) {
@@ -1655,12 +1657,13 @@ function parseImportTarget(value: unknown): Parsed<ImportTarget> {
       return { ok: true, value: target };
     }
     case "playlist-existing":
-      if (typeof value["playlistId"] !== "number") {
+      const playlistId = readId<PlaylistId>(value["playlistId"]);
+      if (playlistId === undefined) {
         return { ok: false, error: "playlistId is required" };
       }
       return {
         ok: true,
-        value: { type: "playlist-existing", playlistId: value["playlistId"] },
+        value: { type: "playlist-existing", playlistId },
       };
     default:
       return {
@@ -1688,7 +1691,7 @@ function exportBasename(source: Exclude<ExportSource, { type: "account" }>): str
     case "favourite-artists":
       return "qobuz-favourite-artists";
     case "playlist":
-      return `qobuz-playlist-${source.playlistId}`;
+      return `${serviceOf(source.playlistId)}-playlist-${shortId(source.playlistId).replace(/[^a-z0-9-]+/gi, "-")}`;
   }
 }
 
@@ -1737,15 +1740,11 @@ function parseCombineInput(body: unknown): Parsed<CombineInput> {
   }
   const sources: CombineSource[] = [];
   for (const raw of body["sources"]) {
+    const playlistId = isRecord(raw) ? readId<PlaylistId>(raw["playlistId"]) : undefined;
     if (isRecord(raw) && raw["type"] === "favourites") {
       sources.push({ type: "favourites" });
-    } else if (
-      isRecord(raw) &&
-      raw["type"] === "playlist" &&
-      Number.isSafeInteger(raw["playlistId"]) &&
-      (raw["playlistId"] as number) > 0
-    ) {
-      sources.push({ type: "playlist", playlistId: raw["playlistId"] as number });
+    } else if (isRecord(raw) && raw["type"] === "playlist" && playlistId !== undefined) {
+      sources.push({ type: "playlist", playlistId });
     } else {
       return {
         ok: false,
@@ -1802,15 +1801,11 @@ function parseCombineInput(body: unknown): Parsed<CombineInput> {
 async function libraryStats(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const source = isRecord(body) ? body["source"] : undefined;
   let parsed: StatsSource;
+  const playlistId = isRecord(source) ? readId<PlaylistId>(source["playlistId"]) : undefined;
   if (isRecord(source) && (source["type"] === "favourites" || source["type"] === "everything")) {
     parsed = { type: source["type"] };
-  } else if (
-    isRecord(source) &&
-    source["type"] === "playlist" &&
-    Number.isSafeInteger(source["playlistId"]) &&
-    (source["playlistId"] as number) > 0
-  ) {
-    parsed = { type: "playlist", playlistId: source["playlistId"] as number };
+  } else if (isRecord(source) && source["type"] === "playlist" && playlistId !== undefined) {
+    parsed = { type: "playlist", playlistId };
   } else {
     return {
       status: 400,
@@ -1999,11 +1994,11 @@ function parseWordPlaySource(value: unknown): Parsed<WordPlaySource> {
     return { ok: true, value: { type: "favourites" } };
   }
   if (isRecord(value) && value["type"] === "playlist") {
-    const id = value["playlistId"];
-    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+    const playlistId = readId<PlaylistId>(value["playlistId"]);
+    if (playlistId === undefined) {
       return { ok: false, error: "source.playlistId must be a playlist id" };
     }
-    return { ok: true, value: { type: "playlist", playlistId: id } };
+    return { ok: true, value: { type: "playlist", playlistId } };
   }
   return { ok: false, error: "source.type must be favourites or playlist" };
 }
@@ -2096,14 +2091,11 @@ async function commitNewReleasesRoute(body: unknown, deps: ApiDeps): Promise<Api
     return { status: 400, body: { error: "expected a JSON object" } };
   }
   const raw = body["albumIds"];
-  if (
-    !Array.isArray(raw) ||
-    raw.length === 0 ||
-    !raw.every((id) => typeof id === "string" && id.length > 0)
-  ) {
+  const albumIds = Array.isArray(raw) ? raw.map(readAlbumId) : [];
+  if (albumIds.length === 0 || !albumIds.every((id) => id !== undefined)) {
     return { status: 400, body: { error: "albumIds must be a non-empty array of album ids" } };
   }
-  if (raw.length > MAX_COMMIT_RELEASES) {
+  if (albumIds.length > MAX_COMMIT_RELEASES) {
     return {
       status: 400,
       body: { error: `at most ${MAX_COMMIT_RELEASES} releases per request` },
@@ -2118,7 +2110,7 @@ async function commitNewReleasesRoute(body: unknown, deps: ApiDeps): Promise<Api
     return { status: 400, body: { error: filter.error } };
   }
   const result = await commitNewReleases(deps.service, {
-    albumIds: raw as string[],
+    albumIds,
     target: target.value,
     filter: filter.value,
   });
@@ -2133,8 +2125,8 @@ function parseArtistSource(value: unknown): Parsed<ArtistSource> {
     return { ok: true, value: { type: "favourites" } };
   }
   if (value["type"] === "playlist") {
-    const playlistId = value["playlistId"];
-    if (typeof playlistId !== "number" || !Number.isInteger(playlistId) || playlistId <= 0) {
+    const playlistId = readId<PlaylistId>(value["playlistId"]);
+    if (playlistId === undefined) {
       return { ok: false, error: "source.playlistId must be a playlist id" };
     }
     return { ok: true, value: { type: "playlist", playlistId } };
@@ -2278,7 +2270,7 @@ async function jobArtists(body: Record<string, unknown>, deps: ApiDeps): Promise
   if (!Array.isArray(queries) || !queries.every((q) => typeof q === "string") || queries.length > 500) {
     return { status: 400, body: { error: "queries must be a list of up to 500 artist names or links" } };
   }
-  const artists: { id: number; name: string }[] = [];
+  const artists: ArtistRef[] = [];
   const problems: string[] = [];
   for (const query of (queries as string[]).map((q) => q.trim()).filter((q) => q.length > 0)) {
     const match = await lookUpArtist(deps.service, query);

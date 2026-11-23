@@ -16,13 +16,13 @@
  * an injected client or callback.
  */
 
-import type { AlbumId, EntryId, PlaylistId } from "../services/ids.js";
+import { shortId, type AlbumId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
 /** The fields duplicate detection and keep-strategies need from a track. */
 export interface DedupTrack {
-  id: number;
+  id: TrackId;
   title: string;
   /** Variant label ("Live", "2011 Remaster"), when there is one. */
   version?: string;
@@ -339,7 +339,7 @@ export function strategyNeedsReleaseDates(strategy: KeepStrategy | KeepChain): b
  */
 export interface ResolvedGroup {
   tracks: DedupTrack[];
-  keepId: number;
+  keepId: TrackId;
 }
 
 /**
@@ -352,7 +352,7 @@ export interface ResolvedGroup {
 export function selectKeeper(
   group: readonly DedupTrack[],
   strategy: KeepStrategy | KeepChain,
-): number {
+): TrackId {
   if (group.length === 0) {
     throw new Error("Cannot select a keeper from an empty group");
   }
@@ -509,7 +509,7 @@ export function formatResolutionReport(
     for (const [position, track] of group.tracks.entries()) {
       const marker = position === keep ? "keep" : "drop";
       const album = track.album === undefined ? "" : `  [${track.album}]`;
-      lines.push(`   ${marker}  id ${track.id}: ${displayTitle(track)}${album}`);
+      lines.push(`   ${marker}  id ${shortId(track.id)}: ${displayTitle(track)}${album}`);
     }
     lines.push("");
   });
@@ -532,7 +532,7 @@ export function formatOtherVersions(groups: readonly DedupTrack[][]): string {
 
 /** A playlist as the across-playlists scan reports it. */
 export interface PlaylistRef {
-  id: number;
+  id: PlaylistId;
   name: string;
 }
 
@@ -667,8 +667,8 @@ export interface PlaylistEntry {
  * Group playlist entries by playlist (in first-seen order), each entry once,
  * for removal with one request per playlist.
  */
-export function entriesByPlaylist(entries: readonly PlaylistEntry[]): Map<number, number[]> {
-  const byPlaylist = new Map<number, number[]>();
+export function entriesByPlaylist(entries: readonly PlaylistEntry[]): Map<PlaylistId, EntryId[]> {
+  const byPlaylist = new Map<PlaylistId, EntryId[]>();
   for (const { playlistId, playlistTrackId } of entries) {
     const ids = byPlaylist.get(playlistId) ?? [];
     if (!ids.includes(playlistTrackId)) {
@@ -710,7 +710,7 @@ export function formatAcrossPlaylistsReport(songs: readonly SongAcrossPlaylists[
     lines.push(`${index + 1}. ${song.track.artist} - ${displayTitle(song.track)}`);
     for (const { playlist, tracks } of song.playlists) {
       const copies = tracks.length > 1 ? ` (${tracks.length} copies)` : "";
-      lines.push(`   in "${playlist.name}" (id ${playlist.id})${copies}`);
+      lines.push(`   in "${playlist.name}" (id ${shortId(playlist.id)})${copies}`);
     }
     lines.push("");
   });

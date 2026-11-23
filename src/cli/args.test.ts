@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import {
   parseJobsArgs,
   parseLoginArgs,
@@ -272,7 +273,7 @@ describe("parseAlbumArgs", () => {
 describe("parseDedupeArgs", () => {
   it("parses a playlist source with defaults (first-added, report-only)", () => {
     expect(parseDedupeArgs(["--playlist", "555"])).toEqual({
-      source: { type: "playlist", playlistId: 555 },
+      source: { type: "playlist", playlistId: qid(555) },
       keep: ["first-added"],
       apply: false,
       includeVersions: false,
@@ -355,7 +356,7 @@ describe("parseExportArgs", () => {
 
   it("parses a playlist source and an output file", () => {
     expect(parseExportArgs(["--playlist", "42", "--out", "list.m3u"])).toEqual({
-      source: { type: "playlist", playlistId: 42 },
+      source: { type: "playlist", playlistId: qid(42) },
       out: "list.m3u",
     });
   });
@@ -512,7 +513,7 @@ describe("parseSimilarArgs", () => {
 
   it("parses a playlist source", () => {
     expect(parseSimilarArgs(["--playlist", "42", "--seeds", "8", "--apply"])).toEqual({
-      source: { type: "playlist", playlistId: 42, maxSeeds: 8, apply: true },
+      source: { type: "playlist", playlistId: qid(42), maxSeeds: 8, apply: true },
       similarPerArtist: 3,
       depth: 1,
       tracksPerSimilar: 3,
@@ -525,7 +526,7 @@ describe("parseSimilarArgs", () => {
     ).toEqual({ excludeTracks: [], excludeAlbums: [], excludeArtists: ["Drake"] });
     expect(parseSimilarArgs(["--playlist", "42"]).source).toEqual({
       type: "playlist",
-      playlistId: 42,
+      playlistId: qid(42),
       maxSeeds: 10,
       apply: false,
     });
@@ -586,9 +587,9 @@ describe("parseCombineArgs", () => {
   it("takes the inputs in the order given, with defaults", () => {
     expect(parseCombineArgs(["--playlist", "12", "--favourites", "--playlist", "34"])).toEqual({
       sources: [
-        { type: "playlist", playlistId: 12 },
+        { type: "playlist", playlistId: qid(12) },
         { type: "favourites" },
-        { type: "playlist", playlistId: 34 },
+        { type: "playlist", playlistId: qid(34) },
       ],
       mode: "merge",
       order: "sequential",
@@ -618,7 +619,7 @@ describe("parseCombineArgs", () => {
         "--apply",
       ]),
     ).toEqual({
-      sources: [{ type: "favourites" }, { type: "playlist", playlistId: 1 }],
+      sources: [{ type: "favourites" }, { type: "playlist", playlistId: qid(1) }],
       mode: "common",
       order: "shuffle",
       keep: "first",
@@ -671,7 +672,7 @@ describe("parseStatsArgs", () => {
       json: true,
     });
     expect(parseStatsArgs(["--playlist", "12"])).toEqual({
-      source: { type: "playlist", playlistId: 12 },
+      source: { type: "playlist", playlistId: qid(12) },
       json: false,
     });
     expect(parseStatsArgs(["--everything"])).toEqual({ source: { type: "everything" }, json: false });
@@ -768,7 +769,7 @@ describe("parseWordPlayArgs", () => {
     });
     expect(parseWordPlayArgs(["--a-to-z", "--playlist", "42"]).request).toEqual({
       mode: "a-to-z",
-      source: { type: "playlist", playlistId: 42 },
+      source: { type: "playlist", playlistId: qid(42) },
     });
   });
 
@@ -810,7 +811,7 @@ describe("parseWordPlayArgs", () => {
       apply: true,
       filter: { excludeArtists: ["Drake"], excludeTracks: [], excludeAlbums: [] },
     });
-    expect(parseWordPlayArgs(["--exact", "x", "--add-to", "7"]).addTo).toBe(7);
+    expect(parseWordPlayArgs(["--exact", "x", "--add-to", "7"]).addTo).toBe(qid(7));
   });
 
   it.each([
@@ -855,7 +856,7 @@ describe("parseNewReleasesArgs", () => {
         "Drake",
       ]),
     ).toEqual({
-      source: { type: "playlist", playlistId: 123 },
+      source: { type: "playlist", playlistId: qid(123) },
       since: "2026-10-01",
       include: ["album", "live"],
       apply: false,
@@ -909,7 +910,7 @@ describe("parseUpgradeArgs", () => {
     expect(parseUpgradeArgs(["--favorites"]).source).toEqual({ type: "favourites" });
     expect(parseUpgradeArgs(["--playlist", "42"]).source).toEqual({
       type: "playlist",
-      playlistId: 42,
+      playlistId: qid(42),
     });
     expect(parseUpgradeArgs(["--all-playlists"]).source).toEqual({ type: "all-playlists" });
   });
@@ -948,19 +949,19 @@ describe("playlist links for --playlist", () => {
   it("accepts a Qobuz playlist link wherever a playlist id is typed", () => {
     expect(parseDedupeArgs(["--playlist", link]).source).toEqual({
       type: "playlist",
-      playlistId: 72685925,
+      playlistId: qid(72685925),
     });
     expect(parseSimilarArgs(["--playlist", link]).source).toMatchObject({
       type: "playlist",
-      playlistId: 72685925,
+      playlistId: qid(72685925),
     });
     expect(parseUpgradeArgs(["--playlist", link]).source).toEqual({
       type: "playlist",
-      playlistId: 72685925,
+      playlistId: qid(72685925),
     });
     expect(parseStatsArgs(["--playlist", link]).source).toEqual({
       type: "playlist",
-      playlistId: 72685925,
+      playlistId: qid(72685925),
     });
   });
 
@@ -1150,7 +1151,7 @@ describe("parseJobsArgs", () => {
 
   it("takes a playlist's artists", () => {
     expect(parseJobsArgs(["create", "new-releases", "--playlist", "42", "--name", "x"])).toMatchObject({
-      definition: { source: { artists: { type: "playlist", playlistId: 42 } } },
+      definition: { source: { artists: { type: "playlist", playlistId: qid(42) } } },
     });
   });
 
@@ -1163,10 +1164,10 @@ describe("parseJobsArgs", () => {
     ).toMatchObject({
       kind: "combined",
       definition: {
-        target: { type: "adopted", playlistId: 99 },
+        target: { type: "adopted", playlistId: qid(99) },
         source: {
           type: "combined",
-          inputs: [{ type: "playlist", playlistId: 11 }, { type: "favourites" }, { type: "playlist", playlistId: 12 }],
+          inputs: [{ type: "playlist", playlistId: qid(11) }, { type: "favourites" }, { type: "playlist", playlistId: qid(12) }],
           mode: "common",
           order: "shuffle",
         },
@@ -1177,7 +1178,7 @@ describe("parseJobsArgs", () => {
 
   it("creates follow, smart, discovery and tidy jobs", () => {
     expect(parseJobsArgs(["create", "follow", "5", "--archive", "--name", "Kept"])).toMatchObject({
-      definition: { source: { type: "follow", playlistId: 5, keepRemoved: true } },
+      definition: { source: { type: "follow", playlistId: qid(5), keepRemoved: true } },
     });
     expect(
       parseJobsArgs([
@@ -1212,7 +1213,7 @@ describe("parseJobsArgs", () => {
       },
     });
     const tidy = parseJobsArgs(["create", "tidy", "77", "--dedupe"]);
-    expect(tidy).toMatchObject({ definition: { target: { type: "adopted", playlistId: 77 } } });
+    expect(tidy).toMatchObject({ definition: { target: { type: "adopted", playlistId: qid(77) } } });
     expect((tidy as { definition: object }).definition).not.toHaveProperty("name");
   });
 
@@ -1282,7 +1283,7 @@ describe("parseRemoveArtistsArgs", () => {
         "--apply",
       ]),
     ).toEqual({
-      playlists: { type: "some", ids: [5, 6] },
+      playlists: { type: "some", ids: [qid(5), qid(6)] },
       artists: ["Portishead", "/^the /"],
       includeGuests: true,
       apply: true,

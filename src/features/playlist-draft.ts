@@ -40,19 +40,19 @@ export type Destination =
 
 export interface Draft {
   /** The entries as opened, in order. */
-  readonly base: readonly number[];
+  readonly base: readonly EntryId[];
   /** The entries kept, in the order wanted. */
-  readonly order: readonly number[];
+  readonly order: readonly EntryId[];
   /** The entries taken out, with where they are moved to (if anywhere). */
-  readonly removed: ReadonlyMap<number, Destination | undefined>;
+  readonly removed: ReadonlyMap<EntryId, Destination | undefined>;
 }
 
-export function startDraft(base: readonly number[]): Draft {
+export function startDraft(base: readonly EntryId[]): Draft {
   return { base: [...base], order: [...base], removed: new Map() };
 }
 
 /** Take entries out: removed, or moved to `destination` on save. */
-export function takeOut(draft: Draft, ids: Iterable<number>, destination?: Destination): Draft {
+export function takeOut(draft: Draft, ids: Iterable<EntryId>, destination?: Destination): Draft {
   const here = new Set(draft.order);
   const going = [...new Set(ids)].filter((id) => here.has(id));
   if (going.length === 0) {
@@ -64,14 +64,14 @@ export function takeOut(draft: Draft, ids: Iterable<number>, destination?: Desti
 }
 
 /** Put taken-out entries back, each after the entry it followed when opened. */
-export function putBack(draft: Draft, ids: Iterable<number>): Draft {
+export function putBack(draft: Draft, ids: Iterable<EntryId>): Draft {
   const wanted = new Set([...ids].filter((id) => draft.removed.has(id)));
   if (wanted.size === 0) {
     return draft;
   }
   const order = [...draft.order];
   const here = new Set(order);
-  let previous: number | undefined;
+  let previous: EntryId | undefined;
   for (const id of draft.base) {
     if (wanted.has(id)) {
       order.splice(previous === undefined ? 0 : order.indexOf(previous) + 1, 0, id);
@@ -90,14 +90,14 @@ export function putBack(draft: Draft, ids: Iterable<number>): Draft {
  * `index` (the length means the end). When that entry is itself moved, they go
  * where it was.
  */
-export function moveTo(draft: Draft, ids: Iterable<number>, index: number): Draft {
+export function moveTo(draft: Draft, ids: Iterable<EntryId>, index: number): Draft {
   const moving = new Set(ids);
   const ordered = draft.order.filter((id) => moving.has(id));
   return withOrder(draft, applyMove(draft.order, ordered, index + 1));
 }
 
 /** Move each entry one place up (-1) or down (1), those at the edge aside. */
-export function moveBy(draft: Draft, ids: Iterable<number>, step: 1 | -1): Draft {
+export function moveBy(draft: Draft, ids: Iterable<EntryId>, step: 1 | -1): Draft {
   const moving = new Set(ids);
   const order = step === -1 ? [...draft.order] : [...draft.order].reverse();
   for (let i = 1; i < order.length; i += 1) {
@@ -112,7 +112,7 @@ export function moveBy(draft: Draft, ids: Iterable<number>, step: 1 | -1): Draft
  * Put entries in the given order: the whole playlist's, or -- when only some
  * are given -- among the places those occupy.
  */
-export function reorder(draft: Draft, ids: readonly number[]): Draft {
+export function reorder(draft: Draft, ids: readonly EntryId[]): Draft {
   const here = new Set(draft.order);
   const given = ids.filter((id) => here.has(id));
   const set = new Set(given);
@@ -123,7 +123,7 @@ export function reorder(draft: Draft, ids: readonly number[]): Draft {
   );
 }
 
-function withOrder(draft: Draft, order: readonly number[]): Draft {
+function withOrder(draft: Draft, order: readonly EntryId[]): Draft {
   return order.every((id, i) => id === draft.order[i]) ? draft : { ...draft, order };
 }
 
@@ -168,15 +168,15 @@ function destinationKey(destination: Destination): string {
 
 /** The request that saves a draft (see savePlaylist in playlist-manager.ts). */
 export interface DraftChanges {
-  base: number[];
-  order: number[];
-  remove: number[];
-  moves: Array<{ destination: Destination; entries: number[] }>;
+  base: EntryId[];
+  order: EntryId[];
+  remove: EntryId[];
+  moves: Array<{ destination: Destination; entries: EntryId[] }>;
 }
 
 export function draftChanges(draft: Draft): DraftChanges {
-  const remove: number[] = [];
-  const moves = new Map<string, { destination: Destination; entries: number[] }>();
+  const remove: EntryId[] = [];
+  const moves = new Map<string, { destination: Destination; entries: EntryId[] }>();
   // In opened order, so moved songs arrive in the order they were in.
   for (const id of draft.base) {
     if (!draft.removed.has(id)) {
@@ -216,7 +216,7 @@ export interface Drift {
   reordered: boolean;
 }
 
-export function driftOf(base: readonly number[], fresh: readonly number[]): Drift {
+export function driftOf(base: readonly EntryId[], fresh: readonly EntryId[]): Drift {
   const baseSet = new Set(base);
   const freshSet = new Set(fresh);
   const common = base.filter((id) => freshSet.has(id));
@@ -233,7 +233,7 @@ export function driftOf(base: readonly number[], fresh: readonly number[]): Drif
  * out, new ones go after the entry they follow there, and the draft's removals
  * and order otherwise stand (a draft that reorders nothing takes the new order).
  */
-export function rebase(draft: Draft, fresh: readonly number[]): Draft {
+export function rebase(draft: Draft, fresh: readonly EntryId[]): Draft {
   const present = new Set(fresh);
   const removed = new Map([...draft.removed].filter(([id]) => present.has(id)));
   const kept = fresh.filter((id) => !removed.has(id));
@@ -245,7 +245,7 @@ export function rebase(draft: Draft, fresh: readonly number[]): Draft {
 }
 
 /** The ids from one row to another, inclusive, as shown (for shift-click). */
-export function rangeBetween(shown: readonly number[], from: number, to: number): number[] {
+export function rangeBetween(shown: readonly EntryId[], from: EntryId, to: EntryId): EntryId[] {
   const a = shown.indexOf(from);
   const b = shown.indexOf(to);
   if (a === -1 || b === -1) {
@@ -323,7 +323,7 @@ const SORT_VALUES: Record<SortKey, (entry: Entry) => Comparable[]> = {
 };
 
 /** Entry ids sorted; entries without the value go last either way, ties keep their order. */
-export function sortIds(entries: readonly Entry[], key: SortKey, descending = false): number[] {
+export function sortIds(entries: readonly Entry[], key: SortKey, descending = false): EntryId[] {
   const values = new Map(entries.map((entry) => [entry, SORT_VALUES[key](entry)]));
   return [...entries]
     .sort((a, b) => compareValues(values.get(a)!, values.get(b)!, descending))
@@ -350,7 +350,7 @@ function compareValues(a: readonly Comparable[], b: readonly Comparable[], desce
   return 0;
 }
 
-export function shuffleIds(entries: readonly Entry[], random: () => number = Math.random): number[] {
+export function shuffleIds(entries: readonly Entry[], random: () => number = Math.random): EntryId[] {
   return shuffle(
     entries.map((entry) => entry.playlistTrackId),
     random,
@@ -362,11 +362,11 @@ export function shuffleIds(entries: readonly Entry[], random: () => number = Mat
  * changing the order as little as it can: the next entry is the first left by
  * another artist, unless one artist has so many left that they must go now.
  */
-export function spreadArtists(entries: readonly Entry[]): number[] {
+export function spreadArtists(entries: readonly Entry[]): EntryId[] {
   const left = entries.map((entry) => ({ id: entry.playlistTrackId, artist: artistKey(entry) }));
   const counts = new Map<string, number>();
   left.forEach(({ artist }) => counts.set(artist, (counts.get(artist) ?? 0) + 1));
-  const out: number[] = [];
+  const out: EntryId[] = [];
   let last: string | undefined;
   while (left.length > 0) {
     let pressing: string | undefined;
@@ -399,7 +399,7 @@ export function duplicateIds(
   entries: readonly Entry[],
   keep: KeepStrategy | KeepChain,
   options: SameSongOptions = {},
-): number[] {
+): EntryId[] {
   const groups = resolveDuplicateGroups(findDuplicateGroups(dedupTracks(entries), options), keep);
   return groups.flatMap(removedTracks).map((track) => track.playlistTrackId!);
 }
@@ -408,7 +408,7 @@ export function duplicateIds(
  * Entries that are another version (live, acoustic, remix) of a song here: in
  * each such song, all but the copies of its ordinary version, or of its first.
  */
-export function otherVersionIds(entries: readonly Entry[]): number[] {
+export function otherVersionIds(entries: readonly Entry[]): EntryId[] {
   return findOtherVersions(dedupTracks(entries)).flatMap((group) => {
     // The ordinary version: without a label, or with one that says no more.
     const main = group.find((track) => trackSignature(track) === plainSignature(track)) ?? group[0]!;
@@ -429,19 +429,19 @@ function dedupTracks(entries: readonly Entry[]): DedupTrack[] {
 }
 
 /** Entries Qobuz can no longer play. */
-export function unplayableIds(entries: readonly Entry[]): number[] {
+export function unplayableIds(entries: readonly Entry[]): EntryId[] {
   return entries.filter((entry) => entry.streamable === false).map((entry) => entry.playlistTrackId);
 }
 
 /** Entries known to be no better than CD quality. */
-export function notHiResIds(entries: readonly Entry[]): number[] {
+export function notHiResIds(entries: readonly Entry[]): EntryId[] {
   return entries
     .filter((e) => e.bitDepth !== undefined && e.samplingRate !== undefined && e.bitDepth <= 16 && e.samplingRate <= 48)
     .map((entry) => entry.playlistTrackId);
 }
 
 /** Entries labelled live: in the version, or in brackets or after a dash in the title. */
-export function liveIds(entries: readonly Entry[]): number[] {
+export function liveIds(entries: readonly Entry[]): EntryId[] {
   return entries
     .filter(
       (entry) =>
@@ -452,7 +452,7 @@ export function liveIds(entries: readonly Entry[]): number[] {
 }
 
 /** Entries added before (or on and after) a date, YYYY-MM-DD, in local time. */
-export function addedIds(entries: readonly Entry[], when: "before" | "since", date: string): number[] {
+export function addedIds(entries: readonly Entry[], when: "before" | "since", date: string): EntryId[] {
   const limit = new Date(`${date}T00:00:00`).getTime();
   return entries
     .filter((entry) => {
@@ -463,7 +463,7 @@ export function addedIds(entries: readonly Entry[], when: "before" | "since", da
 }
 
 /** Entries that are the same song as one of `others` (favourites, another playlist). */
-export function alreadyInIds(entries: readonly Entry[], others: readonly Track[]): number[] {
+export function alreadyInIds(entries: readonly Entry[], others: readonly Track[]): EntryId[] {
   const known = new Set(others.flatMap(songKeys));
   return entries
     .filter((entry) => songKeys(entry).some((key) => known.has(key)))
@@ -471,7 +471,7 @@ export function alreadyInIds(entries: readonly Entry[], others: readonly Track[]
 }
 
 /** Entries whose title, version, artist, album or guests hold every word of `query`. */
-export function searchIds(entries: readonly Entry[], query: string): number[] {
+export function searchIds(entries: readonly Entry[], query: string): EntryId[] {
   const words = foldText(query).split(" ").filter((word) => word.length > 0);
   return entries
     .filter((entry) => {

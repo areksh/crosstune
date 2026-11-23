@@ -34,7 +34,7 @@
  * {@link addTracksToExistingPlaylist} with {@link similarTrackIds}.
  */
 
-import type { ArtistId, PlaylistId } from "../services/ids.js";
+import { shortId, type ArtistId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import {
@@ -188,7 +188,7 @@ export interface ResolveSimilarOptions {
   /** Top tracks to take per similar artist. */
   tracksPerSimilar: number;
   /** Artists never to suggest (e.g. those already in a playlist). Seeds always are. */
-  skipArtistIds?: ReadonlySet<number>;
+  skipArtistIds?: ReadonlySet<ArtistId>;
   filter?: TrackFilter;
   /** Cap on similar artists in total (default `SIMILAR_SETTINGS.maxArtists`). */
   maxArtists?: number;
@@ -287,14 +287,14 @@ export async function walkSimilarArtists(
   const replaceRepeats = options.replaceRepeats ?? false;
 
   // Already in the result before the walk: never added, never expanded.
-  const included = new Set<number>([
+  const included = new Set<ArtistId>([
     ...options.seeds.map((seed) => seed.id),
     ...(options.skipArtistIds ?? []),
   ]);
-  const foundById = new Map<number, FoundArtist>();
+  const foundById = new Map<ArtistId, FoundArtist>();
   const found: FoundArtist[] = [];
   const appearances: Appearance[] = [];
-  const excludedById = new Map<number, Artist>();
+  const excludedById = new Map<ArtistId, Artist>();
   let truncated = false;
   let frontier = options.seeds.map((seed) => ({ artist: seed, seed }));
 
@@ -439,8 +439,8 @@ function attachTracks(
 export function seedsFromPlaylist(
   tracks: readonly Track[],
   maxSeeds: number,
-): { seeds: Artist[]; presentIds: Set<number> } {
-  const counts = new Map<number, { artist: Artist; count: number }>();
+): { seeds: Artist[]; presentIds: Set<ArtistId> } {
+  const counts = new Map<ArtistId, { artist: Artist; count: number }>();
   for (const track of tracks) {
     if (track.artistId === undefined) {
       continue;
@@ -448,7 +448,7 @@ export function seedsFromPlaylist(
     const entry = counts.get(track.artistId);
     if (entry === undefined) {
       counts.set(track.artistId, {
-        artist: { id: track.artistId, name: track.artist ?? `Unknown artist (${track.artistId})` },
+        artist: { id: track.artistId, name: track.artist ?? `Unknown artist (${shortId(track.artistId)})` },
         count: 1,
       });
     } else {
@@ -473,7 +473,7 @@ export function similarTrackIds(
   seeds: readonly { artist: Artist; tracks: readonly Track[] }[],
   similar: readonly { artist: Artist; tracks: readonly Track[] }[],
   appearances: readonly { artist: Artist; seed: Artist }[],
-): number[] {
+): TrackId[] {
   return similarTrackGroups(seeds, similar, appearances)
     .flat()
     .map((track) => track.id);
@@ -492,7 +492,7 @@ export function similarTrackGroups(
 ): Track[][] {
   const tracksOf = new Map(similar.map((entry) => [entry.artist.id, entry.tracks]));
   const groups: (readonly Track[])[] = [];
-  const listed = new Set<number>();
+  const listed = new Set<ArtistId>();
   for (const seed of seeds) {
     groups.push(seed.tracks);
     for (const appearance of appearances) {
@@ -508,7 +508,7 @@ export function similarTrackGroups(
 /** The ids of the user's favourite artists, to skip when walking. */
 export async function favouriteArtistIds(client: {
   getFavoriteArtists(): Promise<Artist[]>;
-}): Promise<Set<number>> {
+}): Promise<Set<ArtistId>> {
   return new Set((await client.getFavoriteArtists()).map((artist) => artist.id));
 }
 
@@ -526,7 +526,7 @@ export interface WalkOptions {
    * More artists never to suggest (e.g. the user's favourite artists, see
    * {@link favouriteArtistIds}); they count like a playlist's own artists.
    */
-  skipArtistIds?: ReadonlySet<number>;
+  skipArtistIds?: ReadonlySet<ArtistId>;
   /** Favourites and repeats to exclude from the tracks, seeds first. */
   picker?: SongPicker;
 }

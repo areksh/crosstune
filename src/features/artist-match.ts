@@ -12,6 +12,7 @@
  * Pure and free of Node dependencies, so the web UI uses it too.
  */
 
+import type { ArtistId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
 import { parseQobuzLink } from "./qobuz-links.js";
 import { compileArtistTerm, normaliseArtistName } from "./track-filter.js";
@@ -23,7 +24,7 @@ export interface ArtistTerm {
   /** Who it names, when that is known: the typed name, or a link's artist. */
   name?: string;
   /** For a link: the artist's id, which the main artist is matched by. */
-  id?: number;
+  id?: ArtistId;
   /** Whether it matches an artist's name. */
   matches(name: string): boolean;
 }
@@ -163,7 +164,7 @@ function guestsInTitle(track: MatchableTrack): string[] {
 /** An artist's songs among those given. */
 export interface ArtistCount {
   name: string;
-  id?: number;
+  id?: ArtistId;
   count: number;
 }
 

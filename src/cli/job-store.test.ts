@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { qid } from "../services/ids.test-support.js";
 import { emptyJobState, validateJob, type RunResultSummary } from "../jobs/model.js";
 import { configDir } from "./config-dir.js";
 import {
@@ -48,20 +49,20 @@ describe("configDir", () => {
 describe("fileJobStore", () => {
   it("round-trips jobs.json, owner-only", () => {
     const store = fileJobStore(dir);
-    store.save({ version: 2, jobs: [job] });
-    expect(store.load()).toEqual({ file: { version: 2, jobs: [job] }, invalid: [] });
+    store.save({ version: 3, jobs: [job] });
+    expect(store.load()).toEqual({ file: { version: 3, jobs: [job] }, invalid: [] });
     expect(statSync(join(dir, "jobs.json")).mode & 0o777).toBe(0o600);
   });
 
   it("loads an empty list when there is no file", () => {
-    expect(fileJobStore(dir).load()).toEqual({ file: { version: 2, jobs: [] }, invalid: [] });
+    expect(fileJobStore(dir).load()).toEqual({ file: { version: 3, jobs: [] }, invalid: [] });
   });
 
   it("throws on an unparsable file and refuses to overwrite it", () => {
     writeFileSync(join(dir, "jobs.json"), "{ not json");
     const store = fileJobStore(dir);
     expect(() => store.load()).toThrow(JobsFileError);
-    expect(() => store.save({ version: 2, jobs: [job] })).toThrow(JobsFileError);
+    expect(() => store.save({ version: 3, jobs: [job] })).toThrow(JobsFileError);
     expect(readFileSync(join(dir, "jobs.json"), "utf8")).toBe("{ not json");
   });
 
@@ -69,7 +70,7 @@ describe("fileJobStore", () => {
     const broken = { ...job, id: "bbbbbbbb", schedule: { every: "never" } };
     writeFileSync(join(dir, "jobs.json"), JSON.stringify({ version: 1, jobs: [job, broken] }));
     const store = fileJobStore(dir);
-    store.save({ version: 2, jobs: [{ ...job, name: "Renamed" }] });
+    store.save({ version: 3, jobs: [{ ...job, name: "Renamed" }] });
     const raw = JSON.parse(readFileSync(join(dir, "jobs.json"), "utf8")) as { jobs: unknown[] };
     expect(raw.jobs).toEqual([{ ...job, name: "Renamed" }, broken]);
     expect(store.load().invalid).toHaveLength(1);
@@ -90,7 +91,7 @@ describe("fileJobStateStore", () => {
   it("round-trips a state and loads the empty state when missing", () => {
     const store = fileJobStateStore(dir);
     expect(store.load("a1b2c3d4")).toEqual(emptyJobState());
-    const state = { ...emptyJobState(), playlistId: 9, dismissed: [3] };
+    const state = { ...emptyJobState(), playlistId: qid(9), dismissed: [qid(3)] };
     store.save("a1b2c3d4", state);
     expect(store.load("a1b2c3d4")).toEqual(state);
     expect(statSync(join(dir, "jobs-state", "a1b2c3d4.json")).mode & 0o777).toBe(0o600);
@@ -106,7 +107,7 @@ describe("fileJobStateStore", () => {
   });
 });
 
-const result: RunResultSummary = { at: "", status: "ok", added: 1, removed: 0, dismissed: 0, notes: [] };
+const result: RunResultSummary = { at: "", status: "ok", added: 1, removed: 0, dismissed: qid(0), notes: [] };
 const record = (jobId: string, at: string): RunRecord => ({ at, jobId, jobName: jobId, result, durationMs: 5 });
 
 describe("fileRunLog", () => {

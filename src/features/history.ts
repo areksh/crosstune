@@ -15,7 +15,16 @@
  * recording itself is in ./journal.ts and the file in src/cli/history-store.ts.
  */
 
-import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import {
+  readAlbumId,
+  readId,
+  shortId,
+  type AlbumId,
+  type AnyId,
+  type EntryId,
+  type PlaylistId,
+  type TrackId,
+} from "../services/ids.js";
 
 /** The favourite collections an operation can touch. */
 export type FavouriteType = "tracks" | "albums" | "artists";
@@ -73,7 +82,7 @@ export type Operation =
        * Track ids sent but not confirmed (the playlist could not be read back
        * afterwards), so their entries are unknown.
        */
-      unconfirmed?: number[];
+      unconfirmed?: TrackId[];
     }
   | {
       kind: "remove-tracks";
@@ -94,8 +103,8 @@ export type Operation =
        */
       from?: number[];
     }
-  | { kind: "add-favourites"; type: FavouriteType; ids: Array<number | string> }
-  | { kind: "remove-favourites"; type: FavouriteType; ids: Array<number | string> };
+  | { kind: "add-favourites"; type: FavouriteType; ids: AnyId[] }
+  | { kind: "remove-favourites"; type: FavouriteType; ids: AnyId[] };
 
 /** Where an action came from. */
 export type HistorySource = "cli" | "web";
@@ -185,6 +194,23 @@ function isIntArray(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isInt);
 }
 
+/** A list of ids, tagged or (in older lines) bare; undefined if any is not one. */
+function readIds<T extends AnyId>(value: unknown): T[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const ids = value.map((id) => readId<T>(id));
+  return ids.every((id) => id !== undefined) ? ids : undefined;
+}
+
+function readAlbumIds(value: unknown): AlbumId[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const ids = value.map(readAlbumId);
+  return ids.every((id) => id !== undefined) ? ids : undefined;
+}
+
 function toRecord(value: unknown): HistoryRecord | undefined {
   if (!isRecord(value) || value["v"] !== FORMAT_VERSION) {
     return undefined;
@@ -231,19 +257,15 @@ function toEntries(value: unknown): PlaylistEntryRecord[] | undefined {
   }
   const out: PlaylistEntryRecord[] = [];
   for (const item of value) {
-    if (
-      !isRecord(item) ||
-      !isInt(item["trackId"]) ||
-      !isInt(item["playlistTrackId"]) ||
-      !isInt(item["position"])
-    ) {
+    if (!isRecord(item) || !isInt(item["position"])) {
       return undefined;
     }
-    out.push({
-      trackId: item["trackId"],
-      playlistTrackId: item["playlistTrackId"],
-      position: item["position"],
-    });
+    const trackId = readId<TrackId>(item["trackId"]);
+    const playlistTrackId = readId<EntryId>(item["playlistTrackId"]);
+    if (trackId === undefined || playlistTrackId === undefined) {
+      return undefined;
+    }
+    out.push({ trackId, playlistTrackId, position: item["position"] });
   }
   return out;
 }
@@ -269,18 +291,15 @@ function toOperation(value: unknown): Operation | undefined {
   }
   const kind = value["kind"];
   if (kind === "add-favourites" || kind === "remove-favourites") {
-    const { type, ids } = value;
-    if (
-      !isFavouriteType(type) ||
-      !Array.isArray(ids) ||
-      !ids.every((id) => (type === "albums" ? isString(id) : isInt(id)))
-    ) {
+    const { type } = value;
+    if (!isFavouriteType(type)) {
       return undefined;
     }
-    return { kind, type, ids: ids as Array<number | string> };
+    const ids = type === "albums" ? readAlbumIds(value["ids"]) : readIds<AnyId>(value["ids"]);
+    return ids === undefined ? undefined : { kind, type, ids };
   }
-  const playlistId = value["playlistId"];
-  if (!isInt(playlistId)) {
+  const playlistId = readId<PlaylistId>(value["playlistId"]);
+  if (playlistId === undefined) {
     return undefined;
   }
   const playlistName = isString(value["playlistName"]) ? { playlistName: value["playlistName"] } : {};
@@ -298,14 +317,15 @@ function toOperation(value: unknown): Operation | undefined {
       };
     }
     case "delete-playlist": {
-      if (!isString(value["name"]) || !isIntArray(value["trackIds"])) {
+      const trackIds = readIds<TrackId>(value["trackIds"]);
+      if (!isString(value["name"]) || trackIds === undefined) {
         return undefined;
       }
       return {
         kind: "delete-playlist",
         playlistId,
         name: value["name"],
-        trackIds: value["trackIds"],
+        trackIds,
         ...(typeof value["isPublic"] === "boolean" && { isPublic: value["isPublic"] }),
         ...(isString(value["description"]) && { description: value["description"] }),
       };
@@ -326,8 +346,8 @@ function toOperation(value: unknown): Operation | undefined {
       if (value["kind"] === "remove-tracks") {
         return { kind: "remove-tracks", playlistId, ...playlistName, entries };
       }
-      const unconfirmed = value["unconfirmed"];
-      if (unconfirmed !== undefined && !isIntArray(unconfirmed)) {
+      const unconfirmed = value["unconfirmed"] === undefined ? undefined : readIds<TrackId>(value["unconfirmed"]);
+      if (value["unconfirmed"] !== undefined && unconfirmed === undefined) {
         return undefined;
       }
       return {
@@ -339,17 +359,18 @@ function toOperation(value: unknown): Operation | undefined {
       };
     }
     case "move-tracks": {
-      if (!isIntArray(value["playlistTrackIds"]) || !isInt(value["insertBefore"])) {
+      const playlistTrackIds = readIds<EntryId>(value["playlistTrackIds"]);
+      if (playlistTrackIds === undefined || !isInt(value["insertBefore"])) {
         return undefined;
       }
       return {
         kind: "move-tracks",
         playlistId,
         ...playlistName,
-        playlistTrackIds: value["playlistTrackIds"],
+        playlistTrackIds,
         insertBefore: value["insertBefore"],
         ...(isIntArray(value["from"]) &&
-          value["from"].length === value["playlistTrackIds"].length && { from: value["from"] }),
+          value["from"].length === playlistTrackIds.length && { from: value["from"] }),
       };
     }
     default:
@@ -466,8 +487,8 @@ function favouriteCounts(ops: readonly Operation[], kind: "add-favourites" | "re
 }
 
 /** A playlist's name as the ops know it, else "playlist <id>". */
-function playlistNamer(ops: readonly Operation[]): (id: number) => string {
-  const names = new Map<number, string>();
+function playlistNamer(ops: readonly Operation[]): (id: PlaylistId) => string {
+  const names = new Map<PlaylistId, string>();
   for (const op of ops) {
     if (op.kind === "create-playlist" || op.kind === "delete-playlist") {
       names.set(op.playlistId, op.name);
@@ -475,12 +496,12 @@ function playlistNamer(ops: readonly Operation[]): (id: number) => string {
       names.set(op.playlistId, op.playlistName);
     }
   }
-  return (id) => names.get(id) ?? `playlist ${id}`;
+  return (id) => names.get(id) ?? `playlist ${shortId(id)}`;
 }
 
 /** Sum of entries per playlist for one op kind, in first-seen order. */
-function countByPlaylist(ops: readonly Operation[], kind: "add-tracks" | "remove-tracks"): Map<number, number> {
-  const counts = new Map<number, number>();
+function countByPlaylist(ops: readonly Operation[], kind: "add-tracks" | "remove-tracks"): Map<PlaylistId, number> {
+  const counts = new Map<PlaylistId, number>();
   for (const op of ops) {
     if (op.kind === kind) {
       const n = op.entries.length + (op.kind === "add-tracks" ? (op.unconfirmed?.length ?? 0) : 0);
@@ -491,7 +512,7 @@ function countByPlaylist(ops: readonly Operation[], kind: "add-tracks" | "remove
 }
 
 /** Where a set of changes happened: "Favourites", a playlist's name, "2 playlists". */
-function placeOf(playlistIds: readonly PlaylistId[], favourites: boolean, name: (id: number) => string): string {
+function placeOf(playlistIds: readonly PlaylistId[], favourites: boolean, name: (id: PlaylistId) => string): string {
   const playlists =
     playlistIds.length === 1 ? name(playlistIds[0]!) : plural(playlistIds.length, "playlist");
   if (!favourites) {

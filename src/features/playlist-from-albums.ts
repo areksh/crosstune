@@ -401,7 +401,7 @@ export interface FetchAlbumTracksResult {
    * 404 for the id, or a transient error). Reported rather than fatal so one bad
    * album does not sink the whole operation.
    */
-  failedAlbumIds: string[];
+  failedAlbumIds: AlbumId[];
 }
 
 /**
@@ -425,8 +425,8 @@ export async function fetchAlbumTracks(
   // pool keeps a large list fast without holding a single web request open long
   // enough for the browser to abort the fetch; ordering the unique ids up front
   // and reassembling in that order keeps the result deterministic.
-  const uniqueAlbumIds: string[] = [];
-  const seen = new Set<string>();
+  const uniqueAlbumIds: AlbumId[] = [];
+  const seen = new Set<AlbumId>();
   for (const albumId of albumIds) {
     if (!seen.has(albumId)) {
       seen.add(albumId);
@@ -435,7 +435,7 @@ export async function fetchAlbumTracks(
   }
 
   type Outcome = AlbumTracks | { albumId: AlbumId; failed: true };
-  const outcomes = await mapWithConcurrency<string, Outcome>(
+  const outcomes = await mapWithConcurrency<AlbumId, Outcome>(
     uniqueAlbumIds,
     DEFAULT_CONCURRENCY,
     async (albumId) => {
@@ -449,7 +449,7 @@ export async function fetchAlbumTracks(
   );
 
   const fetched: AlbumTracks[] = [];
-  const failedAlbumIds: string[] = [];
+  const failedAlbumIds: AlbumId[] = [];
   for (const outcome of outcomes) {
     if ("failed" in outcome) {
       failedAlbumIds.push(outcome.albumId);

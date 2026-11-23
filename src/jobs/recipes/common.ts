@@ -6,7 +6,7 @@
  * reconciler that gets a different answer each pass churns the playlist.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import { compareIds, shortId, type ArtistId, type PlaylistId, type TrackId } from "../../services/ids.js";
 import type { Artist } from "../../services/model.js";
 import { fitToLength } from "../../features/playlist-shape.js";
 import {
@@ -61,7 +61,7 @@ export async function seedArtists(client: SeedArtistsClient, artists: FeedArtist
       : artists.type === "favourites"
         ? await client.getFavoriteArtists()
         : seedsFromPlaylist(await client.getPlaylistTracks(artists.playlistId), Infinity).seeds;
-  const seen = new Set<number>();
+  const seen = new Set<ArtistId>();
   return list
     .filter((artist) => !seen.has(artist.id) && seen.add(artist.id))
     .map(({ id, name }) => ({ id, name }));
@@ -133,9 +133,9 @@ export function hashText(text: string): number {
  * alone (a seeded Fisher-Yates would reshuffle everything, churning a
  * mirrored playlist).
  */
-export function stableShuffle<T>(seed: string, items: readonly T[], idOf: (item: T) => number): T[] {
+export function stableShuffle<T>(seed: string, items: readonly T[], idOf: (item: T) => TrackId): T[] {
   return items
-    .map((item) => ({ item, rank: hashText(`${seed}:${idOf(item)}`) }))
-    .sort((a, b) => a.rank - b.rank || idOf(a.item) - idOf(b.item))
+    .map((item) => ({ item, rank: hashText(`${seed}:${shortId(idOf(item))}`) }))
+    .sort((a, b) => a.rank - b.rank || compareIds(idOf(a.item), idOf(b.item)))
     .map(({ item }) => item);
 }

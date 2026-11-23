@@ -34,7 +34,7 @@ interface Item {
   location: Location;
   candidates: Candidate[];
   action: "replace" | "remove" | "leave";
-  replacementId?: number;
+  replacementId?: TrackId;
 }
 
 interface Plan {
@@ -100,7 +100,7 @@ async function loadPlaylists(): Promise<void> {
 function currentSource(): Source {
   const value = el<HTMLSelectElement>("upgrade-source").value;
   if (value.startsWith("playlist:")) {
-    return { type: "playlist", playlistId: Number(value.slice("playlist:".length)) };
+    return { type: "playlist", playlistId: value.slice("playlist:".length) as PlaylistId };
   }
   return value === "all-playlists" ? { type: "all-playlists" } : { type: "favourites" };
 }
@@ -256,7 +256,7 @@ function upgradeRow(item: Item): HTMLElement {
     }
     select.value = String(item.replacementId ?? item.candidates[0]!.track.id);
     select.addEventListener("change", () => {
-      item.replacementId = Number(select.value);
+      item.replacementId = select.value as TrackId;
       showChoice();
     });
     row.appendChild(select);
@@ -323,7 +323,7 @@ function brokenRow(item: Item): HTMLElement {
   select.addEventListener("change", () => {
     if (select.value.startsWith("replace:")) {
       item.action = "replace";
-      item.replacementId = Number(select.value.slice("replace:".length));
+      item.replacementId = select.value.slice("replace:".length) as TrackId;
     } else {
       item.action = select.value === "remove" ? "remove" : "leave";
     }

@@ -100,3 +100,29 @@ describe("logSinksFor", () => {
     expect(lines).toEqual(["stderr", "stderr"]);
   });
 });
+
+describe("ids in --json output", () => {
+  it("writes Qobuz's own ids as before: numbers, but text for albums", () => {
+    const document = {
+      tracks: [{ id: "qobuz:12", albumId: "qobuz:123456", playlistTrackId: "qobuz:3456789012", artistId: "qobuz:7" }],
+      albums: [{ id: "qobuz:0060254735156" }, { id: "qobuz:pvsb64n704d0b" }, { id: "qobuz:886443927087" }],
+      byPlaylist: new Map([["qobuz:5", ["qobuz:1"]]]),
+      albumIds: ["qobuz:123"],
+    };
+    expect(JSON.parse(toJson(document))).toEqual({
+      tracks: [{ id: 12, albumId: "123456", playlistTrackId: 3456789012, artistId: 7 }],
+      albums: [{ id: "0060254735156" }, { id: "pvsb64n704d0b" }, { id: "886443927087" }],
+      byPlaylist: { "5": [1] },
+      albumIds: ["123"],
+    });
+  });
+
+  it("leaves other text and other services' ids alone", () => {
+    const document = { title: "qobuz: the song", a: "tidal:12", b: "qobuz:", c: "see qobuz:12" };
+    expect(JSON.parse(toJson(document))).toEqual(document);
+  });
+
+  it("does the same for a document with keys left out", () => {
+    expect(omitKeys({ id: "qobuz:12", big: [1] }, ["big"])).toEqual({ id: 12 });
+  });
+});

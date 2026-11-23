@@ -14,10 +14,10 @@
  * filtering live in the tested server modules.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
+import type { ArtistId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
-import { playlistIdOf } from "../../features/qobuz-links.js";
+import { parsePlaylistId } from "../../features/qobuz-links.js";
 import { PlanControls } from "../plan.js";
 import { keepUpdated } from "./managed.js";
 import {
@@ -145,8 +145,8 @@ function onKeepUpdated(): void {
   // A pasted playlist link wins over the picker, as when finding similar artists.
   const link = el<HTMLInputElement>("similar-source-link").value.trim();
   const picked = el<HTMLSelectElement>("similar-source-playlist").value;
-  const playlistId = link !== "" ? playlistIdOf(link) : Number(picked);
-  if (!Number.isInteger(playlistId) || playlistId <= 0) {
+  const playlistId = parsePlaylistId(link !== "" ? link : picked);
+  if (playlistId === undefined) {
     showError(el("resolve-similar-error"), "Choose a playlist, or paste a playlist link.");
     return;
   }
@@ -337,7 +337,7 @@ async function fetchTracksInBatches(
   body: Record<string, unknown>,
   button: HTMLButtonElement,
 ): Promise<PlanResponse> {
-  const byId = new Map<number, TracksResponse["fetched"][number]>();
+  const byId = new Map<ArtistId, TracksResponse["fetched"][number]>();
   const emptyArtists = [...walk.emptyArtists];
   const partialArtists = [...walk.partialArtists];
   const total = walk.found.length;
@@ -419,7 +419,7 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
   const groups = el("similar-groups");
   groups.textContent = "";
   const byArtist = new Map(plan.similar.map((entry) => [entry.artist.id, entry]));
-  const listed = new Set<number>();
+  const listed = new Set<ArtistId>();
   for (const seed of plan.seeds) {
     groups.appendChild(
       renderSeed(
@@ -434,7 +434,7 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
 
   // Expanding a playlist most naturally adds back into it (when it is yours).
   const sourceId = sourcePlaylistId();
-  if (fromPlaylist && sourceId !== undefined && !Number.isNaN(sourceId)) {
+  if (fromPlaylist && sourceId !== undefined) {
     void preselectExisting(sourceId);
   }
 
@@ -452,8 +452,8 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
 function renderSeed(
   seed: SeedGroup,
   appearances: Appearance[],
-  byArtist: ReadonlyMap<number, SimilarGroup>,
-  listed: Set<number>,
+  byArtist: ReadonlyMap<ArtistId, SimilarGroup>,
+  listed: Set<ArtistId>,
   fromPlaylist: boolean,
 ): HTMLElement {
   const group = document.createElement("div");
@@ -566,13 +566,13 @@ async function preselectExisting(playlistId: PlaylistId): Promise<void> {
  * your playlists. NaN for a link that is not a playlist link; undefined when
  * neither is given.
  */
-function sourcePlaylistId(): number | undefined {
+function sourcePlaylistId(): PlaylistId | undefined {
   const link = el<HTMLInputElement>("similar-source-link").value.trim();
   if (link.length > 0) {
-    return playlistIdOf(link);
+    return parsePlaylistId(link);
   }
   const chosen = el<HTMLSelectElement>("similar-source-playlist").value;
-  return chosen === "" ? undefined : Number(chosen);
+  return chosen === "" ? undefined : (chosen as PlaylistId);
 }
 
 /** Fill both playlist pickers (source and destination) once. */
@@ -633,7 +633,7 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Working...";
   try {
-    const result = await api<{ playlist?: Playlist; added: number[]; skipped: number[] }>(
+    const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/commit",
       { tool: "similar-artists", target, trackIds },
@@ -670,5 +670,5 @@ function buildTarget(): CommitTarget | undefined {
     };
   }
   const value = el<HTMLSelectElement>("similar-playlist-select").value;
-  return value === "" ? undefined : { type: "existing", playlistId: Number(value) };
+  return value === "" ? undefined : { type: "existing", playlistId: value as PlaylistId };
 }

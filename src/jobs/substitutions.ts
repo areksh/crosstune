@@ -17,9 +17,9 @@ import { STATE_LIST_CAP, type Substitution } from "./model.js";
 import type { DesiredTrack } from "./reconcile.js";
 
 /** Follow a track's substitutions; undefined when it is left out. */
-function resolve(trackId: TrackId, byFrom: ReadonlyMap<number, Substitution>): number | undefined {
+function resolve(trackId: TrackId, byFrom: ReadonlyMap<TrackId, Substitution>): TrackId | undefined {
   let current = trackId;
-  const visited = new Set<number>();
+  const visited = new Set<TrackId>();
   for (;;) {
     const next = byFrom.get(current);
     if (next === undefined || visited.has(current)) {
@@ -42,7 +42,7 @@ export function mapDesired(
     return [...desired];
   }
   const byFrom = new Map(substitutions.map((sub) => [sub.from, sub]));
-  const seen = new Set<number>();
+  const seen = new Set<TrackId>();
   const out: DesiredTrack[] = [];
   for (const track of desired) {
     const trackId = resolve(track.trackId, byFrom);
@@ -58,7 +58,7 @@ export function mapDesired(
 /** Split off the substitutions whose original track is in the playlist again. */
 export function findReverts(
   substitutions: readonly Substitution[],
-  presentTrackIds: ReadonlySet<number>,
+  presentTrackIds: ReadonlySet<TrackId>,
 ): { kept: Substitution[]; revertedKeys: string[] } {
   const kept: Substitution[] = [];
   const revertedKeys: string[] = [];

@@ -35,15 +35,37 @@ export function toJson(value: unknown): string {
   return `${JSON.stringify(value, jsonReplacer, 2)}\n`;
 }
 
-/** Maps become plain objects and Sets arrays (JSON.stringify would write `{}`). */
-function jsonReplacer(_key: string, value: unknown): unknown {
+/**
+ * Maps become plain objects and Sets arrays (JSON.stringify would write `{}`),
+ * and Qobuz's ids are written as Qobuz has them, as they were before ids
+ * carried their service: {@link legacyId}.
+ */
+function jsonReplacer(key: string, value: unknown): unknown {
   if (value instanceof Map) {
-    return Object.fromEntries(value);
+    return Object.fromEntries([...value].map(([k, v]) => [typeof k === "string" ? legacyId("", k) : k, v]));
   }
   if (value instanceof Set) {
     return [...value];
   }
-  return value;
+  if (key === "albumIds" && Array.isArray(value)) {
+    return value.map((id) => (typeof id === "string" ? String(legacyId("albumId", id)) : id));
+  }
+  return typeof value === "string" ? legacyId(key, value) : value;
+}
+
+const QOBUZ_ID = /^qobuz:([a-z0-9]+)$/i;
+
+/**
+ * A Qobuz id as scripts know it; any other text unchanged. Qobuz's ids are
+ * numbers except an album's, which is text: alphanumeric, or a barcode of 12
+ * digits or more -- longer than any of its numbers.
+ */
+function legacyId(key: string, text: string): string | number {
+  const native = QOBUZ_ID.exec(text)?.[1];
+  if (native === undefined) {
+    return text;
+  }
+  return key !== "albumId" && /^[1-9]\d{0,10}$/.test(native) ? Number(native) : native;
 }
 
 /**

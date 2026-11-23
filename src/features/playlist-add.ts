@@ -34,8 +34,8 @@ export async function addInOrder(
   playlistId: PlaylistId,
   trackIds: readonly TrackId[],
 ): Promise<void> {
-  let request: number[] = [];
-  let sent = new Set<number>();
+  let request: TrackId[] = [];
+  let sent = new Set<TrackId>();
   for (const id of trackIds) {
     if (sent.has(id)) {
       await client.addTracksToPlaylist(playlistId, request);
@@ -49,8 +49,8 @@ export async function addInOrder(
 }
 
 /** The `wanted` ids not in `got`, counting repeats. */
-export function missingFrom(wanted: readonly number[], got: readonly number[]): number[] {
-  const left = new Map<number, number>();
+export function missingFrom(wanted: readonly TrackId[], got: readonly TrackId[]): TrackId[] {
+  const left = new Map<TrackId, number>();
   got.forEach((id) => left.set(id, (left.get(id) ?? 0) + 1));
   return wanted.filter((id) => {
     const n = left.get(id) ?? 0;
@@ -66,11 +66,11 @@ export interface ConfirmedAdd {
   /** Whether the playlist was made for this. */
   created: boolean;
   /** Track ids that arrived. */
-  added: number[];
+  added: TrackId[];
   /** Track ids that were there already (and not added again). */
-  already: number[];
+  already: TrackId[];
   /** Track ids that did not arrive: Qobuz no longer offers them. */
-  missing: number[];
+  missing: TrackId[];
 }
 
 /**
@@ -86,7 +86,7 @@ export async function addConfirmed(
 ): Promise<ConfirmedAdd> {
   const wanted = [...new Set(trackIds)];
   let playlistId: PlaylistId;
-  let before = new Set<number>();
+  let before = new Set<TrackId>();
   if (destination.type === "new") {
     playlistId = (await client.createPlaylist(destination.name, { isPublic: destination.isPublic })).id;
     onCreated(playlistId);

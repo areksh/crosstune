@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { shortId, type PlaylistId, type TrackId } from "../../services/ids.js";
+import { qid } from "../../services/ids.test-support.js";
 import type { Artist, Track } from "../../services/model.js";
 import { validateJob, type CombinedSource, type DiscoverySource, type SmartSource } from "../model.js";
 import { resolveCombined } from "./combined.js";
@@ -9,8 +11,8 @@ import { resolveFollow } from "./follow.js";
 import { meetsRule, resolveSmart } from "./smart.js";
 
 const NOW = new Date("2026-11-02T12:00:00Z");
-const tr = (id: number, extra: Partial<Track> = {}): Track => ({ id, title: `T${id}`, ...extra });
-const ids = (result: { tracks: { trackId: number }[] }) => result.tracks.map((t) => t.trackId);
+const tr = (id: number, extra: Partial<Track> = {}): Track => ({ id: qid(id), title: `T${id}`, ...extra });
+const ids = (result: { tracks: { trackId: TrackId }[] }) => result.tracks.map((t) => Number(shortId(t.trackId)));
 
 function source<T>(raw: Record<string, unknown>): T {
   return validateJob({
@@ -34,16 +36,16 @@ function inputs(lists: Record<string, Track[] | Error>) {
   };
   return {
     getFavoriteTracks: vi.fn(async () => read("f")),
-    getPlaylistTracks: vi.fn(async (id: number) => read(`p${id}`)),
+    getPlaylistTracks: vi.fn(async (id: PlaylistId) => read(`p${shortId(id)}`)),
   };
 }
 
 describe("stableShuffle", () => {
   it("keeps the others' order when an item is added", () => {
-    const before = stableShuffle("job", [1, 2, 3, 4, 5, 6], (n) => n);
-    const after = stableShuffle("job", [1, 2, 3, 4, 5, 6, 7], (n) => n);
+    const before = stableShuffle("job", [1, 2, 3, 4, 5, 6], (n) => qid(n));
+    const after = stableShuffle("job", [1, 2, 3, 4, 5, 6, 7], (n) => qid(n));
     expect(after.filter((n) => n !== 7)).toEqual(before);
-    expect(stableShuffle("other", [1, 2, 3, 4, 5, 6], (n) => n)).not.toEqual(before);
+    expect(stableShuffle("other", [1, 2, 3, 4, 5, 6], (n) => qid(n))).not.toEqual(before);
   });
 });
 
@@ -51,7 +53,7 @@ describe("combined source", () => {
   const def = (overrides: Record<string, unknown> = {}) =>
     source<CombinedSource>({
       type: "combined",
-      inputs: [{ type: "playlist", playlistId: 1 }, { type: "playlist", playlistId: 2 }],
+      inputs: [{ type: "playlist", playlistId: qid(1) }, { type: "playlist", playlistId: qid(2) }],
       ...overrides,
     });
 
@@ -86,23 +88,23 @@ describe("combined source", () => {
 
 describe("follow source", () => {
   it("follows the playlist's tracks in its order", async () => {
-    const result = await resolveFollow(inputs({ p9: [tr(3), tr(1)] }), { type: "follow", playlistId: 9, keepRemoved: false }, { state: {} });
+    const result = await resolveFollow(inputs({ p9: [tr(3), tr(1)] }), { type: "follow", playlistId: qid(9), keepRemoved: false }, { state: {} });
     expect(ids(result)).toEqual([3, 1]);
     expect(result.state).toEqual({});
   });
 
   it("archives: keeps every track ever seen, newest last", async () => {
-    const def = { type: "follow" as const, playlistId: 9, keepRemoved: true };
-    const result = await resolveFollow(inputs({ p9: [tr(3), tr(4)] }), def, { state: { seen: [1, 3] } });
+    const def = { type: "follow" as const, playlistId: qid(9), keepRemoved: true };
+    const result = await resolveFollow(inputs({ p9: [tr(3), tr(4)] }), def, { state: { seen: [qid(1), qid(3)] } });
     expect(ids(result)).toEqual([1, 3, 4]);
-    expect(result.state.seen).toEqual([1, 3, 4]);
+    expect(result.state.seen).toEqual([qid(1), qid(3), qid(4)]);
   });
 
   it("is incomplete when the playlist cannot be read (an archive keeps its list)", async () => {
     const failing = inputs({ p9: new Error("down") });
-    const followed = await resolveFollow(failing, { type: "follow", playlistId: 9, keepRemoved: false }, { state: {} });
+    const followed = await resolveFollow(failing, { type: "follow", playlistId: qid(9), keepRemoved: false }, { state: {} });
     expect(followed).toMatchObject({ tracks: [], complete: false });
-    const archived = await resolveFollow(failing, { type: "follow", playlistId: 9, keepRemoved: true }, { state: { seen: [1] } });
+    const archived = await resolveFollow(failing, { type: "follow", playlistId: qid(9), keepRemoved: true }, { state: { seen: [qid(1)] } });
     expect(ids(archived)).toEqual([1]);
     expect(archived.complete).toBe(false);
   });
@@ -117,8 +119,8 @@ describe("smart source", () => {
     [{ type: "genres", genres: ["jazz"] }, tr(1, { genre: "Jazz" }), true],
     [{ type: "favourited-within", days: 30 }, tr(1, { favouritedAt: "2026-10-20T00:00:00.000Z" }), true],
     [{ type: "favourited-within", days: 30 }, tr(1, { favouritedAt: "2026-01-01T00:00:00.000Z" }), false],
-    [{ type: "artists", exclude: [{ id: 5, name: "X" }] }, tr(1, { artistId: 5 }), false],
-    [{ type: "artists", include: [{ id: 5, name: "Air" }] }, tr(1, { artist: "AIR" }), true],
+    [{ type: "artists", exclude: [{ id: qid(5), name: "X" }] }, tr(1, { artistId: qid(5) }), false],
+    [{ type: "artists", include: [{ id: qid(5), name: "Air" }] }, tr(1, { artist: "AIR" }), true],
     [{ type: "duration", maxSeconds: 200 }, tr(1, { duration: 250 }), false],
   ] as const)("rule %j on %j -> %s", (rule, track, expected) => {
     expect(meetsRule(track, rule as never, NOW)).toBe(expected);
@@ -127,7 +129,7 @@ describe("smart source", () => {
   it("keeps the tracks meeting every rule, carrying favourite dates over to playlist copies", async () => {
     const def = source<SmartSource>({
       type: "smart",
-      from: [{ type: "playlist", playlistId: 1 }, { type: "favourites" }],
+      from: [{ type: "playlist", playlistId: qid(1) }, { type: "favourites" }],
       rules: [{ type: "favourited-within", days: 30 }],
       order: "newest-favourited",
     });
@@ -155,7 +157,7 @@ describe("smart source", () => {
     const result = await resolveSmart(client, def, {
       now: NOW,
       jobId: "j",
-      favouriteDates: new Map([[8, "2020-01-01T00:00:00.000Z"]]),
+      favouriteDates: new Map([[qid(8), "2020-01-01T00:00:00.000Z"]]),
     });
     expect(ids(result)).toEqual([]);
   });
@@ -163,7 +165,7 @@ describe("smart source", () => {
   it("is incomplete when an input fails", async () => {
     const def = source<SmartSource>({
       type: "smart",
-      from: [{ type: "playlist", playlistId: 1 }],
+      from: [{ type: "playlist", playlistId: qid(1) }],
       rules: [{ type: "quality", quality: "cd" }],
     });
     const result = await resolveSmart(inputs({ p1: new Error("down") }), def, { now: NOW, jobId: "j" });
@@ -180,14 +182,14 @@ describe("discovery source", () => {
     expect(rotationNumber("week", created, new Date("2026-10-05T00:30:00"))).toBe(1); // Monday
   });
 
-  const seed: Artist = { id: 1, name: "Seed" };
+  const seed: Artist = { id: qid(1), name: "Seed" };
   const similar: Artist[] = [2, 3, 4, 5].map((id) => ({ id, name: `S${id}` }));
   function client(): DiscoveryClient & Record<string, ReturnType<typeof vi.fn>> {
     return {
       getFavoriteArtists: vi.fn(async () => [seed]),
       getPlaylistTracks: vi.fn(async () => []),
       getSimilarArtists: vi.fn(async () => similar),
-      getArtistTopTracks: vi.fn(async (id: number) => [tr(id * 10), tr(id * 10 + 1), tr(id * 10 + 2)]),
+      getArtistTopTracks: vi.fn(async (id: PlaylistId) => [tr(id * 10), tr(id * 10 + 1), tr(id * 10 + 2)]),
       getFavoriteTracks: vi.fn(async () => [tr(20)]),
     } as never;
   }
