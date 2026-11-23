@@ -16,7 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   playlist's page and over its tools (with album covers on), and a playlist's
   header tinted by its real cover (ADR-0015).
 - The web UI **asks once** whether to show album covers, saying what that tells
-  the services' image servers; *Settings* keeps the switch.
+  the services' image servers; *Settings* keeps the switch (ticking it there
+  answers the question too).
+- The page asks before loading afresh while a change is still being saved, so
+  you see how it ended. The ask box keeps what you typed if you stay where you
+  are, finds playlists with a dash in their name, says when a link is of a kind
+  no tool takes, leaves Ctrl+K to other fields, and goes back to one line when
+  you leave it. A header's colour follows covers being turned on or off, without
+  a flicker after each save; Home's recent playlists follow the tab.
 
 - **TIDAL and Spotify**, beside Qobuz, through their official APIs. Connect
   each from the new **Accounts** page (or `login tidal|spotify`); each needs an

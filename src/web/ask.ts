@@ -11,10 +11,19 @@ import { parseRoute, viewOf } from "../ui/routes.js";
 import { el } from "./dom.js";
 import { libraryPlaylists } from "./library.js";
 import { applyPrefill, storePrefill } from "./prefill.js";
+import { VIEW_SHOWN } from "./route-state.js";
 import { workingService } from "./service.js";
 
 let shown: AskSuggestion[] = [];
 let highlighted = 0;
+let closing: ReturnType<typeof setTimeout> | undefined;
+/** Where a picked suggestion went: the box empties once the page shows it (not if the user stays). */
+let goingTo: string | undefined;
+
+/** The suggestions that can be picked (a note cannot). */
+function pickable(): number[] {
+  return shown.flatMap((suggestion, index) => (suggestion.hash === undefined ? [] : [index]));
+}
 
 export function initAsk(): void {
   const box = el<HTMLTextAreaElement>("ask");
@@ -23,24 +32,36 @@ export function initAsk(): void {
     update(box.value);
   });
   box.addEventListener("focus", () => {
+    clearTimeout(closing);
     grow(box);
     update(box.value);
   });
   box.addEventListener("blur", () => {
-    // Late enough for a click on a suggestion to land first.
-    setTimeout(close, 150);
+    // Late enough for a click on a suggestion to land first; one line again meanwhile.
+    closing = setTimeout(() => {
+      if (document.activeElement !== box) {
+        close();
+        shrink(box);
+      }
+    }, 150);
   });
   box.addEventListener("keydown", (event) => {
+    if (event.isComposing) {
+      // Typing through an input method (Japanese, Chinese...): Enter confirms the text.
+      return;
+    }
+    const choices = pickable();
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       const choice = shown[highlighted];
-      if (choice !== undefined) {
+      if (choice?.hash !== undefined) {
         pick(choice);
       }
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      if (shown.length > 0) {
+      if (choices.length > 0) {
         event.preventDefault();
-        highlighted = (highlighted + (event.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length;
+        const at = choices.indexOf(highlighted);
+        highlighted = choices[(at + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length]!;
         render();
       }
     } else if (event.key === "Escape") {
@@ -49,12 +70,31 @@ export function initAsk(): void {
     }
   });
   document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.altKey) {
+      return;
+    }
     const inField = event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]") !== null;
-    if ((event.key === "k" && (event.ctrlKey || event.metaKey)) || (event.key === "/" && !inField)) {
+    const shortcut = event.key === "k" && (event.ctrlKey || event.metaKey) && !event.shiftKey;
+    const slash = event.key === "/" && !event.ctrlKey && !event.metaKey;
+    // Not from another field: Ctrl+K edits text there, and "/" is typed.
+    if (!inField && (shortcut || slash)) {
       event.preventDefault();
       box.focus();
     }
   });
+  // A picked suggestion's page is showing: the box is done with.
+  window.addEventListener(VIEW_SHOWN, () => {
+    if (goingTo !== undefined && location.hash === goingTo) {
+      box.value = "";
+      shrink(box);
+    }
+    goingTo = undefined;
+  });
+}
+
+function shrink(box: HTMLTextAreaElement): void {
+  box.style.height = "";
+  box.style.overflowY = "hidden";
 }
 
 function grow(box: HTMLTextAreaElement): void {
@@ -71,7 +111,7 @@ function update(text: string): void {
     ...(where.kind === "playlist" && { open: where.id }),
     ...(service !== undefined && { service }),
   });
-  highlighted = 0;
+  highlighted = pickable()[0] ?? 0;
   render();
 }
 
@@ -87,15 +127,25 @@ function render(): void {
       item.className = "ask-option";
       item.setAttribute("aria-selected", String(index === highlighted));
       item.textContent = suggestion.label;
+      if (suggestion.hash === undefined) {
+        item.setAttribute("aria-disabled", "true");
+        item.classList.add("ask-note");
+      }
       item.addEventListener("mousedown", (event) => {
         // Before the box's blur closes the menu.
         event.preventDefault();
-        pick(suggestion);
+        if (suggestion.hash !== undefined) {
+          pick(suggestion);
+        }
       });
       return item;
     }),
   );
-  el("ask").setAttribute("aria-activedescendant", shown.length > 0 ? `ask-option-${highlighted}` : "");
+  if (pickable().length > 0) {
+    el("ask").setAttribute("aria-activedescendant", `ask-option-${highlighted}`);
+  } else {
+    el("ask").removeAttribute("aria-activedescendant");
+  }
 }
 
 function close(): void {
@@ -104,19 +154,25 @@ function close(): void {
 }
 
 function pick(suggestion: AskSuggestion): void {
+  const { hash } = suggestion;
+  if (hash === undefined) {
+    return;
+  }
   const box = el<HTMLTextAreaElement>("ask");
   if (suggestion.fill !== undefined) {
     // For that address only: if the user stays (a draft, a preview), it is dropped.
-    storePrefill({ ...suggestion.fill, hash: suggestion.hash });
+    storePrefill({ ...suggestion.fill, hash });
   }
-  box.value = "";
-  grow(box);
   close();
   box.blur();
-  if (location.hash === suggestion.hash) {
+  if (location.hash === hash) {
     // Already there: no hashchange, so fill it now.
     applyPrefill(viewOf(parseRoute(location.hash)));
+    box.value = "";
+    shrink(box);
   } else {
-    location.hash = suggestion.hash;
+    // The text stays until that page shows: kept if the user stays where they are.
+    goingTo = hash;
+    location.hash = hash;
   }
 }

@@ -99,10 +99,25 @@ export function artworkOn(): boolean {
  * answer CORS, so a CORS-mode image can be drawn to a canvas and read. Only
  * while artwork is on; undefined on any failure (the caller keeps its tint).
  */
-export function readCoverColour(url: string): Promise<{ r: number; g: number; b: number } | undefined> {
+type Rgb = { r: number; g: number; b: number };
+
+/** Colours already read, by cover URL (undefined: could not be read). */
+const colours = new Map<string, Rgb | undefined>();
+
+export function readCoverColour(url: string): Promise<Rgb | undefined> {
   if (!enabled || !url.startsWith("https://")) {
     return Promise.resolve(undefined);
   }
+  if (colours.has(url)) {
+    return Promise.resolve(colours.get(url));
+  }
+  return readFresh(url).then((rgb) => {
+    colours.set(url, rgb);
+    return rgb;
+  });
+}
+
+function readFresh(url: string): Promise<Rgb | undefined> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -145,15 +160,36 @@ export function readCoverColour(url: string): Promise<{ r: number; g: number; b:
  * still shows that cover then (the page may have moved on).
  */
 export function tintFromCover(target: HTMLElement, url: string | undefined): void {
+  // The tint drawn from the name, set just before: what turning covers off goes back to.
+  target.dataset["drawnGlow"] = target.style.background;
   target.dataset["tintFor"] = url ?? "";
   if (url === undefined) {
     return;
   }
+  const known = enabled && colours.has(url) ? colours.get(url) : undefined;
+  if (known !== undefined) {
+    // Read before: painted at once, so a re-render (after a save) does not flicker.
+    target.style.background = glowBackground(coverFromColour(known));
+    return;
+  }
   void readCoverColour(url).then((rgb) => {
-    if (rgb !== undefined && target.dataset["tintFor"] === url) {
+    if (rgb !== undefined && enabled && target.dataset["tintFor"] === url) {
       target.style.background = glowBackground(coverFromColour(rgb));
     }
   });
+}
+
+/** Covers turned on or off: tint the headers on the page again (or go back to the drawn tint). */
+function retint(): void {
+  for (const target of document.querySelectorAll<HTMLElement>("[data-tint-for]")) {
+    const url = target.dataset["tintFor"];
+    if (!enabled || url === undefined || url === "") {
+      target.style.background = target.dataset["drawnGlow"] ?? target.style.background;
+    } else {
+      // Off put the drawn tint back, so it is what tintFromCover keeps as the fallback.
+      tintFromCover(target, url);
+    }
+  }
 }
 
 /** Point an existing cover slot at another cover (e.g. a different version). */
@@ -166,6 +202,7 @@ function apply(): void {
   if (enabled) {
     document.querySelectorAll<HTMLImageElement>(".cover img[data-src], .cover-host img[data-src]").forEach(load);
   }
+  retint();
 }
 
 /** Turn covers on or off, remembered in this browser; the Settings checkbox follows. */
@@ -180,11 +217,25 @@ function setArtwork(on: boolean): void {
 export function initArtworkToggle(): void {
   const checkbox = el<HTMLInputElement>("show-artwork");
   checkbox.checked = enabled;
-  checkbox.addEventListener("change", () => setArtwork(checkbox.checked));
+  checkbox.addEventListener("change", () => {
+    setArtwork(checkbox.checked);
+    // Chosen in Settings: the one-time question is answered.
+    markAsked();
+  });
   apply();
 }
 
 const ASKED_KEY = "crosstune:artwork-asked";
+
+/** The question about covers is answered (here or in Settings): never shown again. */
+function markAsked(): void {
+  try {
+    localStorage.setItem(ASKED_KEY, "yes");
+  } catch {
+    // Storage unavailable: it goes for this page.
+  }
+  el("artwork-ask").hidden = true;
+}
 
 function stored(key: string): string | null {
   try {
@@ -203,12 +254,7 @@ export function askAboutArtwork(connected: number): void {
   banner.hidden = false;
   const answer = (on: boolean): void => {
     setArtwork(on);
-    try {
-      localStorage.setItem(ASKED_KEY, "yes");
-    } catch {
-      // Storage unavailable: the banner goes for this page.
-    }
-    banner.hidden = true;
+    markAsked();
   };
   el("artwork-ask-yes").addEventListener("click", () => answer(true), { once: true });
   el("artwork-ask-no").addEventListener("click", () => answer(false), { once: true });

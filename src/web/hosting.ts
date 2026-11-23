@@ -16,6 +16,7 @@ import { parseRoute, routeHash, viewOf, type Route } from "../ui/routes.js";
 import { hostingDecision } from "../ui/hosting-decision.js";
 import { sourceToolFill, toolLabel, type Fill, type Source } from "../ui/tools.js";
 import { artworkInto, tintFromCover } from "./artwork.js";
+import { writesInFlight } from "./api.js";
 import { openDialog } from "./dialog.js";
 import { el } from "./dom.js";
 import { knownPlaylist, LIBRARY_LOADED } from "./library.js";
@@ -117,6 +118,10 @@ function unsavedPreviews(): string[] {
   for (const node of pending) {
     const view = node.closest<HTMLElement>(".view");
     titles.add(view?.querySelector("h1")?.textContent?.trim() || "a tool");
+  }
+  if (writesInFlight() > 0) {
+    // The service may finish it, but a fresh page would not say how it went.
+    titles.add("a change still being saved");
   }
   return [...titles];
 }

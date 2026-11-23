@@ -11,6 +11,7 @@ import { routeHash } from "../../ui/routes.js";
 import { artworkInto } from "../artwork.js";
 import { el } from "../dom.js";
 import { libraryPlaylists, LIBRARY_LOADED } from "../library.js";
+import { currentTab, TAB_CHANGED } from "../shell.js";
 import { songCount } from "./playlist-actions.js";
 
 /** How many playlists Home shows. */
@@ -19,11 +20,15 @@ const RECENT = 6;
 /** Wire up the home view. Call once on load. */
 export function initHomeView(): void {
   window.addEventListener(LIBRARY_LOADED, render);
+  window.addEventListener(TAB_CHANGED, render);
   render();
 }
 
 function render(): void {
+  const tab = currentTab();
   const recent = [...libraryPlaylists()]
+    // As the sidebar: the chosen service's, or all of them.
+    .filter((playlist) => tab === "all" || serviceOf(playlist.id) === tab)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
     .slice(0, RECENT);
   const box = el("home-recent");

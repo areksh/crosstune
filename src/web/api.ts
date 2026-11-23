@@ -7,6 +7,7 @@
  */
 
 import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
+import { isWriteRequest } from "../ui/writes.js";
 import { chosenService, type Choice } from "./service.js";
 
 export interface Artist {
@@ -93,6 +94,14 @@ function baseHeaders(on: Choice | undefined = chosenService()): Record<string, s
   return { "X-Crosstune-Nonce": nonce, ...(service !== undefined && { "X-Music-Service": service }) };
 }
 
+/** Changes sent and not yet answered (see src/ui/writes.ts). */
+let inFlight = 0;
+
+/** How many changes are being written now: a reload would hide how they end. */
+export function writesInFlight(): number {
+  return inFlight;
+}
+
 /** Call a local API route, returning the parsed JSON or throwing on error. */
 export async function api<T>(
   method: string,
@@ -105,11 +114,22 @@ export async function api<T>(
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(path, {
-    method,
-    headers,
-    ...(body !== undefined && { body: JSON.stringify(body) }),
-  });
+  const writing = isWriteRequest(method, path);
+  if (writing) {
+    inFlight += 1;
+  }
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    });
+  } finally {
+    if (writing) {
+      inFlight -= 1;
+    }
+  }
   const data: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message =

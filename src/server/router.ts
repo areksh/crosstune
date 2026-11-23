@@ -398,7 +398,7 @@ function onChosenService(req: ApiRequest, deps: ApiDeps): ApiDeps {
  * the history. `/api/commit` serves several tools, which name themselves in
  * the body's `tool`.
  */
-const WRITE_ROUTES: Record<string, string> = {
+export const WRITE_ROUTES: Record<string, string> = {
   "/api/commit": "playlist",
   "/api/new-releases/commit": "new-releases",
   "/api/deduplicate/apply": "deduplicate",

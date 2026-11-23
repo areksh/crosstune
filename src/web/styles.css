@@ -261,6 +261,14 @@ button.tab[aria-pressed="true"] {
   background: var(--surface-3);
 }
 
+/* A note (a link no tool takes): read, not picked. */
+.ask-option.ask-note,
+.ask-option.ask-note:hover {
+  background: none;
+  color: var(--muted);
+  cursor: default;
+}
+
 /* Home: the playlists changed most recently. */
 .home-sub {
   margin: 8px 0 12px;

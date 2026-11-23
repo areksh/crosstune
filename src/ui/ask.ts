@@ -23,7 +23,8 @@ export interface AskContext {
 
 export interface AskSuggestion {
   label: string;
-  hash: string;
+  /** Where it goes; none for a note that cannot be picked. */
+  hash?: string;
   /** What to fill in the tool, when its address does not say. */
   fill?: Fill;
 }
@@ -72,7 +73,12 @@ function pasteSuggestions(found: PasteSummary, context: AskContext): AskSuggesti
     const artists = found.artists.join("\n");
     suggestions.push(
       {
-        label: found.artists.length === 1 ? `Build a playlist from ${found.artists[0]}` : "Build a playlist from these artists",
+        label:
+          found.artists.length > 1
+            ? "Build a playlist from these artists"
+            : /^https?:\/\//.test(found.artists[0] ?? "")
+              ? "Build a playlist from this artist"
+              : `Build a playlist from ${found.artists[0]}`,
         hash: routeHash({ kind: "new", tool: "artists" }),
         fill: { view: "playlist", fields: { artists } },
       },
@@ -107,6 +113,9 @@ function pasteSuggestions(found: PasteSummary, context: AskContext): AskSuggesti
       );
     }
   }
+  if (suggestions.length === 0 && (found.tracks.length > 0 || found.other.length > 0)) {
+    suggestions.push({ label: "Track and label links are not used by a tool yet" });
+  }
   return suggestions;
 }
 
@@ -117,7 +126,8 @@ export function askSuggestions(text: string, context: AskContext): AskSuggestion
   }
   const found = classifyPaste(trimmed);
   const oneLine = !trimmed.includes("\n");
-  const plain = oneLine && found.playlists.length === 0 && found.albums.length === 0 && found.tracks.length === 0 && found.other.length === 0 && !/https?:\/\//.test(trimmed);
+  // One line that is not a link: looked for by name first ("Chill - Evening" may be an album too).
+  const plain = oneLine && !/https?:\/\//.test(trimmed);
   if (!plain) {
     return pasteSuggestions(found, context).slice(0, MOST);
   }

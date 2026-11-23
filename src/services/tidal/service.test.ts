@@ -154,6 +154,20 @@ describe("TidalService playlists", () => {
     expect((await service.getPlaylist(t(id))).image).toBe(covered?.image);
   });
 
+  it("keeps each page's cover art (the included artworks come per page)", async () => {
+    const { fake, service } = setup();
+    fake.pageSize = 2;
+    for (const n of [1, 2, 3, 4, 5]) {
+      fake.seedPlaylist(`P${n}`, tracks(1), { cover: `https://resources.tidal.com/images/c${n}` });
+    }
+    const listed = await service.getUserPlaylists();
+    expect(listed).toHaveLength(5);
+    for (const playlist of listed) {
+      expect(playlist.image).toContain(`/images/c${playlist.name.slice(1)}/`);
+    }
+    expect(fake.log().filter((line) => line === "GET /playlists").length).toBeGreaterThan(1);
+  });
+
   it("says whose another's playlist is", async () => {
     const { fake, service } = setup();
     const id = fake.seedPlaylist("Theirs", tracks(1), { owner: "99" });

@@ -61,6 +61,25 @@ describe("askSuggestions", () => {
     });
   });
 
+  it("finds a playlist whose name has a dash, before reading it as an album", () => {
+    const dashed: AskContext = { ...context, playlists: [{ id: "qobuz:5" as PlaylistId, name: "Chill - Evening", owned: true }] };
+    const suggestions = askSuggestions("Chill - Evening", dashed);
+    expect(suggestions[0]).toEqual({ label: "Open Chill - Evening", hash: "#/p/5" });
+    expect(suggestions.some((s) => s.label === "Build a playlist from these albums")).toBe(true);
+  });
+
+  it("names a pasted artist link as an artist, not by its address", () => {
+    expect(askSuggestions("https://open.spotify.com/artist/6liAMWkVf5LH7YR9yfFy1Y", context)[0]?.label).toBe(
+      "Build a playlist from this artist",
+    );
+  });
+
+  it("says when a link is of a kind no tool takes, rather than offering nothing", () => {
+    expect(askSuggestions("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", context)).toEqual([
+      { label: "Track and label links are not used by a tool yet" },
+    ]);
+  });
+
   it("never offers more than eight", () => {
     const many: AskContext = {
       ...context,
