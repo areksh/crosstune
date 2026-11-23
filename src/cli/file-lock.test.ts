@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -46,6 +46,37 @@ describe("tryAcquireLock", () => {
       now: at("2026-11-02T10:02:00Z"),
     });
     expect(lock).toBeDefined();
+  });
+
+  it("never takes over a live holder on this host, however old", () => {
+    tryAcquireLock(path, { pid: 1, host: "box", now: at("2026-11-02T10:00:00Z") });
+    expect(
+      tryAcquireLock(path, {
+        pid: 2,
+        host: "box",
+        isAlive: () => true,
+        staleMs: 60_000,
+        now: at("2026-11-03T10:00:00Z"),
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not delete a lock taken over while it was judging the old one stale", () => {
+    tryAcquireLock(path, { pid: 1, host: "box" });
+    let a: ReturnType<typeof tryAcquireLock>;
+    const b = tryAcquireLock(path, {
+      pid: 3,
+      host: "box",
+      isAlive: () => {
+        // A, a second process, judges and takes over before B acts on its verdict.
+        a ??= tryAcquireLock(path, { pid: 2, host: "box", isAlive: () => false });
+        return false;
+      },
+    });
+    expect(a).toBeDefined();
+    expect(b).toBeUndefined();
+    expect(readLock(path)?.pid).toBe(2);
+    expect(readdirSync(dir)).toEqual(["jobs.lock"]);
   });
 
   it("does not judge a pid from another host", () => {
