@@ -31,6 +31,7 @@ import type { AlbumId } from "../services/ids.js";
 import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
+import { stopsEverySong } from "./match.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
   createPlaylistWithTracks,
@@ -174,8 +175,9 @@ export interface ResolveAlbumsOptions {
  * An album link resolves to the one release it names (by id). Otherwise this
  * searches Qobuz for "artist album" and keeps the results whose artist and
  * title match the entry (normalised, so case and edition noise are ignored).
- * Entries with no match are collected in `unresolvedAlbums`; entries whose
- * every match was excluded by the filter's album terms in `excludedAlbums`.
+ * Entries with no match, or whose search failed, are collected in
+ * `unresolvedAlbums`; entries whose every match was excluded by the filter's
+ * album terms in `excludedAlbums`.
  */
 export async function resolveAlbumVersions(
   client: AlbumSearchClient & Partial<Pick<AlbumResolverClient, "getAlbum">>,
@@ -189,7 +191,16 @@ export async function resolveAlbumVersions(
     DEFAULT_CONCURRENCY,
     async (input): Promise<{ entry: AlbumEntry; versions: Album[]; fromLink?: boolean } | string> => {
       if (!("albumId" in input)) {
-        return { entry: input, versions: await findAlbumVersions(client, input) };
+        // One album's failed search is that line's problem alone; an error
+        // every line would run into (signed out, rate-limited) ends the run.
+        try {
+          return { entry: input, versions: await findAlbumVersions(client, input) };
+        } catch (error) {
+          if (stopsEverySong(error)) {
+            throw error;
+          }
+          return `${formatEntry(input)} (could not be looked up)`;
+        }
       }
       // A link names one release: use it as the only version.
       if (client.getAlbum === undefined) {
@@ -245,9 +256,10 @@ export async function resolveAlbumVersions(
  * Searches "artist album" first; if that yields no match, falls back to an
  * album-title-only search filtered by artist. The combined query sometimes
  * returns an empty page for a valid album, while the broader title search does
- * not, so the fallback markedly improves recall.
+ * not, so the fallback markedly improves recall. A failed search throws
+ * ({@link resolveAlbumVersions} reports it against the line).
  */
-async function findAlbumVersions(
+export async function findAlbumVersions(
   client: AlbumSearchClient,
   entry: AlbumEntry,
 ): Promise<Album[]> {

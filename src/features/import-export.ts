@@ -38,10 +38,7 @@ import {
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
-import {
-  resolveAlbumVersions,
-  selectAlbumVersion,
-} from "./playlist-from-albums.js";
+import { findAlbumVersions, selectAlbumVersion } from "./playlist-from-albums.js";
 import {
   addTracksToExistingPlaylist,
   createPlaylistWithTracks,
@@ -803,14 +800,10 @@ async function resolveAlbum(
   if (item.title === undefined || item.artist === undefined) {
     return undefined;
   }
-  const { resolvedAlbums } = await resolveAlbumVersions(client, {
-    entries: [{ artist: item.artist, album: item.title }],
-  });
-  const resolved = resolvedAlbums[0];
-  const id =
-    resolved === undefined
-      ? undefined
-      : selectAlbumVersion(resolved.versions, "highest-quality")?.id;
+  // The search itself, not resolveAlbumVersions: that reports a failed search
+  // as an unmatched line, where this one's failure must reach attempt().
+  const versions = await findAlbumVersions(client, { artist: item.artist, album: item.title });
+  const id = selectAlbumVersion(versions, "highest-quality")?.id;
   return id === undefined ? undefined : { id, via: "search" };
 }
 

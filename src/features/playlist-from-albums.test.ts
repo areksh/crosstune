@@ -223,6 +223,40 @@ describe("resolveAlbumVersions", () => {
     expect(result.excludedAlbums).toEqual([]);
   });
 
+  it("reports an album whose search fails, and carries on", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Daft Punk Discovery": [album({ id: "disc", title: "Discovery", artist: "Daft Punk" })],
+      },
+    });
+    const searchAlbums = client.searchAlbums.getMockImplementation()!;
+    client.searchAlbums.mockImplementation(async (query: string) => {
+      if (query.startsWith("Radiohead")) throw new ServiceError("qobuz", "api-response", "HTTP 500");
+      return searchAlbums(query);
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [
+        { artist: "Radiohead", album: "OK Computer" },
+        { artist: "Daft Punk", album: "Discovery" },
+      ],
+    });
+
+    expect(result.resolvedAlbums.map((r) => r.query)).toEqual(["Daft Punk - Discovery"]);
+    expect(result.unresolvedAlbums).toEqual(["Radiohead - OK Computer (could not be looked up)"]);
+  });
+
+  it.each(["authentication", "rate-limited"])(
+    "stops on a %s error, which every album would run into",
+    async (kind) => {
+      const client = stubClient({});
+      client.searchAlbums.mockRejectedValue(new ServiceError("qobuz", kind, "no"));
+      await expect(
+        resolveAlbumVersions(client, { entries: [{ artist: "A", album: "B" }] }),
+      ).rejects.toThrow("no");
+    },
+  );
+
   it("drops versions whose title or version matches an album term", async () => {
     const client = stubClient({
       albumsByQuery: {
