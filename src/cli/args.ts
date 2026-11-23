@@ -3,7 +3,7 @@
  */
 
 import { isServiceName, type ServiceName } from "../services/names.js";
-import type { PlaylistId } from "../services/ids.js";
+import { serviceOf, type PlaylistId } from "../services/ids.js";
 import {
   COMBINE_KEEPS,
   COMBINE_MODES,
@@ -2454,4 +2454,89 @@ export function parseLoginArgs(argv: readonly string[]): LoginArgs {
     }
   }
   return { printUrl, service: service ?? "qobuz", ...(clientId !== undefined && { clientId }) };
+}
+
+export interface CopyArgs {
+  source: { type: "playlist"; playlistId: PlaylistId } | { type: "favourites"; service: ServiceName };
+  to: ServiceName;
+  /** A name for the new playlist; the source playlist's name by default. */
+  name?: string;
+  apply: boolean;
+  /** Write likely matches (their best option) too, unseen. */
+  acceptLikely: boolean;
+}
+
+/**
+ * Parse `copy (--playlist <id> | --favourites --from <service>) --to <service>
+ * [--name <name>] [--apply] [--accept-likely]`.
+ */
+export function parseCopyArgs(argv: readonly string[]): CopyArgs {
+  let playlistId: PlaylistId | undefined;
+  let favourites = false;
+  let from: ServiceName | undefined;
+  let to: ServiceName | undefined;
+  let name: string | undefined;
+  let apply = false;
+  let acceptLikely = false;
+  const service = (flag: string, value: string | undefined): ServiceName => {
+    if (!isServiceName(value)) {
+      throw new Error(`${flag} must be qobuz, tidal or spotify`);
+    }
+    return value;
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    const value = argv[i + 1];
+    switch (arg) {
+      case "--playlist":
+        playlistId = parsePlaylistId(value);
+        if (playlistId === undefined) {
+          throw new Error(`--playlist must be a playlist id or link, got "${value}"`);
+        }
+        i += 1;
+        break;
+      case "--favourites":
+      case "--favorites":
+        favourites = true;
+        break;
+      case "--from":
+        from = service(arg, value);
+        i += 1;
+        break;
+      case "--to":
+        to = service(arg, value);
+        i += 1;
+        break;
+      case "--name":
+        if (value === undefined || value.trim() === "") {
+          throw new Error("--name requires a value");
+        }
+        name = value.trim();
+        i += 1;
+        break;
+      case "--apply":
+        apply = true;
+        break;
+      case "--accept-likely":
+        acceptLikely = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  if (to === undefined) {
+    throw new Error("--to is required: the service to copy to");
+  }
+  if ((playlistId === undefined) === !favourites) {
+    throw new Error("copy one playlist (--playlist) or the favourites (--favourites --from <service>)");
+  }
+  if (favourites && from === undefined) {
+    throw new Error("--favourites needs --from <service>");
+  }
+  const source: CopyArgs["source"] =
+    playlistId !== undefined ? { type: "playlist", playlistId } : { type: "favourites", service: from! };
+  if ((source.type === "playlist" ? serviceOf(source.playlistId) : source.service) === to) {
+    throw new Error("--to must be another service than the source's");
+  }
+  return { source, to, ...(name !== undefined && { name }), apply, acceptLikely };
 }

@@ -4,6 +4,7 @@ import { qid } from "../services/ids.test-support.js";
 import {
   parseJobsArgs,
   parseLoginArgs,
+  parseCopyArgs,
   parseRunDueArgs,
   parseScheduleArgs,
   parseServeArgs,
@@ -1316,5 +1317,34 @@ describe("parseLoginArgs with a service", () => {
   it("takes the client id of the user's app", () => {
     expect(parseLoginArgs(["spotify", "--client-id", "abc"])).toEqual({ printUrl: false, service: "spotify", clientId: "abc" });
     expect(() => parseLoginArgs(["spotify", "--client-id"])).toThrow(/--client-id/);
+  });
+});
+
+describe("parseCopyArgs", () => {
+  it("copies a playlist or the favourites to another service, as a report unless applied", () => {
+    expect(parseCopyArgs(["--playlist", "tidal:abc", "--to", "spotify"])).toEqual({
+      source: { type: "playlist", playlistId: "tidal:abc" },
+      to: "spotify",
+      apply: false,
+      acceptLikely: false,
+    });
+    expect(parseCopyArgs(["--favourites", "--from", "tidal", "--to", "qobuz", "--name", "Mine", "--apply", "--accept-likely"])).toEqual({
+      source: { type: "favourites", service: "tidal" },
+      to: "qobuz",
+      name: "Mine",
+      apply: true,
+      acceptLikely: true,
+    });
+  });
+
+  it.each([
+    [["--to", "tidal"]],
+    [["--playlist", "5"]],
+    [["--playlist", "5", "--to", "qobuz"]],
+    [["--favourites", "--to", "tidal"]],
+    [["--playlist", "5", "--to", "deezer"]],
+    [["--playlist", "x y", "--to", "tidal"]],
+  ])("refuses %j", (argv) => {
+    expect(() => parseCopyArgs(argv)).toThrow();
   });
 });

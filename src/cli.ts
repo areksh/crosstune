@@ -193,6 +193,8 @@ import {
   parseImportArgs,
   parseJobsArgs,
   parseLoginArgs,
+  parseCopyArgs,
+  type CopyArgs,
   type LoginArgs,
   parseRunDueArgs,
   parseScheduleArgs,
@@ -385,6 +387,7 @@ import { linksService, type LinksService } from "./sync/service.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
 import { forgetInHistory } from "./features/forget.js";
+import { commitTransfer, resolveTransfer } from "./features/transfer.js";
 import { parseHistory, serializeRecords } from "./features/history.js";
 import { homeService, jobServices } from "./jobs/model.js";
 import { unflag } from "./jobs/stores.js";
@@ -510,6 +513,16 @@ async function main(): Promise<void> {
     const connections = openConnections(journal);
     await connections.accounts.resume();
     await runLinksNow(openLinks(journal, connections), { all: true });
+    output.flush();
+    return;
+  }
+
+  // `copy`: a playlist or the favourites, to another service.
+  if (command === "copy") {
+    const copy = parseCopyArgs(args.slice(1));
+    const connections = openConnections(journal);
+    await connections.accounts.resume();
+    await journal.run({ tool: "transfer" }, () => runCopy(connections.hub, copy));
     output.flush();
     return;
   }
@@ -1360,6 +1373,38 @@ async function runLinksNow(links: LinksService, options: { all?: boolean } = {})
 
 /** The exit code of a run that left linked playlists in conflict. */
 const EXIT_CONFLICT = 3;
+
+/** Executor for `copy`: what would be copied, and with --apply copy it. */
+async function runCopy(hub: ServiceHub, args: CopyArgs): Promise<void> {
+  const { source, to } = args;
+  const tracks =
+    source.type === "playlist" ? await hub.getPlaylistTracks(source.playlistId) : await hub.service(source.service).getFavoriteTracks();
+  const name =
+    args.name ?? (source.type === "playlist" ? (await hub.getPlaylist(source.playlistId)).name : "Favourites");
+  const matches = fileMatches();
+  const plan = await resolveTransfer(hub.service(to), tracks, matches);
+  output.assign({ to, counts: plan.counts, matches: plan.matches.map(({ source: from, grade, track, reason }) => ({ source: from.id, grade, track: track?.id ?? null, reason })) });
+  const { exact, likely, missing } = plan.counts;
+  logger.info(`On ${labelOf(to)}: ${exact} found exactly, ${likely} likely, ${missing} not found.`);
+  for (const match of plan.matches.filter((one) => one.grade !== "exact")) {
+    const song = `${match.source.title}${match.source.artist === undefined ? "" : ` - ${match.source.artist}`}`;
+    const found = match.track === undefined ? "" : ` -> ${match.track.title}${match.track.album === undefined ? "" : ` [${match.track.album}]`}`;
+    logger.info(`  ${match.grade === "likely" ? "?" : "-"} ${song}${found}${match.reason === undefined ? "" : ` (${match.reason})`}`);
+  }
+  if (!args.apply) {
+    logger.info(`\n(dry run -- pass --apply to copy them${likely > 0 && !args.acceptLikely ? "; likely ones only with --accept-likely" : ""})`);
+    return;
+  }
+  const picks = plan.matches.map((match) => ({
+    source: match.source.id,
+    track: match.grade === "exact" || (match.grade === "likely" && args.acceptLikely) ? (match.track?.id ?? null) : null,
+    decided: false,
+  }));
+  const destination = source.type === "favourites" ? ({ type: "favourites" } as const) : ({ type: "new", name, isPublic: false } as const);
+  const result = await commitTransfer(hub.service(to), destination, picks, matches);
+  output.set("result", result);
+  logger.info(`\nCopied ${result.added} to ${source.type === "favourites" ? "Favourites" : `"${name}"`} on ${labelOf(to)}${result.leftOut > 0 ? `; ${result.leftOut} left out` : ""}${result.missing.length > 0 ? `; ${labelOf(to)} did not take ${result.missing.length}` : ""}.`);
+}
 
 /** `accounts`: who is signed in to what, from what is saved (nothing is asked of the services). */
 function showAccounts(): void {
@@ -2543,6 +2588,11 @@ function printUsage(): void {
       "Usage:",
       "  qobuz-helper login",
       "  qobuz-helper logout",
+      "  qobuz-helper login [tidal|spotify] [--client-id <id>] [--print-url]",
+      "  qobuz-helper accounts",
+      "  qobuz-helper forget <qobuz|tidal|spotify>",
+      "  qobuz-helper copy (--playlist <id> | --favourites --from <service>) --to <service> [--name <name>] [--apply] [--accept-likely]",
+      "  qobuz-helper sync",
       "  qobuz-helper ui",
       "  qobuz-helper check",
       '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
