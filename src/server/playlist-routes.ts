@@ -109,6 +109,8 @@ async function read(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
         },
       };
     }
+    case "GET favourites":
+      return { status: 200, body: { tracks: await service.getFavoriteTracks() } };
     case "POST open": {
       const { playlist, entries } = await openPlaylist(service, playlistId(record(req.body)));
       return { status: 200, body: { playlist: describe(playlist, deps, jobInfo(deps)), entries } };

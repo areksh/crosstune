@@ -53,6 +53,15 @@ const job = (name: string, playlistId: number, rest: Record<string, unknown> = {
 });
 
 describe("reading", () => {
+  it("lists the favourite tracks in full", async () => {
+    const world = setup();
+    world.account.favourites.tracks = [qid(7)];
+    const res = await world.call("GET", "favourites");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ tracks: [{ id: qid(7), title: "Track 7", duration: 3 }] });
+    expect(world.acquireWriteLock).not.toHaveBeenCalled();
+  });
+
   it("lists playlists with who owns and manages them", async () => {
     const world = setup([]);
     const a = world.account.seedPlaylist("A", [qid(1)]);
