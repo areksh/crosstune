@@ -13,6 +13,7 @@
  */
 
 import {
+  isServiceName,
   readAlbumId,
   readId,
   serviceOf,
@@ -22,6 +23,7 @@ import {
   type ArtistId,
   type EntryId,
   type PlaylistId,
+  type ServiceName,
   type TrackId,
   type UserId,
 } from "../services/ids.js";
@@ -160,6 +162,7 @@ import type { ArtistRef } from "../jobs/model.js";
 import type { RefreshPreview } from "../jobs/refresh.js";
 import type { AcceptOutcome, RunSummary } from "../jobs/run-due.js";
 import { UnknownJobError, type JobsService } from "../jobs/service.js";
+import { accountRoutes, ACCOUNTS_PREFIX, type AccountDeps } from "./account-routes.js";
 import { authorise, type RequestHeaders } from "./security.js";
 
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
@@ -218,6 +221,7 @@ export interface QobuzApiService {
 export interface SessionInfo {
   displayName: string;
   subscriptionLabel: string;
+  service?: ServiceName;
 }
 
 export interface ApiDeps {
@@ -227,6 +231,11 @@ export interface ApiDeps {
    */
   service: QobuzApiService;
   session: SessionInfo;
+  /**
+   * The connected services. With it, each request is carried out on the service
+   * the page chose, and `service`, `session` and `ownerId` are set from that.
+   */
+  accounts?: AccountDeps;
   nonce: string;
   port: number;
   /** The change history; without it the history routes answer 404. */
@@ -253,7 +262,10 @@ export interface ApiDeps {
 export interface ApiRequest {
   method: string;
   path: string;
-  headers: RequestHeaders;
+  headers: RequestHeaders & {
+    /** The service the page chose. */
+    service?: string | undefined;
+  };
   /** Parsed JSON body, or undefined. */
   body?: unknown;
 }
@@ -290,12 +302,16 @@ export async function handleApi(
     return { status: 403, body: { error: `forbidden: ${auth.reason}` } };
   }
   try {
-    return await dispatch(req, deps);
+    if (deps.accounts !== undefined && req.path.startsWith(ACCOUNTS_PREFIX)) {
+      return await accountRoutes(req, deps.accounts);
+    }
+    return await dispatch(req, onChosenService(req, deps));
   } catch (error) {
     if (error instanceof ServiceError) {
-      // An id of the wrong service, or something the service cannot do: the
-      // request itself is at fault. Anything else failed on the service's side.
-      const status = error.kind === "bad-id" || error.kind === "unsupported" ? 400 : 502;
+      if (error.kind === "authentication" && error.service !== undefined) {
+        deps.accounts?.accounts.rejected(error.service, error.message);
+      }
+      const status = STATUS_BY_KIND[error.kind] ?? 502;
       return {
         status,
         body: {
@@ -310,6 +326,34 @@ export async function handleApi(
       body: { error: error instanceof Error ? error.message : "internal error" },
     };
   }
+}
+
+/**
+ * An id of the wrong service, or something the service cannot do: the request
+ * itself is at fault (400). A service that is not connected, or a playlist
+ * changed meanwhile: the state is (409). Anything else failed on the service's
+ * side (502).
+ */
+const STATUS_BY_KIND: Record<string, number> = { "bad-id": 400, unsupported: 400, "not-connected": 409, conflict: 409 };
+
+/** `deps` on the service the page chose, or the first that is connected. */
+function onChosenService(req: ApiRequest, deps: ApiDeps): ApiDeps {
+  if (deps.accounts === undefined) {
+    return deps;
+  }
+  const { hub } = deps.accounts;
+  const { service } = req.headers;
+  const name = isServiceName(service) ? service : (hub.connected()[0] ?? "qobuz");
+  const chosen = hub.scoped(name);
+  const account = chosen.account();
+  return {
+    ...deps,
+    service: chosen,
+    ...(account !== undefined && {
+      session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "", service: name },
+      ownerId: account.id,
+    }),
+  };
 }
 
 /**
@@ -361,6 +405,9 @@ async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     return historyUndo(req.body, deps);
   }
   if (req.method === "GET" && req.path === "/api/session") {
+    if (deps.accounts !== undefined && deps.ownerId === undefined) {
+      throw new ServiceError(undefined, "not-connected", "No music service is connected");
+    }
     return { status: 200, body: deps.session };
   }
   if (req.method === "GET" && req.path === "/api/playlists") {

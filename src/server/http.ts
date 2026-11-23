@@ -42,13 +42,19 @@ const STATIC_FILES: Record<string, string> = {
   "/fonts/archivo-latin-ext-wdth.woff2": "font/woff2",
 };
 
+/** Never used: with `accounts`, each request names its service. */
+const NO_SERVICE = {} as QobuzApiService;
+
 export interface StartServerOptions {
-  service: QobuzApiService;
-  session: SessionInfo;
+  /** The service every request is carried out on, without `accounts`. */
+  service?: QobuzApiService;
+  session?: SessionInfo;
   /** The change history the API lists and undoes (see ApiDeps). */
   history?: ApiDeps["history"];
   /** Background jobs the API manages (see ApiDeps). */
   jobs?: ApiDeps["jobs"];
+  /** The connected services (see ApiDeps). */
+  accounts?: ApiDeps["accounts"];
   /** For the playlist manager (see ApiDeps). */
   ownerId?: ApiDeps["ownerId"];
   acquireWriteLock?: ApiDeps["acquireWriteLock"];
@@ -80,11 +86,13 @@ export function extractHeaders(headers: http.IncomingHttpHeaders): {
   host?: string | undefined;
   origin?: string | undefined;
   nonce?: string | undefined;
+  service?: string | undefined;
 } {
   return {
     host: single(headers.host),
     origin: single(headers.origin),
     nonce: single(headers["x-qobuz-nonce"]),
+    service: single(headers["x-music-service"]),
   };
 }
 
@@ -148,10 +156,11 @@ async function handle(
         body,
       },
       {
-        service: options.service,
-        session: options.session,
+        service: options.service ?? NO_SERVICE,
+        session: options.session ?? { displayName: "", subscriptionLabel: "" },
         nonce,
         port: address,
+        ...(options.accounts !== undefined && { accounts: options.accounts }),
         ...(options.history !== undefined && { history: options.history }),
         ...(options.jobs !== undefined && { jobs: options.jobs }),
         ...(options.ownerId !== undefined && { ownerId: options.ownerId }),
