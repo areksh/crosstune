@@ -2,44 +2,29 @@
  * Spotify as a {@link MusicService}, over its official Web API as development
  * mode apps see it (February to November 2026).
  *
- * To confirm with a live probe (nothing here has been run against Spotify):
+ * Probed live on 2026-11-23 (development mode, scratch playlists only):
  *
- *  1. DELETE /playlists/{id}/items removes every copy of a song, and cannot name
- *     one by position. If it can, single copies need no re-adding
- *     (./playlists.ts).
- *  2. Whether a DELETE that names an older snapshot spares copies added after
- *     it. If so, kept copies can be added first and nothing is ever missing.
- *  3. Local files: that they can be moved by range, and whether they can be
- *     removed at all (refused here; the guide says by position, which the
- *     reference no longer has).
- *  4. A range move against an older snapshot is merged, not refused; and
- *     `range_length` has a limit, if it has (100 assumed).
- *  5. GET /playlists/{id} holds `snapshot_id` and the first items together
- *     (`items.items[].item`, 100 of them), `items` is absent for others'
- *     playlists, and `fields` works. Any size of first page will do.
- *  6. A read straight after a write shows it, and a snapshot id does not change
- *     on its own. If not, moves fail as "changed meanwhile" and a finished
- *     re-adding may be reported as interrupted.
- *  7. An unreadable item is `null` in its place and counts in `total` and in
- *     positions.
- *  8. Limits: 100 items per add and removal, 50 items a page, 40 URIs per library
- *     request, 10 results per search and per page of an artist's albums.
- *  9. PUT and DELETE /me/library take `uris` in the query (as the reference
- *     says; the migration guide shows a JSON body), and take artists, which the
- *     reference leaves out, and playlists.
- * 10. Taking an own playlist out of the library deletes it as the app does, and
- *     putting it back undoes that.
- * 11. `isrc:` searches find a recording, with `external_ids.isrc` in the results.
- * 12. Whether `is_playable` comes without a market (playability is declared
- *     "no", and it is not read).
- * 13. Whether songs are relinked without `linked_from` saying so: a URI read
- *     from a playlist must be the one DELETE knows.
- * 14. GET /me/following, /me/albums and /artists/{id}/albums page as documented,
- *     and what an app without Premium or a user off its list is told (403
- *     assumed).
- * 15. QUOTA_EXCEEDED comes as `error.reason`, and whether with `Retry-After`.
- * 16. An added item Spotify no longer offers: refused (400, the whole batch) or
- *     silently left out.
+ *  - A read names a stale snapshot: the one of the playlist's last change of
+ *    name or description, never of its items (5, 6). A DELETE naming an older
+ *    snapshot spares every copy added after it (2) -- so against a read's
+ *    snapshot it removed nothing, and taking out one copy of a repeated song
+ *    added one instead. Now the first write after a read names no snapshot and
+ *    later ones name our last write's answer (./playlists.ts).
+ *  - Confirmed: DELETE removes every copy of a song (1); a range move naming an
+ *    older snapshot is worked out against the playlist as it is (4); a read
+ *    holds the first items with the playlist (`items.items[].item`, 5) and
+ *    shows a write straight after it (6); search gives 10 a page (8);
+ *    `DELETE /me/library?uris=` takes a playlist out, and with it out of the
+ *    user's playlists (9, 10); `isrc:` search finds every copy, with
+ *    `external_ids.isrc` (11); `is_playable` comes without a market (12; only
+ *    `true` seen, so it is still not read); the library and follows read (14).
+ *  - Found: an empty description is ignored (a space clears it, and is read
+ *    back as none); `public: false` on creating is answered as false, but every
+ *    read says true -- for Spotify it means "shown on the profile", which reads
+ *    are said not to report reliably.
+ *  - Not seen: local files (3); a null item (7); relinking (13); a 429 or
+ *    QUOTA_EXCEEDED (15); an added song no longer offered (16); saving songs,
+ *    albums or artists to the library (9, not probed: it writes to the user's).
  */
 
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
@@ -304,7 +289,8 @@ export class SpotifyService implements MusicService {
     await this.#client.send("PUT", `/playlists/${plainId(playlistId)}`, {
       body: {
         ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
+        // An empty description is ignored; a space clears it (seen live).
+        ...(description !== undefined && { description: description === "" ? " " : description }),
         ...(isPublic !== undefined && { public: isPublic }),
       },
       repeatable: true,

@@ -1,9 +1,12 @@
 /**
  * Reading and changing the items of a playlist, by positional entry ids.
  *
- * Every change reads the playlist first, finds the entries in it (./entries.ts)
- * and names the snapshot they were found in, so that Spotify works the change
- * out against that one and merges it with whatever others do meanwhile. Changes
+ * Every change reads the playlist first and finds the entries in it
+ * (./entries.ts). A read names no snapshot that can be written against (live,
+ * it names the one of the last change of name or description, and a DELETE
+ * against that spares every copy added since), so the first write goes by the
+ * playlist as it is; later ones name the snapshot our own last write answered
+ * with, so that Spotify merges them with whatever others do meanwhile. Changes
  * to one playlist are made one after another. What the playlist was left as is
  * remembered, so that the ids of one read stay good through our own changes.
  *
@@ -76,7 +79,6 @@ export class RemovalInterrupted extends SpotifyError {
 
 /** A playlist as just read. */
 interface Read {
-  snapshot: string;
   uris: Uris;
   /** The song at each place; undefined where it cannot be read. */
   tracks: readonly (Track | undefined)[];
@@ -87,7 +89,8 @@ interface Open {
   readonly native: string;
   readonly tracks: Read["tracks"];
   view: View;
-  snapshot: string;
+  /** The snapshot our last write answered with; none straight after a read. */
+  snapshot: string | undefined;
   /** Somebody else changed it since it was last read. */
   readonly changed: boolean;
   /** As last read or left by us. */
@@ -217,19 +220,18 @@ export class PlaylistEditor {
 
   // -- Reading ------------------------------------------------------------
 
-  /** Read every item, as of one snapshot. */
+  /**
+   * Read every item. A long playlist is read in pages; one whose count changed
+   * meanwhile is read again (a reorder meanwhile cannot be seen: the snapshot
+   * a read names does not follow the items).
+   */
   async #load(native: string): Promise<Read> {
     const path = `/playlists/${native}`;
     for (let attempt = 0; attempt < READS; attempt += 1) {
-      // One answer holds the snapshot and the first items, so they agree.
       const playlist = await this.#client.get(path, EVERY_TYPE);
-      const snapshot = isRecord(playlist) ? text(playlist["snapshot_id"]) : undefined;
       const items = isRecord(playlist) ? playlist["items"] : undefined;
       if (!isRecord(items)) {
         throw new SpotifyError("unsupported", this.#notReadable);
-      }
-      if (snapshot === undefined) {
-        throw new SpotifyError("api-response", "Spotify did not say which version of the playlist this is");
       }
       const raw: unknown[] = Array.isArray(items["items"]) ? items["items"] : [];
       const total = number(items["total"]) ?? Infinity;
@@ -237,22 +239,21 @@ export class PlaylistEditor {
       if (raw.length < total) {
         const rest = await this.#client.pages(`${path}/items`, EVERY_TYPE, { size: ITEMS_PER_PAGE, from: raw.length });
         raw.push(...rest.items);
-        const after = await this.#client.get(path, { fields: "snapshot_id" });
-        same = isRecord(after) && after["snapshot_id"] === snapshot && (rest.total ?? raw.length) === raw.length;
+        same = rest.total === total && raw.length === total;
       }
       if (same) {
         const tracks = raw.map(parsePlaylistItem);
-        return { snapshot, tracks, uris: tracks.map((track) => (track === undefined ? undefined : uriOf(track.id))) };
+        return { tracks, uris: tracks.map((track) => (track === undefined ? undefined : uriOf(track.id))) };
       }
     }
     throw new SpotifyError("conflict", "the playlist kept changing on Spotify while it was read; try again");
   }
 
   async #open(native: string): Promise<Open> {
-    const { uris, tracks, snapshot } = await this.#load(native);
+    const { uris, tracks } = await this.#load(native);
     const known = this.#views.get(native);
     const { ids, changed } = identify(uris, known);
-    return { native, tracks, view: { uris, ids }, snapshot, changed, known };
+    return { native, tracks, view: { uris, ids }, snapshot: undefined, changed, known };
   }
 
   /** @throws {SpotifyError} kind `conflict` if an entry cannot be found for certain. */
@@ -269,13 +270,13 @@ export class PlaylistEditor {
   /** What the playlist is after a request of ours. */
   #left(open: Open, view: View, answer: unknown): void {
     open.view = view;
-    open.snapshot = (isRecord(answer) ? text(answer["snapshot_id"]) : undefined) ?? open.snapshot;
+    open.snapshot = isRecord(answer) ? text(answer["snapshot_id"]) : undefined;
     this.#views.set(open.native, view);
   }
 
   async #deleteSongs(open: Open, uris: readonly string[]): Promise<void> {
     const answer = await this.#client.send("DELETE", `/playlists/${open.native}/items`, {
-      body: { items: uris.map((uri) => ({ uri })), snapshot_id: open.snapshot },
+      body: { items: uris.map((uri) => ({ uri })), ...(open.snapshot !== undefined && { snapshot_id: open.snapshot }) },
       repeatable: true,
     });
     this.#left(open, without(open.view, new Set(uris)), answer);
@@ -287,7 +288,7 @@ export class PlaylistEditor {
         range_start: move.start,
         range_length: move.length,
         insert_before: move.before,
-        snapshot_id: open.snapshot,
+        ...(open.snapshot !== undefined && { snapshot_id: open.snapshot }),
       },
     });
     const { uris, ids } = open.view;
@@ -330,7 +331,7 @@ export class PlaylistEditor {
       if (now === undefined || now.uris.includes(uri)) {
         throw interrupted(open, uri, keptAt.length, error);
       }
-      this.#left(open, without(open.view, new Set([uri])), { snapshot_id: now.snapshot });
+      this.#left(open, without(open.view, new Set([uri])), undefined);
     }
     const answer = await this.#putBack(open, uri, keptAt);
     const first = keptAt[0]!;
@@ -361,7 +362,7 @@ export class PlaylistEditor {
         if (now !== undefined) {
           left = keptAt.length - now.uris.filter((other) => other === uri).length;
           if (left <= 0) {
-            return { snapshot_id: now.snapshot };
+            return undefined;
           }
         }
         if (now === undefined || attempt > 0) {

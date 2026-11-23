@@ -215,7 +215,7 @@ export function parsePlaylist(item: unknown): Playlist | undefined {
     id,
     name: item["name"],
     trackCount: isRecord(item["items"]) ? number(item["items"]["total"]) : undefined,
-    description: text(item["description"]),
+    description: text(typeof item["description"] === "string" ? item["description"].trim() : undefined),
     isPublic: flag(item["public"]),
     isCollaborative: flag(item["collaborative"]),
     ownerId: isRecord(item["owner"]) ? tagged<UserId>(item["owner"]["id"]) : undefined,

@@ -134,7 +134,8 @@ describe("removing from a playlist", () => {
     await service.removeTracksFromPlaylist(P, [...ids.slice(0, 120), ...ids.slice(130)]);
     expect(fake.uris("p")).toEqual(names.slice(120, 130).map(song));
     expect(writes()).toEqual(Array(3).fill("DELETE /playlists/p/items"));
-    expect(fake.seen.filter((r) => r.method === "DELETE").every((r) => r.body["snapshot_id"] !== undefined)).toBe(true);
+    // The first names no snapshot (a read's is stale); the others name the last answer's.
+    expect(fake.seen.filter((r) => r.method === "DELETE").map((r) => r.body["snapshot_id"] !== undefined)).toEqual([false, true, true]);
   });
 
   it("removes every copy with one request when none stays", async () => {
@@ -344,7 +345,7 @@ describe("moving in a playlist", () => {
     expect(new Map(fake.dates("p"))).toEqual(dates);
     const puts = fake.seen.slice(before).filter((r) => r.method === "PUT");
     expect(puts).toHaveLength(2);
-    expect(puts.every((r) => typeof r.body["snapshot_id"] === "string")).toBe(true);
+    expect(puts.map((r) => typeof r.body["snapshot_id"])).toEqual(["undefined", "string"]);
   });
 
   it("moves to the start and to the end", async () => {
@@ -392,18 +393,29 @@ describe("moving in a playlist", () => {
     expect(fake.uris("p")).toEqual([...names.slice(110), ...names.slice(0, 110)].map(song));
   });
 
-  it("merges with a change made while it is under way", async () => {
-    const { fake, service, read, now } = world("abcd");
+  it("merges with a change made between its writes", async () => {
+    const { fake, service, read, now } = world("abcdefgh");
     const ids = await read();
+    let puts = 0;
     fake.before = ({ method }) => {
-      if (method === "PUT") {
+      if (method === "PUT" && ++puts === 2) {
         fake.before = undefined;
-        // Somebody takes the first song out, keeping the others as they are.
-        fake.playlists.get("p")!.snapshots.set("theirs", fake.current("p").slice(1));
+        // Somebody takes "h" out, keeping the others as they are.
+        fake.playlists.get("p")!.snapshots.set("theirs", fake.current("p").filter((e) => e.uri !== song("h")));
       }
     };
-    await service.movePlaylistTracks(P, [ids[3]!], 2);
-    expect(now()).toBe("dbc");
+    await service.movePlaylistTracks(P, [ids[6]!, ids[1]!, ids[2]!], 5);
+    expect(now()).toBe("adgbcef");
+  });
+
+  // Live, a read names a stale snapshot; a DELETE against it removed nothing,
+  // and taking out one copy of a repeated song added another (2026-11-23).
+  it("takes out one copy of a repeated song though a read names a stale snapshot", async () => {
+    const { fake, service, read, now } = world("abca");
+    fake.edit("p", (list) => [...list, song("b")]);
+    const ids = await read();
+    await service.removeTracksFromPlaylist(P, [ids[3]!]);
+    expect(now()).toBe("abcb");
   });
 });
 

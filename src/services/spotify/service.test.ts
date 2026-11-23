@@ -269,6 +269,14 @@ describe("SpotifyService playlists", () => {
     expect(fake.seen[0]).toMatchObject({ method: "PUT", path: "/playlists/p", body: { description: "new", public: true } });
   });
 
+  // Live, Spotify ignored an empty description and took a space.
+  it("clears a description", async () => {
+    const { service } = world();
+    const { id } = await service.createPlaylist("Mix", { description: "old" });
+    const changed = await service.updatePlaylist(id, { description: "" });
+    expect(changed.description ?? "").toBe("");
+  });
+
   it("deletes a playlist by taking it out of the library", async () => {
     const { service, fake } = world();
     fake.seedPlaylist("p", []);

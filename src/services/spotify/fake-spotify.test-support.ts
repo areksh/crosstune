@@ -6,7 +6,11 @@
  * - a playlist's items are given only to its owner and collaborators;
  * - every change makes a new snapshot; a range move is worked out against the
  *   snapshot it names and merged into the newest;
- * - DELETE names songs, and removes every copy there is;
+ * - DELETE names songs, and removes every copy there is -- in the snapshot it
+ *   names, so copies added after that one stay (seen live, 2026-11-23);
+ * - a playlist read names the snapshot of its last change of name or
+ *   description, not of its items (seen live): it cannot be written against;
+ * - an empty description is ignored (seen live);
  * - adding names a position but no snapshot, and keeps repeats;
  * - local files can be neither added nor removed, only moved;
  * - search and an artist's albums give 10 at most, the library takes 40 URIs;
@@ -51,6 +55,8 @@ interface FakePlaylist {
   collaborators: string[];
   /** Every snapshot by id, oldest first; the last is the current one. */
   snapshots: Map<string, Entry[]>;
+  /** The snapshot a read names: the one of its last change of details. */
+  shown?: string;
 }
 
 export interface SeenRequest {
@@ -347,7 +353,7 @@ export class FakeSpotify {
       public: playlist.isPublic,
       collaborative: playlist.collaborative,
       owner: { id: playlist.owner },
-      snapshot_id: [...playlist.snapshots.keys()].at(-1),
+      snapshot_id: playlist.shown ?? [...playlist.snapshots.keys()][0],
       external_urls: { spotify: `https://open.spotify.com/playlist/${id}` },
       ...(mine && {
         items: {
@@ -421,9 +427,10 @@ export class FakeSpotify {
     if (typeof body["name"] === "string") {
       playlist.name = body["name"];
     }
-    if (typeof body["description"] === "string") {
+    if (typeof body["description"] === "string" && body["description"] !== "") {
       playlist.description = body["description"];
     }
+    playlist.shown = this.#commit(id, this.current(id)).snapshot_id;
     if (typeof body["public"] === "boolean") {
       playlist.isPublic = body["public"];
     }
@@ -492,9 +499,11 @@ export class FakeSpotify {
         return keys.length !== 1 || LOCAL.test(uri) ? bad("uri") : uri;
       }),
     );
+    // Only the copies there were in the snapshot named go.
+    const then = named === undefined ? undefined : new Set(this.#playlist(id).snapshots.get(String(named))!.map((e) => e.key));
     return this.#commit(
       id,
-      this.current(id).filter((e) => e.uri === undefined || !uris.has(e.uri)),
+      this.current(id).filter((e) => e.uri === undefined || !uris.has(e.uri) || (then !== undefined && !then.has(e.key))),
     );
   }
 
