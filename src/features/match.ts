@@ -115,7 +115,7 @@ async function matchOne(
       ? missing(source, "It is there, but cannot be played.")
       : byName;
   } catch (error) {
-    if (error instanceof ServiceError && STOPS_EVERY_SONG.has(error.kind)) {
+    if (stopsEverySong(error)) {
       throw error;
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -125,6 +125,18 @@ async function matchOne(
 
 /** Errors that every song would run into. */
 const STOPS_EVERY_SONG = new Set(["authentication", "quota", "rate-limited", "not-connected", "forbidden"]);
+
+/**
+ * True for an error that every other song would run into as well -- signed
+ * out, out of quota, rate-limited, not connected, refused. A tool that looks
+ * songs up one by one records any other failure against that one song and
+ * carries on, but rethrows these: carrying on would only turn every remaining
+ * song into the same failure, one wasted request each, and hide the one thing
+ * the user has to do (sign in again, or wait).
+ */
+export function stopsEverySong(error: unknown): boolean {
+  return error instanceof ServiceError && STOPS_EVERY_SONG.has(error.kind);
+}
 
 function missing(source: Track, reason: string): SongMatch {
   return { source, grade: "missing", options: [], reason };

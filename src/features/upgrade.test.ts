@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
 import type { Playlist, Track } from "../services/model.js";
 import {
   commitUpgrades,
@@ -242,6 +243,27 @@ describe("resolveUpgrades: better quality", () => {
     const plan = await resolveUpgrades(client, { type: "favourites" });
     expect(plan.failed).toBe(1);
     expect(plan.items).toEqual([]);
+  });
+
+  it("stops the run on an error every search would hit (signed out, quota, rate limit)", async () => {
+    for (const kind of ["authentication", "quota", "rate-limited"]) {
+      const tracks: Track[] = Array.from({ length: 50 }, (_, index) => ({
+        ...sympathy,
+        id: index + 1,
+        isrc: `I${index}`,
+      }));
+      const client = resolver({
+        getFavoriteTracks: vi.fn(async () => tracks),
+        searchTracks: vi.fn(async () => {
+          throw new ServiceError("qobuz", kind, `refused: ${kind}`);
+        }),
+      });
+      await expect(resolveUpgrades(client, { type: "favourites" }, { concurrency: 2 })).rejects.toThrow(
+        `refused: ${kind}`,
+      );
+      // Not one doomed search per track.
+      expect(client.searchTracks.mock.calls.length).toBeLessThan(10);
+    }
   });
 });
 
