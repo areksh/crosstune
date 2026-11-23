@@ -23,6 +23,7 @@ import {
   type Question,
   type SongRef,
   type SyncBase,
+  type SyncSong,
 } from "./model.js";
 import { findChanges, planSync, refOf, type Choice, type Copy, type CopyPlan, type Facts, type Offered } from "./plan.js";
 
@@ -350,8 +351,13 @@ async function carryOut(
   };
   const writing: LinkState = { ...next, base: state.base, pending };
   input.save(writing);
+  // What is on disk: on a failure the caller keeps this, not an older state.
+  let latest = writing;
   try {
-    const written = await write(copies, plan.copies, plan.base);
+    const written = await write(copies, plan.copies, plan.base, state.answers, (base, left) => {
+      latest = { ...writing, pending: { base, copies: left } };
+      input.save(latest);
+    });
     const { pending: _done, ...rest } = writing;
     const done: LinkState = { ...rest, base: written.base, questions: [...plan.questions, ...written.questions] };
     next.base = written.base;
@@ -360,7 +366,7 @@ async function carryOut(
   } catch (error) {
     return {
       status: "failed",
-      state: writing,
+      state: latest,
       changes: report,
       gaps: [],
       error: error instanceof Error ? error.message : String(error),
@@ -368,20 +374,30 @@ async function carryOut(
   }
 }
 
-/** Write each copy; songs a service took but dropped become gaps. */
+/**
+ * Write each copy; songs a service took but dropped become gaps. After each
+ * copy, `progress` gets the base as learnt so far and the copies still to
+ * write: an interruption then finishes only those (a finished copy's later
+ * edits are the user's, and must not be undone).
+ */
 async function write(
   copies: readonly ReadCopy[],
   plans: readonly (Pick<CopyPlan, "service" | "before" | "after"> & { rename?: string })[],
   base: SyncBase,
+  answers: LinkState["answers"],
+  progress?: (base: SyncBase, left: PendingSync["copies"]) => void,
 ): Promise<{ base: SyncBase; questions: Question[] }> {
   const songs = base.songs.map((song) => ({ ...song, ids: { ...song.ids } }));
   const questions: Question[] = [];
+  const services = copies.map((copy) => copy.service);
+  const left = new Map(plans.map((plan) => [plan.service, plan]));
+  const now = (): SyncBase => ({ ...base, songs: songs.filter((song) => Object.keys(song.ids).length > 0) });
   for (const plan of plans) {
     const copy = copies.find((one) => one.service === plan.service)!;
     if (plan.rename !== undefined) {
       await copy.client.updatePlaylist(copy.playlistId, { name: plan.rename });
     }
-    const result = await writeCopy(copy, plan.before, plan.after);
+    const result = await writeCopy(copy, plan.before, plan.after, answers);
     questions.push(...result.questions);
     for (const id of result.dropped) {
       const song = songs.find((one) => one.ids[plan.service] === id);
@@ -390,8 +406,23 @@ async function write(
         song.gaps = { ...song.gaps, [plan.service]: "not-found" };
       }
     }
+    // A repeat it could not take out stays, there only, until the user says.
+    for (const { track, at } of result.kept) {
+      let seen = 0;
+      const place = songs.findIndex((song) => song.ids[plan.service] !== undefined && seen++ === at);
+      const gaps = Object.fromEntries(services.filter((one) => one !== plan.service).map((one) => [one, "left-out" as const]));
+      const song: SyncSong = { ids: { [plan.service]: track.id }, gaps, ...(track.isrc !== undefined && { isrc: normaliseIsrc(track.isrc) }) };
+      songs.splice(place === -1 ? songs.length : place, 0, song);
+    }
+    left.delete(plan.service);
+    if (left.size > 0) {
+      progress?.(
+        now(),
+        Object.fromEntries([...left.values()].map(({ service, before, after }) => [service, { before, after }])),
+      );
+    }
   }
-  return { base: { ...base, songs: songs.filter((song) => Object.keys(song.ids).length > 0) }, questions };
+  return { base: now(), questions };
 }
 
 function count(ids: readonly TrackId[]): Map<TrackId, number> {
@@ -410,7 +441,8 @@ async function writeCopy(
   copy: ReadCopy,
   before: readonly TrackId[],
   after: readonly TrackId[],
-): Promise<{ dropped: TrackId[]; questions: Question[] }> {
+  answers: LinkState["answers"],
+): Promise<{ dropped: TrackId[]; questions: Question[]; kept: { track: Track; at: number }[] }> {
   const { client, playlistId } = copy;
   const [had, wants] = [count(before), count(after)];
   const read = async (): Promise<Track[]> => client.getPlaylistTracks(playlistId);
@@ -467,19 +499,25 @@ async function writeCopy(
     return true;
   });
   const questions: Question[] = [];
+  const repeats: { track: Track; at: number }[] = [];
   if (surplus.length > 0) {
+    // Taking out one of a repeated song re-adds the others: only when asked to.
     const reAdded = new Set(
-      (await client.removesByReAdding?.(playlistId, surplus.map((track) => track.playlistTrackId!))) ?? [],
+      ((await client.removesByReAdding?.(playlistId, surplus.map((track) => track.playlistTrackId!))) ?? []).filter(
+        (id) => answers[`repeated ${id}`] !== "removed",
+      ),
     );
     const plain = surplus.filter((track) => !reAdded.has(track.id));
+    const staying = entries.filter((track) => !plain.includes(track));
     for (const track of surplus.filter((one) => reAdded.has(one.id))) {
       questions.push({ kind: "repeated", key: `repeated ${track.id}`, song: refOf(track), service: copy.service });
+      repeats.push({ track, at: staying.indexOf(track) });
     }
     if (plain.length > 0) {
       await client.removeTracksFromPlaylist(playlistId, plain.map((track) => track.playlistTrackId!));
     }
   }
-  return { dropped, questions };
+  return { dropped, questions, kept: repeats };
 }
 
 function movesFor(entries: readonly Track[], after: readonly TrackId[]) {
@@ -507,12 +545,16 @@ async function finishPending(
   if (strange.length > 0) {
     return { outcome: conflicted(input, state, strange.map(({ service }) => ({ kind: "interrupted", service }))) };
   }
+  let latest = state;
   try {
     const plans = SERVICES.flatMap((service) => {
       const intended = pending.copies[service];
       return intended === undefined ? [] : [{ service, ...intended }];
     });
-    const { base, questions } = await write(read.copies, plans, pending.base);
+    const { base, questions } = await write(read.copies, plans, pending.base, state.answers, (base, left) => {
+      latest = { ...state, pending: { base, copies: left } };
+      input.save(latest);
+    });
     const { pending: _done, ...rest } = state;
     const next: LinkState = {
       ...rest,
@@ -526,7 +568,7 @@ async function finishPending(
     return {
       outcome: {
         status: "failed",
-        state,
+        state: latest,
         changes: [],
         gaps: [],
         error: error instanceof Error ? error.message : String(error),

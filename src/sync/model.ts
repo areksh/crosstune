@@ -16,7 +16,14 @@ export type Gap =
   /** The service no longer offers it. */
   | "withdrawn"
   /** Its match there is another song of the list already. */
-  | "same-as";
+  | "same-as"
+  /**
+   * Removed from this copy by the user, but kept on another that could not
+   * take out one of its repeats alone (Spotify): asked about until answered.
+   */
+  | "left-out"
+  /** As `left-out`, and the user chose to keep that repeat there. */
+  | "only-there";
 
 export interface SyncSong {
   /** Its track on each copy that has it. */

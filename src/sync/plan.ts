@@ -375,6 +375,33 @@ export function planSync(
       }
     }
   }
+
+  // ---- Repeats a copy kept, as it could not take one out alone ---------------
+  for (const item of items) {
+    if (item.index === undefined || dropped.has(item) || !Object.values(item.song.gaps ?? {}).includes("left-out")) {
+      continue;
+    }
+    for (const copy of copies) {
+      const id = item.song.ids[copy.service];
+      if (id === undefined || !onCopy(copy, item)) {
+        continue;
+      }
+      const key = `repeated ${id}`;
+      const answer = facts.answers[key];
+      if (answer === "removed") {
+        dropped.add(item);
+      } else if (answer === "keep") {
+        for (const [service, gap] of Object.entries(item.song.gaps!)) {
+          if (gap === "left-out") {
+            setGap(item, service as ServiceName, "only-there");
+          }
+        }
+      } else {
+        questions.push({ kind: "repeated", key, song: refOf(item.track ?? { id, title: id }), service: copy.service });
+      }
+    }
+  }
+
   function dropIfNowhere(item: Item, _service: ServiceName): void {
     if (!copies.some((copy) => hasIt(copy, item))) {
       dropped.add(item);

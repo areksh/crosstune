@@ -26,6 +26,8 @@ export class SyncAccount implements SyncClient {
   knowsAvailability = true;
   /** Song -> another song here that is the same recording under another id. */
   readonly alias = new Map<number, number>();
+  /** One copy of a repeated song goes only by re-adding the others, as on Spotify. */
+  readdsRepeats = false;
   /** Entry ids are places, as on Spotify, rather than lasting. */
   positional = false;
   /** Fail the nth write from now (1 is the next), then work again. */
@@ -166,6 +168,17 @@ export class SyncAccount implements SyncClient {
       const playlist = this.#get(id);
       playlist.entries = playlist.entries.filter((_, index) => !gone.has(index));
     });
+  }
+
+  async removesByReAdding(id: PlaylistId, ids: readonly EntryId[]): Promise<TrackId[]> {
+    if (!this.readdsRepeats) {
+      return [];
+    }
+    const read = this.#read(id);
+    const going = read.filter((entry) => ids.includes(entry.id));
+    return [...new Set(going.map((entry) => entry.track))].filter(
+      (track) => read.filter((entry) => entry.track === track).length > going.filter((entry) => entry.track === track).length,
+    );
   }
 
   async movePlaylistTracks(id: PlaylistId, ids: readonly EntryId[], insertBefore: number): Promise<void> {

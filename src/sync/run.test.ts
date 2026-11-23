@@ -212,6 +212,56 @@ describe("a sync", () => {
   });
 });
 
+describe("a repeated song a copy cannot remove one of (Spotify)", () => {
+  async function repeated() {
+    const w = await linked([1, 2, 1, 3], ["qobuz", "spotify"]);
+    w.at("spotify").account.readdsRepeats = true;
+    w.edit("qobuz", () => [2, 1, 3]);
+    expect((await w.sync()).status).toBe("synced");
+    return w;
+  }
+
+  it("is asked about, and the removal is not put back", async () => {
+    const w = await repeated();
+    expect(w.state.questions).toMatchObject([{ kind: "repeated", service: "spotify" }]);
+    for (let round = 0; round < 3; round += 1) {
+      await w.sync();
+      expect([w.songs("qobuz"), w.songs("spotify")]).toEqual([[2, 1, 3], [1, 2, 1, 3]]);
+      expect(w.state.questions).toMatchObject([{ kind: "repeated" }]);
+    }
+  });
+
+  it("answered removed, goes from that copy too", async () => {
+    const w = await repeated();
+    const [question] = w.state.questions;
+    w.state = { ...w.state, answers: { [question!.key]: "removed" } };
+    await w.sync();
+    expect(w.songs("spotify").filter((n) => n === 1)).toHaveLength(1);
+    expect(w.state.questions).toEqual([]);
+    w.clearWrites();
+    expect((await w.sync()).status).toBe("unchanged");
+    expect(w.writes()).toEqual([]);
+  });
+
+  it("answered keep, stays there and is not asked again", async () => {
+    const w = await repeated();
+    const [question] = w.state.questions;
+    w.state = { ...w.state, answers: { [question!.key]: "keep" } };
+    await w.sync();
+    await w.sync();
+    expect([w.songs("qobuz"), w.songs("spotify")]).toEqual([[2, 1, 3], [1, 2, 1, 3]]);
+    expect(w.state.questions).toEqual([]);
+  });
+
+  it("removed there later by the user, is simply gone", async () => {
+    const w = await repeated();
+    w.edit("spotify", () => [2, 1, 3]);
+    await w.sync();
+    expect([w.songs("qobuz"), w.songs("spotify")]).toEqual([[2, 1, 3], [2, 1, 3]]);
+    expect(w.state.questions).toEqual([]);
+  });
+});
+
 describe("what is not a removal", () => {
   it("a song the service withdrew stays on the others", async () => {
     const w = await linked([1, 2, 3]);
@@ -555,6 +605,32 @@ describe("an interrupted sync", () => {
     expect((await w.sync()).status).toBe("conflict");
     expect(w.state.conflicts).toEqual([{ kind: "interrupted", service: "tidal" }]);
     expect(w.songs("qobuz")).toEqual([1, 2, 3, 8, 9]);
+  });
+
+  it("does not undo, on a copy it had finished, what the user did after", async () => {
+    const w = await linked([1, 2, 3], ["qobuz", "tidal", "spotify"]);
+    w.edit("qobuz", (songs) => [...songs, 8]);
+    w.at("spotify").account.failWrite = 1;
+    expect((await w.sync()).status).toBe("failed");
+    expect(w.songs("tidal")).toEqual([1, 2, 3, 8]);
+    w.edit("tidal", without(8));
+    expect(Object.keys(w.state.pending!.copies)).toEqual(["spotify"]);
+    await w.sync();
+    await w.sync();
+    for (const name of ["qobuz", "tidal", "spotify"] as const) {
+      expect(w.songs(name), name).toEqual([1, 2, 3]);
+    }
+  });
+
+  it("keeps what it learnt on a finished copy: a song the service dropped is a gap", async () => {
+    const w = await linked([1, 2, 3], ["qobuz", "tidal", "spotify"]);
+    w.at("tidal").account.absent.add(8);
+    w.edit("qobuz", (songs) => [...songs, 8]);
+    w.at("spotify").account.failWrite = 1;
+    expect((await w.sync()).status).toBe("failed");
+    await w.sync();
+    await w.sync();
+    expect([w.songs("qobuz"), w.songs("tidal"), w.songs("spotify")]).toEqual([[1, 2, 3, 8], [1, 2, 3], [1, 2, 3, 8]]);
   });
 
   it("takes in what the user changed meanwhile on a copy that was not being written", async () => {
