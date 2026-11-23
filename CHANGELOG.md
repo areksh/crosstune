@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Spotify's missing top tracks and similar artists are taken from Qobuz or TIDAL.
 - Spotify and TIDAL links work wherever a list is typed, as Qobuz's do. A link
   to another service than the one a tool runs on is found again there: an
-  artist by its exact name, an album by its barcode, else its title and artist.
+  artist by its exact name (never a guess between namesakes), an album by its
+  barcode, else its title and artist.
 - `accounts`, `forget <service>` (deletes what is kept about it, History
   included) and `sync` commands.
 - With more than one music service connected, the playlists made by Playlist

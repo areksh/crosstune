@@ -205,7 +205,7 @@ export function describeLinkMismatch(link: MusicLink, wanted: MusicLinkKind): st
  * has no such item. "no Qobuz artist has this id".
  */
 export function linkNotFound(link: MusicLink, error: unknown): string {
-  if (error instanceof ServiceError && (error.kind === "not-found" || error.kind === "not-connected")) {
+  if (error instanceof ServiceError && ["not-found", "not-connected", "ambiguous"].includes(error.kind)) {
     return error.message;
   }
   const service = link.kind === "label" ? "qobuz" : parseId(link.id)?.service;

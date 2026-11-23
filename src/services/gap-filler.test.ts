@@ -167,6 +167,18 @@ describe("fillGaps: another service's ids", () => {
     expect(base.getAlbum).toHaveBeenCalledWith("qobuz:z");
   });
 
+  it("chooses no artist when several here have the name, and says so", async () => {
+    const namesakes = vi.fn(async () => [
+      { id: tagId<ArtistId>("qobuz", 1), name: "Portishead" },
+      { id: tagId<ArtistId>("qobuz", 2), name: "portishead" },
+    ]);
+    const filled = fillGaps(here({ searchArtists: namesakes } as Partial<MusicService>), () => [there()], new MemoryMatches());
+    await expect(filled.getArtist(tagId<ArtistId>("spotify", 7))).rejects.toMatchObject({
+      kind: "ambiguous",
+      message: expect.stringMatching(/2 Qobuz artists are called Portishead/),
+    });
+  });
+
   it("says when the artist is not here", async () => {
     const filled = fillGaps(here({ searchArtists: vi.fn(async () => []) } as Partial<MusicService>), () => [there()], new MemoryMatches());
     await expect(filled.getArtist(tagId<ArtistId>("spotify", 7))).rejects.toMatchObject({

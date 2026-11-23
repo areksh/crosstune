@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPaste,
   describeLinkMismatch,
+  linkNotFound,
   parsePlaylistId,
   parseMusicLink,
 } from "./music-links.js";
@@ -154,6 +155,15 @@ describe("parsePlaylistId", () => {
     expect(parsePlaylistId("nope:1")).toBeUndefined();
     expect(parsePlaylistId(undefined)).toBeUndefined();
     expect(parsePlaylistId("")).toBeUndefined();
+  });
+});
+
+describe("linkNotFound", () => {
+  it("passes on why another service's item was not found here, including namesakes", async () => {
+    const { ServiceError } = await import("../services/errors.js");
+    const link = { kind: "artist", id: "spotify:4uLU6hMCjMI75M1A2tKUQC" } as const;
+    expect(linkNotFound(link, new ServiceError("qobuz", "ambiguous", "2 Qobuz artists are called X"))).toBe("2 Qobuz artists are called X");
+    expect(linkNotFound(link, new Error("HTTP 500"))).toBe("no Spotify artist has this id");
   });
 });
 

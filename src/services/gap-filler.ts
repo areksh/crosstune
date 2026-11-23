@@ -6,7 +6,8 @@
  *
  * Likewise an artist or album id of another service -- a pasted Spotify link
  * in a tool running on Qobuz -- is read there and found again here: an artist
- * by its exact name, an album by its barcode, else its exact title and artist.
+ * by its exact name (none when several here have it: a namesake is a guess),
+ * an album by its barcode, else its exact title and artist.
  */
 
 import { matchTracks, type MatchMemory } from "../features/match.js";
@@ -60,11 +61,19 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
       }
       const { name } = await owner(artistId).getArtist(artistId);
       const wanted = normaliseArtistName(name);
-      const found = (await service.searchArtists(name, 10)).find((artist) => normaliseArtistName(artist.name) === wanted);
-      if (found === undefined) {
+      const found = (await service.searchArtists(name, 10)).filter((artist) => normaliseArtistName(artist.name) === wanted);
+      if (found.length > 1) {
+        // A namesake is a guess; the user chooses, here, by name or link.
+        throw new ServiceError(
+          service.name,
+          "ambiguous",
+          `${found.length} ${label} artists are called ${name}; paste a ${label} link or type the name to choose`,
+        );
+      }
+      if (found[0] === undefined) {
         throw notHere(name);
       }
-      return found;
+      return found[0];
     },
     getAlbum: async (albumId: AlbumId): Promise<Album> => {
       if (serviceOf(albumId) === service.name) {

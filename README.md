@@ -242,8 +242,9 @@ query strings or a trailing slash:
   `https://listen.tidal.com/playlist/<id>` and the like.
 
 A link to another service than the one a tool runs on is read there (so that
-service must be connected) and found again: an artist by its exact name, an
-album by its barcode, else by its exact title and artist. What is not found is
+service must be connected) and found again: an artist by its exact name (if
+several artists there share it, none is picked and the line says so), an album
+by its barcode, else by its exact title and artist. What is not found is
 reported with the reason, as is a link of the wrong kind -- an album link
 among artists.
 
