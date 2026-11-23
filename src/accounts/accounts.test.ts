@@ -5,6 +5,7 @@ import { ServiceHub } from "../services/hub.js";
 import { tagId, type ServiceName, type UserId } from "../services/ids.js";
 import type { Account, MusicService } from "../services/service.js";
 import { Accounts, type AccountRecord, type AccountStore, type Connector } from "./accounts.js";
+import { SignInError } from "./sign-in.js";
 
 const account = (service: ServiceName, n: number): Account => ({
   id: tagId<UserId>(service, n),
@@ -106,6 +107,45 @@ describe("Accounts", () => {
     expect(keep).toHaveBeenCalledTimes(1);
     expect(saved.accounts.get("qobuz")?.id).toBe("qobuz:1");
     expect(hub.service("qobuz").account()?.id).toBe("qobuz:1");
+  });
+
+  // A ServiceError of kind "authentication" would make the server mark the
+  // service expired (and disconnect what is connected): a sign-in that fails
+  // is the user's to start again, so it says so as a SignInError.
+  it("reports a code the service refuses as a sign-in to start again, not an expired account", async () => {
+    const { accounts, signIn } = setup([
+      connector("tidal", {
+        finish: async () => {
+          throw new ServiceError("tidal", "authentication", "TIDAL did not accept the sign-in; connect TIDAL again");
+        },
+      }),
+    ]);
+    accounts.setClientId("tidal", "id");
+    const failure = signIn("tidal");
+    await expect(failure).rejects.toBeInstanceOf(SignInError);
+    await expect(failure).rejects.toThrow(/TIDAL did not accept.*[Ss]tart/s);
+    expect(accounts.view()[0]?.status).toBe("signed-out");
+  });
+
+  it("reports another account than the one known as a sign-in error, leaving the connected one", async () => {
+    let user = 1;
+    const { hub, signIn } = setup([connector("qobuz", { finish: async () => ({ music: music("qobuz", user), keep: vi.fn() }) })]);
+    await signIn("qobuz");
+    user = 2;
+    await expect(signIn("qobuz")).rejects.toBeInstanceOf(SignInError);
+    expect(hub.connected()).toEqual(["qobuz"]);
+  });
+
+  it("leaves a sign-in the service could not be reached for as it was", async () => {
+    const { accounts, signIn } = setup([
+      connector("tidal", {
+        finish: async () => {
+          throw new ServiceError("tidal", "network", "TIDAL could not be reached to sign in");
+        },
+      }),
+    ]);
+    accounts.setClientId("tidal", "id");
+    await expect(signIn("tidal")).rejects.toBeInstanceOf(ServiceError);
   });
 
   it("resumes what is saved, one service's failure leaving the others", async () => {

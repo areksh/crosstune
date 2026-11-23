@@ -148,12 +148,26 @@ export class Accounts {
     return this.#signIns.waiting(service);
   }
 
-  /** End a sign-in with the address the browser came back on. */
+  /**
+   * End a sign-in with the address the browser came back on.
+   *
+   * A refusal is a {@link SignInError}, not an authentication ServiceError:
+   * those mean a connected account stopped working, and a sign-in that failed
+   * says nothing about the account that may be connected.
+   */
   async complete(target: string): Promise<{ service: ServiceName; displayName: string }> {
     const { service, code, verifier } = this.#signIns.complete(target);
-    const { music, keep } = await this.#connector(service).finish({ code, verifier });
-    const displayName = this.#accept(music, keep);
-    return { service, displayName };
+    const label = labelOf(service);
+    const { music, keep } = await this.#connector(service)
+      .finish({ code, verifier })
+      .catch((error: unknown) => {
+        throw refused(error, `${label} did not accept that sign-in (a pasted address may be cut short). Start it again.`);
+      });
+    try {
+      return { service, displayName: this.#accept(music, keep) };
+    } catch (error) {
+      throw refused(error, error instanceof Error ? error.message : String(error));
+    }
   }
 
   /** Drop the sign-in; who it was is remembered. */
@@ -245,4 +259,9 @@ export class Accounts {
     }
     return connector;
   }
+}
+
+/** An authentication failure during a sign-in, told as a sign-in error. */
+function refused(error: unknown, message: string): unknown {
+  return error instanceof ServiceError && error.kind === "authentication" ? new SignInError(message) : error;
 }
