@@ -121,6 +121,8 @@ export class QobuzClient {
 
   #tokens?: BundleTokens;
   #validatedSecret?: string;
+  /** Set while a cached secret is unproven: see {@link initFromCache}. */
+  #onCachedSecretRejected: (() => void) | undefined;
   #session?: UserSession;
 
   constructor(options: QobuzClientOptions = {}) {
@@ -157,6 +159,7 @@ export class QobuzClient {
   async init(): Promise<void> {
     this.#tokens = await fetchBundleTokens(this.#fetch);
     this.#validatedSecret = await this.#validateSecret(this.#tokens.secrets);
+    this.#onCachedSecretRejected = undefined;
   }
 
   /**
@@ -180,8 +183,14 @@ export class QobuzClient {
    * Qobuz has since rotated its credentials the cached values become stale and
    * later requests will fail, so callers should discard the cache and fall back
    * to {@link init} on such failures.
+   *
+   * `onRejected` is how they learn of it: it is called (once) when the first
+   * signed request still fails with HTTP 400 after every retry -- what a wrong
+   * secret looks like. A signed request that gets any other answer first
+   * proves the secret, and the hook is dropped, so a later 400 of another
+   * cause does not discard a good cache.
    */
-  initFromCache(credentials: ResolvedCredentials): void {
+  initFromCache(credentials: ResolvedCredentials, onRejected?: () => void): void {
     this.#tokens =
       credentials.privateKey === undefined
         ? { appId: credentials.appId, secrets: [credentials.secret] }
@@ -191,6 +200,7 @@ export class QobuzClient {
             privateKey: credentials.privateKey,
           };
     this.#validatedSecret = credentials.secret;
+    this.#onCachedSecretRejected = onRejected;
   }
 
   /**
@@ -1181,7 +1191,17 @@ export class QobuzClient {
     return headers;
   }
 
-  /** Try each candidate secret against a signed probe; return the first valid one. */
+  /**
+   * Try each candidate secret against a signed probe; return the first valid one.
+   *
+   * Only a 400 says "wrong secret, try the next". A 5xx, a 429 or no answer at
+   * all says nothing about the secret, so it is not taken as acceptance: the
+   * probe throws (kind `network`, or `rate-limited` for a 429) and no secret is
+   * chosen. Otherwise a Qobuz hiccup during the (weekly) re-extraction would
+   * validate a wrong candidate, which the credentials cache would then keep
+   * for days while every signed request failed with 400. Any other answer
+   * (200, or the 401 of a correctly signed request with no user) accepts it.
+   */
   async #validateSecret(secrets: readonly string[]): Promise<string> {
     for (const secret of secrets) {
       const timestamp = this.#now();
@@ -1204,10 +1224,22 @@ export class QobuzClient {
         // throttling, so it must not trigger the backoff-and-retry loop.
         retryOn400: false,
       });
-      // A wrong secret is rejected with 400; anything else means it was accepted.
-      if (response.status !== 400) {
-        return secret;
+      if (response.status === 400) {
+        continue;
       }
+      if (response.status === 429) {
+        throw new QobuzError(
+          "rate-limited",
+          "Qobuz is getting too many requests to check its app secret; try again later",
+        );
+      }
+      if (response.status >= 500) {
+        throw new QobuzError(
+          "network",
+          `Qobuz failed while its app secret was checked (HTTP ${response.status}); try again later`,
+        );
+      }
+      return secret;
     }
     throw new QobuzError(
       "bundle-extraction",
@@ -1251,7 +1283,26 @@ export class QobuzClient {
         await this.#sleep(delay);
         continue;
       }
+      if (options.query?.["request_sig"] !== undefined) {
+        this.#judgeCachedSecret(response.status);
+      }
       return response;
+    }
+  }
+
+  /**
+   * The first answer to a signed request settles an unproven cached secret:
+   * a 400 that outlasted the retries rejects it, anything else proves it.
+   */
+  #judgeCachedSecret(status: number): void {
+    const onRejected = this.#onCachedSecretRejected;
+    if (onRejected === undefined) {
+      return;
+    }
+    this.#onCachedSecretRejected = undefined;
+    if (status === 400) {
+      this.#logger.debug("The cached app secret was rejected (HTTP 400)");
+      onRejected();
     }
   }
 

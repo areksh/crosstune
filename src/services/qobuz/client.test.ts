@@ -272,6 +272,49 @@ describe("QobuzClient credentials caching", () => {
     const search = recorded.find((r) => r.url.pathname.endsWith("/artist/search"));
     expect(search?.headers.get("X-App-Id")).toBe("999888777");
   });
+
+  /** A cache-primed client whose signed searches are answered, in turn, with these statuses. */
+  function cachedClient(...statuses: number[]) {
+    const base = makeFetch({ recorded: [] });
+    let calls = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/album/search")) {
+        const status = statuses[calls] ?? 200;
+        calls += 1;
+        return new Response("{}", { status });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000, sleep: async () => {} });
+    const rejected = { count: 0 };
+    client.initFromCache({ appId: "100200300", secret: "stale" }, () => {
+      rejected.count += 1;
+    });
+    return { client, rejected };
+  }
+
+  it("says the cached secret was rejected when its first signed request still fails 400", async () => {
+    const { client, rejected } = cachedClient(...Array<number>(6).fill(400));
+
+    await expect(client.searchAlbums("x", 5)).rejects.toBeInstanceOf(QobuzError);
+
+    expect(rejected.count).toBe(1);
+  });
+
+  it("does not blame the cached secret once a signed request has worked", async () => {
+    const { client, rejected } = cachedClient(200, ...Array<number>(6).fill(400));
+
+    await client.searchAlbums("x", 5);
+    await expect(client.searchAlbums("x", 5)).rejects.toBeInstanceOf(QobuzError);
+
+    expect(rejected.count).toBe(0);
+  });
+
+  it("does not blame the cached secret for a throttled 400 that a retry rides out", async () => {
+    const { client, rejected } = cachedClient(400, 400, 200);
+    await client.searchAlbums("x", 5);
+    expect(rejected.count).toBe(0);
+  });
 });
 
 describe("QobuzClient request retries on HTTP 400", () => {
@@ -361,6 +404,67 @@ describe("QobuzClient request retries on HTTP 400", () => {
     // must move straight to the next candidate, never backing off and retrying.
     await expect(client.init()).rejects.toBeInstanceOf(QobuzError);
     expect(delays).toEqual([]);
+  });
+});
+
+describe("QobuzClient secret probe", () => {
+  // Two candidates: Berlin's "qobuztestsecret001", then London's "...002".
+  const TWO_SEEDS =
+    `production:{api:{appId:"100200300"}` +
+    SEED_BLOCK +
+    `;y.initialSeed("cW9idXp0ZXN0c2VjcmV0MDAy",window.utimezone.london)` +
+    `;name:"Europe/London",info:"${"A".repeat(22)}",extras:"${"B".repeat(22)}"`;
+
+  /** A client whose probes are answered, in turn, with the given statuses. */
+  function probed(...answers: Array<number | Error>) {
+    const base = makeFetch({ recorded: [], bundleJs: TWO_SEEDS });
+    let probes = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/track/getFileUrl")) {
+        const answer = answers[probes] ?? 200;
+        probes += 1;
+        if (answer instanceof Error) {
+          throw answer;
+        }
+        return new Response("{}", { status: answer });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000, sleep: async () => {} });
+    return { client, probes: () => probes };
+  }
+
+  it("moves past a candidate rejected with 400 to the next", async () => {
+    const { client } = probed(400, 200);
+    await client.init();
+    expect(client.credentials.secret).toBe("qobuztestsecret002");
+  });
+
+  it("chooses no secret when Qobuz fails (5xx) rather than rejecting the candidate", async () => {
+    const { client, probes } = probed(503);
+
+    await expect(client.init()).rejects.toMatchObject({ kind: "network" });
+    // It neither took the first candidate nor went on to the second.
+    expect(probes()).toBe(1);
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("chooses no secret when Qobuz is limiting requests (429)", async () => {
+    const { client } = probed(400, 429);
+    await expect(client.init()).rejects.toMatchObject({ kind: "rate-limited" });
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("chooses no secret when Qobuz cannot be reached", async () => {
+    const { client } = probed(new TypeError("fetch failed"));
+    await expect(client.init()).rejects.toMatchObject({ kind: "network" });
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("accepts a candidate any other answer comes back for (e.g. 401: signed right, no user)", async () => {
+    const { client } = probed(401);
+    await client.init();
+    expect(client.credentials.secret).toBe("qobuztestsecret001");
   });
 });
 

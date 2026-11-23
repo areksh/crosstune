@@ -6,15 +6,16 @@ import { ServiceError } from "../errors.js";
 
 /**
  * Discriminates the kind of failure so callers can react without string
- * matching. `network` (Qobuz could not be reached, or did not answer in time)
- * shares its name, and meaning, with the other services' (`ServiceErrorKind`
- * in ../errors.ts).
+ * matching. `network` (Qobuz could not be reached, failed, or did not answer
+ * in time) and `rate-limited` (Qobuz asked us to slow down) share their names,
+ * and meanings, with the other services' (`ServiceErrorKind` in ../errors.ts).
  */
 export type QobuzErrorKind =
   | "bundle-extraction"
   | "authentication"
   | "ineligible-user"
   | "network"
+  | "rate-limited"
   | "api-response";
 
 /**

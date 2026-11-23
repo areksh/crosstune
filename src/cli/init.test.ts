@@ -36,9 +36,29 @@ describe("initClientWithCache", () => {
     const result = await initClientWithCache(client, store);
 
     expect(result.fromCache).toBe(true);
-    expect(client.initFromCache).toHaveBeenCalledWith(CREDS);
+    expect(client.initFromCache).toHaveBeenCalledWith(CREDS, expect.any(Function));
     expect(client.init).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
+  });
+
+  it("drops the cache when the client finds the cached secret rejected", async () => {
+    const store = memoryStore(CREDS);
+    let onRejected: (() => void) | undefined;
+    const client = {
+      init: vi.fn(),
+      initFromCache: (_: ResolvedCredentials, hook?: () => void) => {
+        onRejected = hook;
+      },
+      credentials: CREDS,
+    };
+
+    await initClientWithCache(client, store);
+    expect(store.clear).not.toHaveBeenCalled();
+    onRejected?.();
+
+    // The next start extracts the bundle afresh.
+    expect(store.clear).toHaveBeenCalledOnce();
+    expect(store.load()).toBeUndefined();
   });
 
   it("extracts and caches the credentials on a cache miss", async () => {
