@@ -78,7 +78,7 @@ export function tryAcquireLock(path: string, options: LockOptions = {}): FileLoc
     startedAt: now().toISOString(),
     host: options.host ?? hostname(),
   };
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (create(path, info)) {
       return {
