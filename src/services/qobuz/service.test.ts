@@ -42,6 +42,12 @@ describe("QobuzService", () => {
     ]);
   });
 
+  it("keeps the order of a track's fields, which --json output shows", async () => {
+    const native = { id: 12, title: "Roads", artistId: 3, albumId: "a1", playlistTrackId: 9, streamable: true };
+    const service = adapter({ searchTracks: async () => [native] });
+    expect(Object.keys((await service.searchTracks("x"))[0]!)).toEqual(Object.keys(native));
+  });
+
   it("leaves absent ids absent", async () => {
     const service = adapter({ searchTracks: async () => [{ id: 12, title: "Roads" }] });
     expect(await service.searchTracks("roads")).toEqual([{ id: "qobuz:12", title: "Roads" }]);

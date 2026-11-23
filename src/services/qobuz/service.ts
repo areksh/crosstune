@@ -56,32 +56,42 @@ function num(id: AnyId): number {
 const nums = (ids: readonly AnyId[]): number[] => ids.map(num);
 const albumNative = (id: AlbumId): string => nativeOf("qobuz", id);
 
+/** Each conversion overwrites in place, so the fields keep their order. */
 function toTrack(track: Native.Track): Track {
-  const { id, artistId, albumId, playlistTrackId, ...rest } = track;
-  return {
-    ...rest,
-    id: tag<TrackId>(id),
-    ...(artistId !== undefined && { artistId: tag<ArtistId>(artistId) }),
-    ...(albumId !== undefined && albumId.length > 0 && { albumId: tag<AlbumId>(albumId) }),
-    ...(playlistTrackId !== undefined && { playlistTrackId: tag<EntryId>(playlistTrackId) }),
-  };
+  const out: Record<string, unknown> = { ...track, id: tag<TrackId>(track.id) };
+  if (track.artistId !== undefined) {
+    out["artistId"] = tag<ArtistId>(track.artistId);
+  }
+  if (track.albumId === "") {
+    delete out["albumId"];
+  } else if (track.albumId !== undefined) {
+    out["albumId"] = tag<AlbumId>(track.albumId);
+  }
+  if (track.playlistTrackId !== undefined) {
+    out["playlistTrackId"] = tag<EntryId>(track.playlistTrackId);
+  }
+  return out as unknown as Track;
 }
 
 const toArtist = (artist: Native.Artist): Artist => ({ ...artist, id: tag<ArtistId>(artist.id) });
 const toAlbum = (album: Native.Album): Album => ({ ...album, id: tag<AlbumId>(album.id) });
 
 function toPlaylist(playlist: Native.Playlist): Playlist {
-  const { id, ownerId, ...rest } = playlist;
-  return { ...rest, id: tag<PlaylistId>(id), ...(ownerId !== undefined && { ownerId: tag<UserId>(ownerId) }) };
+  const { ownerId } = playlist;
+  return {
+    ...playlist,
+    id: tag<PlaylistId>(playlist.id),
+    ...(ownerId !== undefined && { ownerId: tag<UserId>(ownerId) }),
+  } as Playlist;
 }
 
 function toRelease(release: NativeRelease): Release {
-  const { id, artistId, ...rest } = release;
+  const { artistId } = release;
   return {
-    ...rest,
-    id: tag<AlbumId>(id),
+    ...release,
+    id: tag<AlbumId>(release.id),
     ...(artistId !== undefined && { artistId: tag<ArtistId>(artistId) }),
-  };
+  } as Release;
 }
 
 export class QobuzService implements MusicService {
