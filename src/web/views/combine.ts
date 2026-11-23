@@ -390,7 +390,8 @@ async function onAddMissing(): Promise<void> {
     return;
   }
   const to = serviceOf(target);
-  const name = plan.labels[1] ?? "the playlist";
+  // Its own name: the label may already say which service it is on.
+  const name = playlists?.find((playlist) => playlist.id === target)?.name ?? "the playlist";
   const button = el<HTMLButtonElement>("combine-add-missing");
   button.disabled = true;
   try {

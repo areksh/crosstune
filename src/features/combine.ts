@@ -21,7 +21,8 @@
  * pure core.
  */
 
-import { shortId, type PlaylistId, type TrackId } from "../services/ids.js";
+import { labelOf } from "../services/errors.js";
+import { parseId, shortId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { findDuplicateGroups, selectKeeper, toDedupTrack, type DedupTrack } from "./deduplicate.js";
@@ -148,6 +149,13 @@ export async function resolveCombine(
   const needsNames = sources.some((s) => s.type === "playlist");
   const playlists = needsNames ? await client.getUserPlaylists() : [];
   const names = new Map(playlists.map((p) => [p.id, p.name]));
+  // Copies of one playlist on several services share a name: say whose each is.
+  const serviceOf = (id: PlaylistId) => (typeof id === "string" ? parseId(id)?.service : undefined);
+  const services = new Set(sources.flatMap((s) => (s.type === "playlist" ? [serviceOf(s.playlistId)] : [])));
+  const onService = (id: PlaylistId): string => {
+    const service = serviceOf(id);
+    return services.size > 1 && service !== undefined ? ` on ${labelOf(service)}` : "";
+  };
   const inputs = await mapWithConcurrency(
     sources,
     DEFAULT_CONCURRENCY,
@@ -155,7 +163,7 @@ export async function resolveCombine(
       source.type === "favourites"
         ? { label: FAVOURITES_LABEL, tracks: await client.getFavoriteTracks() }
         : {
-            label: names.get(source.playlistId) ?? `Playlist ${shortId(source.playlistId)}`,
+            label: `${names.get(source.playlistId) ?? `Playlist ${shortId(source.playlistId)}`}${onService(source.playlistId)}`,
             tracks: await client.getPlaylistTracks(source.playlistId),
           },
   );

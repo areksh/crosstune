@@ -218,6 +218,22 @@ describe("resolveCombine", () => {
     expect(combinedTrackIds(plan)).toEqual([1, 2, 4, 3]);
   });
 
+  it("names the service of each playlist when they are on several", async () => {
+    const across: CombineClient = {
+      getFavoriteTracks: vi.fn(async () => []),
+      getPlaylistTracks: vi.fn(async () => [roads]),
+      getUserPlaylists: vi.fn(async () => [
+        { id: "tidal:a", name: "Mix" },
+        { id: "spotify:b", name: "Mix" },
+      ]),
+    } as unknown as CombineClient;
+    const plan = await resolveCombine(across, [
+      { type: "playlist", playlistId: "tidal:a" },
+      { type: "playlist", playlistId: "spotify:b" },
+    ] as never);
+    expect(plan.labels).toEqual(["Mix on TIDAL", "Mix on Spotify"]);
+  });
+
   it("passes the options through", async () => {
     const plan = await resolveCombine(
       client(),

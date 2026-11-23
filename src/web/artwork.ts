@@ -1,8 +1,8 @@
 /**
  * Optional album artwork (see docs/adr/0004-optional-artwork.md).
  *
- * Covers are the one thing the page loads from Qobuz itself (its image
- * server), so they are off by default. While off, a cover is an `<img>` that
+ * Covers are the one thing the page loads from a music service itself (the
+ * image servers of Qobuz, TIDAL and Spotify), so they are off by default. While off, a cover is an `<img>` that
  * keeps its URL in `data-src` and has no `src`, so no request is made; turning
  * the setting on copies `data-src` into `src`. The choice is remembered in
  * this browser only.
