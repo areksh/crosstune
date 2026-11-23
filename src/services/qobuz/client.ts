@@ -9,7 +9,7 @@
 
 import { parseLoginResponse, type UserSession } from "./auth.js";
 import { fetchBundleTokens, type BundleTokens } from "./bundle.js";
-import { buildUrl, paths } from "./endpoints.js";
+import { buildUrl, paths, REQUEST_TIMEOUT_MS } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
   parseAlbumDetails,
@@ -1240,7 +1240,7 @@ export class QobuzClient {
 
     const retryOn400 = options.retryOn400 ?? true;
     for (let attempt = 0; ; attempt += 1) {
-      const response = await this.#fetch(url, init);
+      const response = await this.#fetchOnce(method, path, url, init);
       this.#logger.debug(`${method} ${path} -> ${response.status}`);
       if (response.status === 400 && retryOn400 && attempt < MAX_RETRIES) {
         const delay = RETRY_BASE_MS * 2 ** attempt;
@@ -1252,6 +1252,20 @@ export class QobuzClient {
         continue;
       }
       return response;
+    }
+  }
+
+  /**
+   * One try, with a time limit of its own (a retry starts a fresh one). Qobuz
+   * not answering, or the connection breaking off, is a `network` error rather
+   * than whatever `fetch` threw, so callers can tell it from a refusal.
+   */
+  async #fetchOnce(method: string, path: string, url: URL, init: RequestInit): Promise<Response> {
+    try {
+      return await this.#fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    } catch (cause) {
+      this.#logger.debug(`${method} ${path} -> no answer`);
+      throw new QobuzError("network", "Qobuz could not be reached", { cause });
     }
   }
 

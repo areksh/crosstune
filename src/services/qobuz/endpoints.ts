@@ -7,6 +7,12 @@
 
 export const BASE_URL = "https://www.qobuz.com/api.json/0.2";
 
+/**
+ * A request Qobuz has not answered by then has failed (the same limit as
+ * TIDAL's). Without one, a connection that stalls would hang the run.
+ */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
 export const paths = {
   userLogin: "/user/login",
   oauthCallback: "/oauth/callback",

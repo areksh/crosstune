@@ -364,6 +364,43 @@ describe("QobuzClient request retries on HTTP 400", () => {
   });
 });
 
+describe("QobuzClient network failures", () => {
+  it("reports a request Qobuz never answers as a network error", async () => {
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded });
+    const cause = new TypeError("fetch failed");
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/album/search")) {
+        throw cause;
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+
+    const failure = client.searchAlbums("x", 5);
+
+    await expect(failure).rejects.toBeInstanceOf(QobuzError);
+    await expect(failure).rejects.toMatchObject({ kind: "network", service: "qobuz", cause });
+  });
+
+  it("gives every request a time limit", async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const base = makeFetch({ recorded: [] });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.searchAlbums("x", 5);
+
+    // The probe and the search (the bundle is fetched elsewhere).
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+  });
+});
+
 describe("QobuzClient.loginWithOAuthCode", () => {
   it("exchanges the code for a token, then a session", async () => {
     const { client, recorded } = await initedClient({
