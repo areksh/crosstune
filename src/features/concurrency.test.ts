@@ -63,4 +63,45 @@ describe("mapWithConcurrency", () => {
     const result = await mapWithConcurrency([1, 2], 10, async (n) => n + 1);
     expect(result).toEqual([2, 3]);
   });
+
+  it("runs one at a time when the limit is zero, negative, fractional or not a number", async () => {
+    for (const limit of [0, -3, Number.NaN, 0.5]) {
+      const result = await mapWithConcurrency([1, 2, 3], limit, async (n) => n * 2);
+      expect(result).toEqual([2, 4, 6]);
+      expect(Object.keys(result)).toEqual(["0", "1", "2"]);
+    }
+  });
+
+  it("floors a fractional limit", async () => {
+    const tracker = controllable();
+    const promise = mapWithConcurrency([1, 2, 3, 4], 2.9, tracker.worker);
+    await Promise.resolve();
+    expect(tracker.maxActive).toBe(2);
+    for (const item of [1, 2, 3, 4]) {
+      tracker.release.get(item)?.();
+      await Promise.resolve();
+    }
+    expect(await promise).toEqual([10, 20, 30, 40]);
+  });
+
+  it("stops claiming new items once one has failed, and rejects with the first error", async () => {
+    const started: number[] = [];
+    const items = Array.from({ length: 100 }, (_, index) => index);
+    const promise = mapWithConcurrency(items, 3, async (n) => {
+      started.push(n);
+      await Promise.resolve();
+      if (n === 1) {
+        throw new Error("first");
+      }
+      if (n === 2) {
+        throw new Error("second");
+      }
+      return n;
+    });
+    await expect(promise).rejects.toThrow("first");
+    // Let any runner that was still going finish its current item.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The three first items were in flight; nothing beyond a few more is asked for.
+    expect(started.length).toBeLessThan(10);
+  });
 });
