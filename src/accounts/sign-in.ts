@@ -66,7 +66,7 @@ export class SignIns {
    */
   complete(target: string): CompletedSignIn {
     const url = parse(target);
-    const service = url === undefined ? undefined : /^\/callback\/([a-z]+)$/.exec(url.pathname)?.[1];
+    const service = url === undefined ? undefined : serviceAt(url);
     if (url === undefined || !isServiceName(service)) {
       throw new SignInError("That is not the address a sign-in ends on.");
     }
@@ -99,6 +99,13 @@ export class SignIns {
   #expired(waiting: Waiting): boolean {
     return this.#now() - waiting.startedAt > SIGN_IN_MINUTES * 60_000;
   }
+}
+
+/** The service an address is for. Qobuz is sent to the bare address. */
+function serviceAt(url: URL): string | undefined {
+  return url.pathname === "/" && url.searchParams.has("code_autorisation")
+    ? "qobuz"
+    : /^\/callback\/([a-z]+)$/.exec(url.pathname)?.[1];
 }
 
 function codeOf(service: ServiceName, params: URLSearchParams): string | undefined {

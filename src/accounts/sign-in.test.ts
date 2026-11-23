@@ -115,6 +115,14 @@ describe("SignIns", () => {
       expect(() => s.complete("/callback/qobuz?code_autorisation=q1")).toThrow(/not expected/);
     });
 
+    it("comes back to the bare address, as Qobuz has always been sent", () => {
+      const { signIns: s } = signIns();
+      s.start("qobuz");
+      expect(s.complete("/?code_autorisation=q1")).toMatchObject({ service: "qobuz", code: "q1" });
+      s.start("qobuz");
+      expect(s.complete("http://localhost:53683/?code_autorisation=q2").code).toBe("q2");
+    });
+
     it("is never taken for another service", () => {
       const { signIns: s } = signIns();
       s.start("tidal");
