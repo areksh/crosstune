@@ -115,6 +115,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A new web UI: your library first, in a new look.** The page opens on your
+  playlists from every connected service, in a sidebar with a coloured dot for
+  each service; tabs at the top (All, Qobuz, TIDAL, Spotify) filter it without
+  reloading the page. A playlist's page has its tools as buttons (Find repeats,
+  Upgrade, Copy to..., Link, Stats, Export), and each opens on that playlist's
+  own service, so the "choose a service at the bottom left" notice is gone.
+  Favourites and All playlists have pages of their own per service; tools that
+  start from scratch are under **+ New**, managed playlists and links under
+  **Jobs**, and Accounts and the artwork setting under **Settings**. The look
+  is new too: near-black, rounded, with each page tinted by its cover. Album
+  artwork is still off until you turn it on; until then covers are drawn from
+  the album's or playlist's name, and nothing is fetched. Old addresses
+  (`#/playlists/...`, `#/accounts`) still work.
 - **The app is now called crosstune**, as it works with TIDAL and Spotify as
   well as Qobuz: the command is `crosstune`, and its settings live in
   `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that
