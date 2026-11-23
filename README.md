@@ -29,6 +29,9 @@ APIs. Connect each on the **Accounts** page of the web UI, or with
   TIDAL connected, they are taken from there and matched back.
 - Choose the service in the sidebar. Playlists, Library stats and Combine can
   show **all services** at once; every song and playlist names its service.
+  With all of them shown, Combine compares playlists across services: *Only in
+  the first* lists what a Qobuz playlist has that a Spotify one lacks (matched
+  by ISRC, then artist and title), and *Add these to ...* copies them over.
 - **Copy to another service** (a playlist's menu, or "On" when making a new
   playlist) matches songs by ISRC, then by name. Uncertain matches are shown for
   you to choose; your choices are remembered (`matches.json`).
@@ -1137,7 +1140,10 @@ playlist tells you what its next refresh will do to your edits.
    do not want.
 3. Save to a new playlist (named "A + B" until you change it) or add to an
    existing one (tracks already in it are skipped). The save bar shows the
-   selection's track count and running time.
+   selection's track count and running time. With exactly two playlists and
+   *only what the first has*, *Add these to ...* adds the ticked songs to the
+   second playlist instead, on its own service (found there and reviewed
+   first, when that is another service).
 
 **Library stats:**
 

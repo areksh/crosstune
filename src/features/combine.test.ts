@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Track } from "../services/model.js";
 import {
+  missingGoesTo,
   combinedTrackIds,
   combineTracks,
   formatCombineReport,
@@ -258,5 +259,20 @@ describe("formatCombineReport", () => {
     const report = formatCombineReport(plan, "only-first");
     expect(report).toContain("In more than one: 1; in all 3: 0");
     expect(report).toContain("Result (songs only in A): 0 tracks");
+  });
+});
+
+describe("missingGoesTo", () => {
+  const a = { type: "playlist", playlistId: "qobuz:1" } as const;
+  const b = { type: "playlist", playlistId: "spotify:x" } as const;
+
+  it("offers the second playlist for what only the first has", () => {
+    expect(missingGoesTo("only-first", [a, b])).toBe("spotify:x");
+  });
+
+  it("offers nothing for other modes, more inputs, or favourites second", () => {
+    expect(missingGoesTo("merge", [a, b])).toBeUndefined();
+    expect(missingGoesTo("only-first", [a, b, a])).toBeUndefined();
+    expect(missingGoesTo("only-first", [a, { type: "favourites" }])).toBeUndefined();
   });
 });

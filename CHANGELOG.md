@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shown on every page until you settle it, with each copy's changes side by
   side; a linked playlist is marked in Playlists and on its own page.
 - Spotify's missing top tracks and similar artists are taken from Qobuz or TIDAL.
+- Combine compares playlists across services (with *All services* shown): what
+  one playlist has and the other lacks, and *Add these to ...* copies it over.
 - Spotify and TIDAL links work wherever a list is typed, as Qobuz's do. A link
   to another service than the one a tool runs on is found again there: an
   artist by its exact name (never a guess between namesakes), an album by its

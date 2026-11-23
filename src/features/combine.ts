@@ -121,6 +121,16 @@ export function sourcesProblem(sources: readonly CombineSource[]): string | unde
 }
 
 /**
+ * Where "only in the first" can copy what the second playlist lacks: the
+ * second playlist, when there are exactly two and it is one (on any service;
+ * the songs are found there first).
+ */
+export function missingGoesTo(mode: CombineMode, sources: readonly CombineSource[]): PlaylistId | undefined {
+  const second = sources[1];
+  return mode === "only-first" && sources.length === 2 && second?.type === "playlist" ? second.playlistId : undefined;
+}
+
+/**
  * Fetch each source's tracks (concurrently, keeping input order) and combine
  * them into a reviewable plan (phase one; nothing is written).
  *

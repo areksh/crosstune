@@ -9,11 +9,12 @@
  * ordering live in src/features/combine.ts.
  */
 
-import type { PlaylistId, TrackId } from "../../services/ids.js";
+import { missingGoesTo, type CombineMode } from "../../features/combine.js";
+import { serviceOf, type PlaylistId, type TrackId } from "../../services/ids.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
-import { Destination } from "../transfer.js";
+import { describeTransfer, Destination, reviewTransfer, sendPicks } from "../transfer.js";
 import { keepUpdated } from "./managed.js";
 
 type Source = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
@@ -41,6 +42,8 @@ const FAVOURITES = "favourites";
 let playlists: Playlist[] | undefined;
 let lastSuggestedName = "";
 let plan: CombinePlan | undefined;
+/** Where "Add these to..." copies what only the first has, for the plan shown. */
+let missingTarget: PlaylistId | undefined;
 let destination: Destination;
 
 /** Wire up the combine view. Call once on load. */
@@ -52,6 +55,7 @@ export function initCombineView(): void {
   el("combine-resolve").addEventListener("click", () => void onResolve());
   el("combine-commit").addEventListener("click", () => void onCommit());
   el("combine-keep-updated").addEventListener("click", onKeepUpdated);
+  el("combine-add-missing").addEventListener("click", () => void onAddMissing());
   // Once there is a result, changing how to combine re-combines.
   const recombine = (): void => {
     if (plan !== undefined) {
@@ -213,6 +217,7 @@ async function onResolve(): Promise<void> {
       keep: el<HTMLSelectElement>("combine-keep").value,
       matchSongs: el<HTMLInputElement>("combine-match-songs").checked,
     });
+    missingTarget = missingGoesTo(radioValue("combine-mode", "merge") as CombineMode, sources);
     render(plan);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -224,6 +229,11 @@ async function onResolve(): Promise<void> {
 
 function render(result: CombinePlan): void {
   renderOverlap(result);
+  const offer = missingTarget !== undefined && result.tracks.length > 0;
+  el("combine-missing").hidden = !offer;
+  if (offer) {
+    el("combine-add-missing").textContent = `Add these to ${result.labels[1] ?? "playlist 2"}`;
+  }
   const list = el("combine-tracks");
   list.textContent = "";
   for (const { track, inputs } of result.tracks) {
@@ -358,6 +368,54 @@ function buildTarget(): CommitTarget | string {
   }
   const value = el<HTMLSelectElement>("combine-playlist-select").value;
   return value === "" ? "Choose a playlist." : { type: "existing", playlistId: value as PlaylistId };
+}
+
+/**
+ * Copy what only the first playlist has into the second: written as it is when
+ * the songs are on the second's service already, else found there and
+ * reviewed first, as any copy to another service is.
+ */
+async function onAddMissing(): Promise<void> {
+  const target = missingTarget;
+  const resultNode = el("combine-commit-result");
+  const errorNode = el("combine-commit-error");
+  showError(errorNode, undefined);
+  showError(resultNode, undefined);
+  const ids = selectedTrackIds();
+  if (target === undefined || plan === undefined) {
+    return;
+  }
+  if (ids.length === 0) {
+    showError(errorNode, "Select at least one track.");
+    return;
+  }
+  const to = serviceOf(target);
+  const name = plan.labels[1] ?? "the playlist";
+  const button = el<HTMLButtonElement>("combine-add-missing");
+  button.disabled = true;
+  try {
+    if (ids.every((id) => serviceOf(id) === to)) {
+      const result = await api<{ added: TrackId[]; skipped: TrackId[] }>(
+        "POST",
+        "/api/commit",
+        { tool: "combine", target: { type: "existing", playlistId: target }, trackIds: ids },
+        to,
+      );
+      showError(resultNode, `Added ${tracks(result.added.length)} to ${name}.`);
+    } else {
+      const byId = new Map(plan.tracks.map(({ track }) => [track.id, track]));
+      const picks = await reviewTransfer({ tracks: ids.flatMap((id) => byId.get(id) ?? []) }, to);
+      if (picks === undefined) {
+        return;
+      }
+      showError(resultNode, describeTransfer(to, name, await sendPicks(to, { type: "existing", playlistId: target }, picks)));
+    }
+    setStep("combine-steps", 3);
+  } catch (error) {
+    showError(errorNode, (error as Error).message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function onCommit(): Promise<void> {
