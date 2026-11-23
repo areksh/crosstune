@@ -2,59 +2,25 @@
  * TIDAL as a {@link MusicService}, over its official API (OpenAPI document
  * 1.10.258, read 2026-11-23). Written from the document alone.
  *
- * To confirm with a live probe (the document does not settle these):
+ * Probed live on 2026-11-23 with a user's token (scratch playlists only):
  *
- * Access
- *  1. Which of these a third-party app gets with a user's token. `GET /tracks`
- *     (so finding by ISRC) lists only the INTERNAL scope `r_usr` for signed-in
- *     users; `GET /playlists`, search and the collections list it beside the
- *     third-party scopes, read here as "either". 401 and 403 are not listed at
- *     all.
- *  2. Rate limits; whether a 429 carries `Retry-After` (seconds or a date).
- *  3. Whether `Idempotency-Key` also replays a *failed* answer (429 or 5xx): a
- *     retry with the same key could then never succeed within the hour.
- * Reading
- *  4. Nested includes on relationship endpoints to three levels
- *     (`items.albums.coverArt`), unqualified where tracks and videos both have
- *     the relationship; sent comma-separated.
- *  5. An empty list is `data: []` (the schema does not require `data`); without
- *     it the read fails rather than call the playlist empty.
- *  6. `links.next` without a base path, and with the cursor alone enough to go
- *     on from our own path and parameters. Page sizes.
- *  7. How a track that is not available in the user's country appears: taken to
- *     stay in the list, without an included resource (it then keeps its place
- *     as "Unavailable track", playability unknown).
- *  8. `availability` (deprecated for `usageRules`, but simpler): that it is
- *     sent, and that a list without STREAM means "cannot be played".
- *  9. The `mediaTags` values (see models.ts).
- * 10. The first of a track's or album's `artists` is its main one, and a track's
- *     first album the one to show. `externalLinks` hold a TIDAL_SHARING https
- *     link. Artwork hosts (for the page's content policy).
- * 11. Order of an artist's `tracks`: hoped to be by popularity (each track has a
- *     `popularity` to sort by if not). `collapseBy=FINGERPRINT` folds copies.
- * 12. An artist's `albums`: their order (sorted here) and whether they include
- *     albums the artist only appears on.
- * 13. Search results come in order of relevance, and their first page within
- *     `/searchResults` itself, with a `next` link when there is more.
- * 14. `filter[isrc]` matches upper-case codes without hyphens, and answers an
- *     unknown one with an empty list (404 is taken the same way).
- * 15. `filter[owners.id]=me` lists every playlist the user owns, those in
- *     folders too. Playlists they only collaborate on are not listed.
- * Writing
- * 16. An add without `positionBefore` appends, in the order given, and with
- *     `onDuplicates: ADD` keeps repeats within one request.
- * 17. A move puts the entries in the order of the request, not of the playlist.
- * 18. Item ids stay the same through other edits and moves, and are unique at
- *     least within a playlist. An itemId sent with another resource's id is
- *     refused.
- * 19. What removing an entry that is already gone does: whether it fails the
- *     batch or is ignored (both are handled).
- * 20. `accessType` UNLISTED is the least public a playlist can be made, and is
- *     what `isPublic: false` gives; a new playlist without one may be PUBLIC, so
- *     it is always sent. An empty `description` clears it. Names are at most
- *     250 characters and descriptions 500; longer ones are refused.
- * 21. The most items a playlist holds (409 TOO_MANY_ITEMS_IN_PLAYLIST).
- * 22. Favourites: adding again what is there already changes nothing.
+ *  - Confirmed: ISRC lookup, search and collections work for a third-party app
+ *    (1); a 429 carries `Retry-After` in seconds (it said 4), and a retry with the same
+ *    `Idempotency-Key` then succeeds (2, 3); nested includes (4); an empty list
+ *    is `data: []` (5); paging by cursor (a 172-song playlist read whole, 6);
+ *    `availability` holds STREAM and `mediaTags` LOSSLESS (8, 9); TIDAL_SHARING
+ *    links and artwork on resources.tidal.com (10); top tracks by popularity
+ *    (11); search by relevance (13); an unknown ISRC is an empty list (14);
+ *    `filter[owners.id]=me` lists the user's playlists (15); adds append in the
+ *    order given and keep repeats (16); a move keeps the request's order (17);
+ *    item ids last through moves and removals (18); an entry already gone is
+ *    left out of a removal (19); UNLISTED is private, an empty description
+ *    clears it, and a name over 250 characters is a 400 (20, now refused here).
+ *  - Found: one ISRC's copies may list a track twice (now given once).
+ *  - Not seen: a track unavailable in the user's country (7); whether an
+ *    artist's albums include ones they only appear on (12); the most items a
+ *    playlist holds (21); adding a favourite twice (22, not probed: it writes
+ *    to the user's library).
  */
 
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
@@ -350,7 +316,9 @@ export class TidalService implements MusicService {
         throw error;
       }
     }
-    return tracks.filter((track) => track.isrc !== undefined && normaliseIsrc(track.isrc) === isrc);
+    // TIDAL may list one track twice across pages.
+    const copies = tracks.filter((track) => track.isrc !== undefined && normaliseIsrc(track.isrc) === isrc);
+    return [...new Map(copies.map((track) => [track.id, track])).values()];
   }
 
   async getArtist(artistId: ArtistId): Promise<Artist> {
@@ -508,8 +476,9 @@ export class TidalService implements MusicService {
   }
 
   async createPlaylist(name: string, options: PlaylistOptions = {}): Promise<Playlist> {
-    const { account } = await this.#whoever();
     const { description } = options;
+    withinLimits(name, description);
+    const { account } = await this.#whoever();
     const document = await this.#client.send("POST", "/playlists", {
       data: {
         type: "playlists",
@@ -526,6 +495,7 @@ export class TidalService implements MusicService {
   async updatePlaylist(playlistId: PlaylistId, changes: PlaylistChanges): Promise<Playlist> {
     const id = native(playlistId);
     const { name, description, isPublic } = changes;
+    withinLimits(name, description);
     const attributes = {
       ...(name !== undefined && { name }),
       ...(description !== undefined && { description }),
@@ -716,4 +686,17 @@ function found<T>(value: T | undefined): T {
     throw new ServiceError("tidal", "not-found", "TIDAL says nothing about it");
   }
   return value;
+}
+
+/** TIDAL refuses longer ones with an error whose text is not shown; say it here. */
+const NAME_LIMIT = 250;
+const DESCRIPTION_LIMIT = 500;
+
+function withinLimits(name: string | undefined, description: string | undefined): void {
+  if (name !== undefined && name.length > NAME_LIMIT) {
+    throw new ServiceError("tidal", "unsupported", `TIDAL takes playlist names of at most ${NAME_LIMIT} characters`);
+  }
+  if (description !== undefined && description.length > DESCRIPTION_LIMIT) {
+    throw new ServiceError("tidal", "unsupported", `TIDAL takes descriptions of at most ${DESCRIPTION_LIMIT} characters`);
+  }
 }

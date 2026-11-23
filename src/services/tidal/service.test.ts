@@ -471,6 +471,27 @@ describe("TidalService catalogue", () => {
     expect(fake.requests.filter((r) => r.path === "/tracks").every((r) => !r.query.get("filter[isrc]")!.includes(","))).toBe(true);
   });
 
+  // Live, TIDAL gave one track twice among an ISRC's 60 copies.
+  it("gives each copy of a recording once, though TIDAL lists it twice", async () => {
+    const { fake, service } = setup();
+    await service.load();
+    const copy = { id: "1", type: "tracks", attributes: { title: "Glory Box", isrc: "GBAAA0000001", duration: "PT5M6S" } };
+    fake.instead.push({ status: 200, body: { data: [copy, copy], links: {} } });
+    expect(natives((await service.findByIsrc(["GBAAA0000001"])).get("GBAAA0000001") ?? [])).toEqual(["1"]);
+  });
+
+  // Live, TIDAL refused a 251-character name with a 400 whose text is not repeated.
+  it("refuses a name or description longer than TIDAL takes, before asking", async () => {
+    const { fake, service } = setup();
+    await service.load();
+    const before = fake.requests.length;
+    await expect(service.createPlaylist("x".repeat(251))).rejects.toMatchObject({ message: expect.stringMatching(/250 characters/) });
+    await expect(service.updatePlaylist(tagId<PlaylistId>("tidal", "p"), { description: "x".repeat(501) })).rejects.toMatchObject({
+      message: expect.stringMatching(/500 characters/),
+    });
+    expect(fake.requests).toHaveLength(before);
+  });
+
   it("takes a 404 for an ISRC as having none", async () => {
     const { fake, service } = setup();
     await service.load();
