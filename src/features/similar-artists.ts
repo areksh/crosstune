@@ -34,7 +34,7 @@
  * {@link addTracksToExistingPlaylist} with {@link similarTrackIds}.
  */
 
-import type { Artist, Track } from "../qobuz/index.js";
+import type { Artist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import {
   fetchTopTrackPool,

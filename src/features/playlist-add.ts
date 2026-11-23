@@ -7,7 +7,7 @@
  * depends on are confirmed by reading the playlist back.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import type { Destination } from "./playlist-draft.js";
 
 /** Adds tracks; QobuzClient satisfies it. */

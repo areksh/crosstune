@@ -21,7 +21,7 @@
  * pure core.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { findDuplicateGroups, selectKeeper, toDedupTrack, type DedupTrack } from "./deduplicate.js";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Artist, Track } from "../qobuz/index.js";
+import type { Artist, Track } from "../services/model.js";
 import {
   describeEstimate,
   estimateSimilar,

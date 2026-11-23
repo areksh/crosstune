@@ -12,7 +12,7 @@
  * Pure and free of Node dependencies, so the web UI uses it too.
  */
 
-import type { Artist, Track } from "../qobuz/index.js";
+import type { Artist, Track } from "../services/model.js";
 import { parseQobuzLink } from "./qobuz-links.js";
 import { compileArtistTerm, normaliseArtistName } from "./track-filter.js";
 

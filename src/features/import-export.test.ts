@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Album, Artist, Playlist, Track } from "../qobuz/index.js";
+import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import {
   buildBackup,
   collectCollection,

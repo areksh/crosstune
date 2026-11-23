@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import {
   commitUpgrades,
   formatUpgradeReport,

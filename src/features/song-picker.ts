@@ -21,7 +21,7 @@
  * batches) and the favourites are fetched once per run.
  */
 
-import type { Track } from "../qobuz/index.js";
+import type { Track } from "../services/model.js";
 import { toDedupTrack, trackSignature } from "./deduplicate.js";
 import type { Exclusion } from "./track-filter.js";
 

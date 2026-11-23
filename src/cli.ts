@@ -360,7 +360,7 @@ import {
   formatUndoResult,
   planUndo,
 } from "./features/undo.js";
-import { QobuzClient, QobuzError, type UserSession } from "./qobuz/index.js";
+import { QobuzClient, QobuzError, type UserSession } from "./services/qobuz/index.js";
 
 /**
  * Whether the current run was primed from cached bundle credentials. Tracked so

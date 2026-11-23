@@ -22,14 +22,7 @@
  * {@link MAX_ARTISTS}; the plan says when the cap cut the list short.
  */
 
-import type {
-  Album,
-  Artist,
-  Playlist,
-  Release,
-  ReleaseType,
-  Track,
-} from "../qobuz/index.js";
+import type { Album, Artist, Playlist, Release, ReleaseType, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { editionKey, isByArtist, type ArtistReleasesClient } from "./discography.js";
 import { fetchAlbumTracks, type AlbumTracksClient } from "./playlist-from-albums.js";

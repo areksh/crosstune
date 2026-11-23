@@ -8,7 +8,7 @@
  * same list without reading Qobuz (and a retry, or another machine, agrees).
  */
 
-import type { Artist, Track } from "../../qobuz/index.js";
+import type { Artist, Track } from "../../services/model.js";
 import { seededRandom, shuffle } from "../../features/combine.js";
 import { fetchArtistTracks, type SimilarArtistsClient } from "../../features/similar-artists.js";
 import { SongPicker, songKeys } from "../../features/song-picker.js";

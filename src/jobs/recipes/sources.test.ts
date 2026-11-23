@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Artist, Track } from "../../qobuz/index.js";
+import type { Artist, Track } from "../../services/model.js";
 import { validateJob, type CombinedSource, type DiscoverySource, type SmartSource } from "../model.js";
 import { resolveCombined } from "./combined.js";
 import { stableShuffle } from "./common.js";

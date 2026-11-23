@@ -22,7 +22,7 @@
  * for hand-editing or moving lists between services.
  */
 
-import type { Album, Artist, Playlist, Track } from "../qobuz/index.js";
+import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
 import {

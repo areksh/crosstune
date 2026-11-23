@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { QobuzError } from "../qobuz/index.js";
+import { QobuzError } from "../services/qobuz/index.js";
 import { tryAcquireLock } from "../cli/file-lock.js";
 import {
   emptyJobState,

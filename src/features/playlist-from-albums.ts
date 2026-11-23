@@ -27,7 +27,7 @@
  * stubs; QobuzClient satisfies them structurally.
  */
 
-import type { Album, Playlist, Track } from "../qobuz/index.js";
+import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
 import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";

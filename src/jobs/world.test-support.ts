@@ -4,7 +4,7 @@
  * and favourite dates -- enough for sources and tidy-ups to run against.
  */
 
-import type { Track } from "../qobuz/index.js";
+import type { Track } from "../services/model.js";
 import { FakeAccount } from "../features/fake-account.test-support.js";
 
 const cd = { bitDepth: 16, samplingRate: 44.1 };

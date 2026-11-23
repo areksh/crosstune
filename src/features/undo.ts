@@ -21,7 +21,7 @@
  * or removed, and changed playlist details put back.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import {
   laterConflicts,
   type FavouriteType,

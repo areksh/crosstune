@@ -15,7 +15,7 @@
  * one like the user's edits, and is respected.
  */
 
-import { QobuzError, type Playlist, type Track } from "../qobuz/index.js";
+import { ServiceError, type Playlist, type Track } from "../services/model.js";
 import type { UpgradeResolverClient } from "../features/upgrade.js";
 import {
   capList,
@@ -115,13 +115,16 @@ export class RefreshWriteError extends Error {
   }
 }
 
-/** True for Qobuz's "no such thing" (HTTP 404). */
+/** True for a service's "no such thing" (Qobuz's is an HTTP 404). */
 export function isNotFound(error: unknown): boolean {
-  return error instanceof QobuzError && error.kind === "api-response" && /HTTP 404/.test(error.message);
+  return (
+    error instanceof ServiceError &&
+    (error.kind === "not-found" || (error.kind === "api-response" && /HTTP 404/.test(error.message)))
+  );
 }
 
 function isAuthentication(error: unknown): boolean {
-  return error instanceof QobuzError && error.kind === "authentication";
+  return error instanceof ServiceError && error.kind === "authentication";
 }
 
 const EMPTY_PREVIEW: RefreshPreview = {

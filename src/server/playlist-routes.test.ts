@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
 import { Journal, recordingClient } from "../features/journal.js";
-import type { Playlist } from "../qobuz/index.js";
+import type { Playlist } from "../services/model.js";
 import { handleApi, type ApiDeps, type QobuzApiService } from "./router.js";
 
 const PORT = 4321;

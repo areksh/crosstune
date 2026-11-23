@@ -8,7 +8,7 @@
  * stops every job until it is fixed, and is remembered in the global flags.
  */
 
-import { QobuzError } from "../qobuz/index.js";
+import { ServiceError } from "../services/model.js";
 import { runOrder } from "./dependencies.js";
 import type { InvalidJob, Job, JobState, RunResultSummary } from "./model.js";
 import { RefreshWriteError, runPass, type RefreshClient } from "./refresh.js";
@@ -174,7 +174,7 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
       const cause = error instanceof RefreshWriteError ? error.cause : error;
       const base = error instanceof RefreshWriteError ? error.state : state;
       const message = cause instanceof Error ? cause.message : String(cause);
-      if (cause instanceof QobuzError && cause.kind === "authentication") {
+      if (cause instanceof ServiceError && cause.kind === "authentication") {
         // Not this job's fault: count nothing, and stop until signed in again.
         if (options.dryRun !== true) {
           if (base !== state) {

@@ -27,7 +27,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { toDedupTrack, trackSignature } from "./deduplicate.js";
 

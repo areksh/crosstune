@@ -16,7 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { RELEASE_TYPES, type ReleaseType } from "../qobuz/index.js";
+import { RELEASE_TYPES, type ReleaseType } from "../services/model.js";
 import {
   COMBINE_KEEPS,
   COMBINE_MODES,

@@ -11,7 +11,7 @@
  * cannot play without an error.
  */
 
-import type { Artist, Playlist, Track } from "../qobuz/index.js";
+import type { Artist, Playlist, Track } from "../services/model.js";
 import {
   linkLines,
   matchArtists,

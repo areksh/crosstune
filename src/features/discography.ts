@@ -18,7 +18,7 @@
  * {@link parseIncludeList}) are shared with the new-releases tool.
  */
 
-import type { Artist, ArtistReleases, Release, ReleaseType } from "../qobuz/index.js";
+import type { Artist, ArtistReleases, Release, ReleaseType } from "../services/model.js";
 import { normalise } from "./deduplicate.js";
 import {
   writeAlbumPlaylist,

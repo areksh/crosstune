@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { ResolvedCredentials } from "../qobuz/index.js";
+import type { ResolvedCredentials } from "../services/qobuz/index.js";
 
 /** Bump when the on-disk shape changes, to invalidate older caches. */
 const CACHE_VERSION = 1;

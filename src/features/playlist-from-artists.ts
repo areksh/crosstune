@@ -22,7 +22,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
-import type { Artist, Playlist, Track } from "../qobuz/index.js";
+import type { Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
 import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";

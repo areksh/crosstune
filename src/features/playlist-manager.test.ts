@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Track } from "../qobuz/index.js";
+import type { Track } from "../services/model.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
 import { Journal, recordingClient } from "./journal.js";
 import { draftChanges, moveTo, startDraft, takeOut, type Destination, type Draft } from "./playlist-draft.js";

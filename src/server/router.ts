@@ -14,15 +14,15 @@
 
 import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes } from "./playlist-routes.js";
 import {
-  QobuzError,
   RELEASE_TYPES,
+  ServiceError,
   type Album,
   type Artist,
   type ArtistReleases,
   type Playlist,
   type ReleaseType,
   type Track,
-} from "../qobuz/index.js";
+} from "../services/model.js";
 import {
   deduplicateTracks,
   otherVersions,
@@ -278,8 +278,18 @@ export async function handleApi(
   try {
     return await dispatch(req, deps);
   } catch (error) {
-    if (error instanceof QobuzError) {
-      return { status: 502, body: { error: error.message, kind: error.kind } };
+    if (error instanceof ServiceError) {
+      // An id of the wrong service, or something the service cannot do: the
+      // request itself is at fault. Anything else failed on the service's side.
+      const status = error.kind === "bad-id" || error.kind === "unsupported" ? 400 : 502;
+      return {
+        status,
+        body: {
+          error: error.message,
+          kind: error.kind,
+          ...(error.service !== undefined && { service: error.service }),
+        },
+      };
     }
     return {
       status: 500,
@@ -891,7 +901,7 @@ async function importCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse> 
     );
     return { status: 200, body: result };
   } catch (error) {
-    if (error instanceof QobuzError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
     return {
@@ -1843,7 +1853,7 @@ async function wordPlayResolve(body: unknown, deps: ApiDeps): Promise<ApiRespons
     });
     return { status: 200, body: plan };
   } catch (error) {
-    if (error instanceof QobuzError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
     return {
@@ -2251,7 +2261,7 @@ async function jobsRoute(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     if (error instanceof UnknownJobError) {
       return { status: 404, body: { error: error.message } };
     }
-    if (error instanceof QobuzError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
     if (error instanceof Error) {

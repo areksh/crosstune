@@ -5,7 +5,7 @@
  * stop matching.
  */
 
-import type { Track } from "../../qobuz/index.js";
+import type { Track } from "../../services/model.js";
 import { decadeOf, qualityOf } from "../../features/stats.js";
 import { normaliseArtistName } from "../../features/track-filter.js";
 import type { ArtistRef, SmartRule, SmartSource } from "../model.js";

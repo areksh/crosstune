@@ -10,7 +10,7 @@
  * user's edit (see ./substitutions.ts).
  */
 
-import type { Track } from "../qobuz/index.js";
+import type { Track } from "../services/model.js";
 import {
   findDuplicateGroups,
   keptIndex,

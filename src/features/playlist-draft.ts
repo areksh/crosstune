@@ -11,7 +11,7 @@
  * of Node dependencies: the web UI runs it in the page.
  */
 
-import type { Track } from "../qobuz/index.js";
+import type { Track } from "../services/model.js";
 import { shuffle } from "./combine.js";
 import {
   findDuplicateGroups,

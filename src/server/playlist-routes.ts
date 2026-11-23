@@ -24,7 +24,7 @@ import {
   type PlaylistRemoval,
   type SaveRequest,
 } from "../features/playlist-manager.js";
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import type { ApiDeps, ApiRequest, ApiResponse } from "./router.js";
 
 export const MANAGER_PREFIX = "/api/manager/";

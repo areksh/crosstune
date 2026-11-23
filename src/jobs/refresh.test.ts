@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Artist, Release, Track } from "../qobuz/index.js";
+import type { Artist, Release, Track } from "../services/model.js";
 import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
 import { Journal, recordingClient } from "../features/journal.js";
 import { applyUndo, planUndo } from "../features/undo.js";

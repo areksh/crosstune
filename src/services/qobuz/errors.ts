@@ -2,6 +2,8 @@
  * Error types for the Qobuz client.
  */
 
+import { ServiceError } from "../errors.js";
+
 /** Discriminates the kind of failure so callers can react without string matching. */
 export type QobuzErrorKind =
   | "bundle-extraction"
@@ -15,12 +17,11 @@ export type QobuzErrorKind =
  * The `kind` field lets callers (and the UI) distinguish, for example, a failed
  * token extraction from invalid credentials without parsing messages.
  */
-export class QobuzError extends Error {
-  readonly kind: QobuzErrorKind;
+export class QobuzError extends ServiceError {
+  declare readonly kind: QobuzErrorKind;
 
   constructor(kind: QobuzErrorKind, message: string) {
-    super(message);
+    super("qobuz", kind, message);
     this.name = "QobuzError";
-    this.kind = kind;
   }
 }

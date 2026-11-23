@@ -8,7 +8,7 @@
  * fails the pass, which is then retried with backoff.
  */
 
-import type { Track } from "../../qobuz/index.js";
+import type { Track } from "../../services/model.js";
 import { combineTracks, type CombineInput } from "../../features/combine.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
 import { compileTrackFilter, trackExclusion } from "../../features/track-filter.js";

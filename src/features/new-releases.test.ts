@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Album, Artist, Release, Track } from "../qobuz/index.js";
+import type { Album, Artist, Release, Track } from "../services/model.js";
 import {
   commitNewReleases,
   daysBefore,

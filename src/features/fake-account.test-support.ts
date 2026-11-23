@@ -7,7 +7,8 @@
  * normally but adds nothing, and a move is {@link applyMove}. Used to check that recording a change and undoing it restores the account.
  */
 
-import { QobuzError, type Playlist, type Track } from "../qobuz/index.js";
+import { type Playlist, type Track } from "../services/model.js";
+import { QobuzError } from "../services/qobuz/index.js";
 import { applyMove } from "./playlist-order.js";
 
 interface FakeEntry {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Release, Track } from "../qobuz/index.js";
+import type { Release, Track } from "../services/model.js";
 import {
   buildPlaylistFromDiscography,
   editionKey,

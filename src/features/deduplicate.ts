@@ -16,7 +16,7 @@
  * an injected client or callback.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
 /** The fields duplicate detection and keep-strategies need from a track. */

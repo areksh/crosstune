@@ -7,7 +7,7 @@
  * injected so the decision logic stays free of I/O and can be unit-tested.
  */
 
-import type { ResolvedCredentials } from "../qobuz/index.js";
+import type { ResolvedCredentials } from "../services/qobuz/index.js";
 import {
   clearCredentials,
   loadCredentials,

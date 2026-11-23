@@ -6,111 +6,34 @@
  * trusting the shape.
  */
 
+import type * as Neutral from "../model.js";
 import { QobuzError } from "./errors.js";
 
-export interface Artist {
+/** Qobuz's own ids: numbers, except an album's. The neutral model tags them (../ids.ts). */
+export interface Artist extends Omit<Neutral.Artist, "id"> {
   id: number;
-  name: string;
 }
 
-export interface Track {
+export interface Track extends Omit<Neutral.Track, "id" | "artistId" | "albumId" | "playlistTrackId"> {
   id: number;
-  title: string;
-  /** Track variant label ("Live", "2011 Remaster", ...), when present. */
-  version?: string;
-  /** Disc (medium) number within its album, when present (album/get tracks). */
-  discNumber?: number;
-  /** Track number on its disc, when present. */
-  trackNumber?: number;
-  /** Track artist (performer) name, when present. */
-  artist?: string;
-  /**
-   * Id of the track's main (performer) artist, when present. Used to tell an
-   * artist's own recordings apart from covers on an artist page, and to find a
-   * playlist's artists.
-   */
   artistId?: number;
-  /** Other artists credited as a main artist (see {@link parseCredits}); absent when none. */
-  jointArtists?: string[];
-  /** Artists credited as featured (see {@link parseCredits}); absent when none. */
-  guestArtists?: string[];
-  /** International Standard Recording Code, when present. */
-  isrc?: string;
-  /** Album title the track appears on, when present. */
-  album?: string;
-  /** Album id, used to look up release dates. */
   albumId?: string;
-  /** Id of this track *within a playlist*, needed to remove it from that playlist. */
   playlistTrackId?: number;
-  /** Maximum bit depth (e.g. 16, 24), a quality signal. */
-  bitDepth?: number;
-  /** Maximum sampling rate in kHz (e.g. 44.1, 96), a quality signal. */
-  samplingRate?: number;
-  /** Whether the track is hi-res. */
-  hires?: boolean;
-  /** Original release date (YYYY-MM-DD) when available on the embedded album. */
-  releaseDate?: string;
-  /** Album cover URL (https, about 230px), when known. See {@link imageOf}. */
-  image?: string;
-  /** Length in seconds, when present. */
-  duration?: number;
-  /**
-   * Whether Qobuz can currently stream the track, when the response says.
-   * `false` marks a track that has gone unplayable (rights withdrawn), which
-   * the upgrade tool repairs; absent means unknown, not unplayable.
-   */
-  streamable?: boolean;
-  /** The album's genre name ("Jazz"), when the embedded album carries one. */
-  genre?: string;
-  /** When the track was added to the favourites (ISO), on favourite tracks only. */
-  favouritedAt?: string;
-  /** When the track was added to the playlist (ISO), on playlist tracks only. */
-  addedAt?: string;
+}
+
+export interface Album extends Omit<Neutral.Album, "id"> {
+  id: string;
+}
+
+export interface Playlist extends Omit<Neutral.Playlist, "id" | "ownerId"> {
+  id: number;
+  ownerId?: number;
 }
 
 /** A page of tracks plus the total available, for paginated fetches. */
 export interface TracksPage {
   tracks: Track[];
   total: number;
-}
-
-export interface Album {
-  id: string;
-  title: string;
-  /** Primary artist (performer) name; empty string when the response omits it. */
-  artist: string;
-  /** Release variant label ("2017 Remaster", "Deluxe Edition", ...), when present. */
-  version?: string;
-  /** Original release date (YYYY-MM-DD), when present. */
-  releaseDate?: string;
-  /** Maximum bit depth (e.g. 16, 24), a quality signal. */
-  bitDepth?: number;
-  /** Maximum sampling rate in kHz (e.g. 44.1, 96), a quality signal. */
-  samplingRate?: number;
-  /** Whether the album is hi-res. */
-  hires?: boolean;
-  /** Number of tracks on the album, when the response carries it. */
-  trackCount?: number;
-  /** Cover URL (https, about 230px), when known. See {@link imageOf}. */
-  image?: string;
-  /** Whether Qobuz can currently stream the album, when the response says. */
-  streamable?: boolean;
-}
-
-export interface Playlist {
-  id: number;
-  name: string;
-  /** Number of tracks in the playlist, when the response carries it. */
-  trackCount?: number;
-  description?: string;
-  isPublic?: boolean;
-  isCollaborative?: boolean;
-  /** Total length in seconds. */
-  duration?: number;
-  /** When it last changed (ISO). */
-  updatedAt?: string;
-  /** Id of the user it belongs to. */
-  ownerId?: number;
 }
 
 /** A page of playlists plus the total available, for paginated fetches. */

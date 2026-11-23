@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Artist, Release, Track } from "../../qobuz/index.js";
+import type { Artist, Release, Track } from "../../services/model.js";
 import type { NewReleasesRecipeDef } from "../model.js";
 import { resolveNewReleasesFeed, type FeedClient } from "./new-releases.js";
 

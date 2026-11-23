@@ -7,7 +7,7 @@
  * browser login are injected) so it can be unit-tested.
  */
 
-import { QobuzError, type UserSession } from "../qobuz/index.js";
+import { QobuzError, type UserSession } from "../services/qobuz/index.js";
 import {
   clearToken,
   loadToken,

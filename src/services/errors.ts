@@ -11,6 +11,7 @@ export type ServiceErrorKind =
   | "authentication"
   | "network"
   | "api-response"
+  | "not-found"
   | "unsupported"
   | "rate-limited"
   | "quota"

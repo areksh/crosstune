@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { QobuzClient } from "../qobuz/index.js";
+import { QobuzClient } from "../services/qobuz/index.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
 import { parseHistory, type HistoryEntry, type Operation } from "./history.js";
 import { Journal, MUTATING_METHODS, recordingClient } from "./journal.js";

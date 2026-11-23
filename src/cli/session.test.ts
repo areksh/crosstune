@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { QobuzError, type UserSession } from "../qobuz/index.js";
+import { QobuzError, type UserSession } from "../services/qobuz/index.js";
 import { restoreOrLogin, type TokenStore } from "./session.js";
 
 function session(token: string): UserSession {

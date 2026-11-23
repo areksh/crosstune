@@ -13,7 +13,7 @@
  * the stats is the *resolve* step and writes nothing.
  */
 
-import type { Playlist, Track } from "../qobuz/index.js";
+import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
 /** Where the tracks come from. */

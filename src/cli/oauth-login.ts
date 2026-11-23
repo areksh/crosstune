@@ -11,9 +11,9 @@
 
 import * as http from "node:http";
 
-import type { UserSession } from "../qobuz/index.js";
-import { QobuzClient } from "../qobuz/index.js";
-import { buildOAuthUrl, parseRedirectCode } from "../qobuz/oauth.js";
+import type { UserSession } from "../services/qobuz/index.js";
+import { QobuzClient } from "../services/qobuz/index.js";
+import { buildOAuthUrl, parseRedirectCode } from "../services/qobuz/oauth.js";
 import { openInBrowser } from "./open-browser.js";
 
 const OAUTH_TIMEOUT_MS = 180_000;

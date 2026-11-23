@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ResolvedCredentials } from "../qobuz/index.js";
+import type { ResolvedCredentials } from "../services/qobuz/index.js";
 import { initClientWithCache, type CredentialStore } from "./init.js";
 
 const CREDS: ResolvedCredentials = {

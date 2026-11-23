@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  QobuzError,
   type Album,
   type Artist,
   type Playlist,
   type Release,
   type Track,
-} from "../qobuz/index.js";
+} from "../services/model.js";
+import { ServiceError } from "../services/model.js";
+import { QobuzError } from "../services/qobuz/index.js";
 import { FakeAccount, MemoryStore } from "../features/fake-account.test-support.js";
 import { Journal, recordingClient } from "../features/journal.js";
 import { emptyJobState, type JobsFile, type JobState } from "../jobs/model.js";
@@ -1107,6 +1108,27 @@ describe("error handling", () => {
     const res = await handleApi(request("GET", "/api/playlists"), deps({ service: svc }));
     expect(res.status).toBe(502);
     expect(res.body).toMatchObject({ error: "HTTP 503" });
+  });
+
+  it("maps any service's error to 502, naming the service", async () => {
+    const svc = service({
+      getUserPlaylists: vi.fn(async () => {
+        throw new ServiceError("tidal", "rate-limited", "TIDAL asked us to wait");
+      }),
+    });
+    const res = await handleApi(request("GET", "/api/playlists"), deps({ service: svc }));
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ error: "TIDAL asked us to wait", kind: "rate-limited", service: "tidal" });
+  });
+
+  it.each(["bad-id", "unsupported"])("maps a %s error to 400: the request cannot work", async (kind) => {
+    const svc = service({
+      getUserPlaylists: vi.fn(async () => {
+        throw new ServiceError("spotify", kind, "no");
+      }),
+    });
+    const res = await handleApi(request("GET", "/api/playlists"), deps({ service: svc }));
+    expect(res.status).toBe(400);
   });
 
   it("returns 404 for an unknown route", async () => {

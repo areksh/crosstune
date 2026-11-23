@@ -59,7 +59,7 @@ import {
   type WordPlayRequest,
   type WordPlaySource,
 } from "../features/word-play.js";
-import type { ReleaseType } from "../qobuz/index.js";
+import type { ReleaseType } from "../services/model.js";
 import type { Schedule, Shape } from "../jobs/model.js";
 import type { ScheduleTarget } from "../jobs/schedule-print.js";
 import { DEFAULT_LOG_LEVEL, parseLogLevel, type LogLevel } from "./logger.js";

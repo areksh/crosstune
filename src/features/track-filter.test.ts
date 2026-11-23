@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Album, Track } from "../qobuz/index.js";
+import type { Album, Track } from "../services/model.js";
 import {
   albumExclusion,
   applyTrackFilter,

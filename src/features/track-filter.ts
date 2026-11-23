@@ -21,7 +21,7 @@
  * spells it ("/^the /" catches every "The ..." band).
  */
 
-import type { Album, Track } from "../qobuz/index.js";
+import type { Album, Track } from "../services/model.js";
 
 /** The raw, user-supplied filter, as parsed from CLI flags or a request body. */
 export interface TrackFilterSpec {
