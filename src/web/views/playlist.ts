@@ -13,6 +13,7 @@ import type { ArtistId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { PlanControls } from "../plan.js";
+import { Destination } from "../transfer.js";
 import { parseQobuzLink } from "../../features/qobuz-links.js";
 import {
   groupHead,
@@ -55,8 +56,10 @@ type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
   | { type: "existing"; playlistId: PlaylistId };
 
-let playlistsLoaded = false;
 let controls: PlanControls;
+let destination: Destination;
+/** The listed tracks, to send to another service. */
+let listed = new Map<TrackId, Track>();
 
 /** Wire up the playlist view. Call once on load. */
 export function initPlaylistView(): void {
@@ -72,6 +75,7 @@ export function initPlaylistView(): void {
       el<HTMLButtonElement>("commit").disabled = controls.count() === 0;
     },
   });
+  destination = new Destination({ field: "playlist-on-field", playlists: "playlist-select", onChange: onTargetChange });
   el("resolve").addEventListener("click", () => void onResolve());
   el("commit").addEventListener("click", () => void onCommit());
   for (const radio of document.querySelectorAll('input[name="target"]')) {
@@ -152,6 +156,10 @@ function renderPreview(result: ResolveResponse): void {
     groups.appendChild(renderArtistGroup(resolvedArtist));
   }
 
+  listed = new Map(
+    result.resolvedArtists.flatMap((a) => [...a.tracks, ...a.excluded.map((e) => e.track)].map((t) => [t.id, t])),
+  );
+  destination.show();
   el("preview").hidden = false;
   setStep("playlist-steps", 1);
   showError(el("commit-error"), undefined);
@@ -223,31 +231,9 @@ function selectedTarget(): string {
 }
 
 async function loadPlaylists(): Promise<void> {
-  if (playlistsLoaded) {
-    return;
-  }
-  const select = el<HTMLSelectElement>("playlist-select");
   try {
-    const { playlists } = await api<{ playlists: Playlist[] }>(
-      "GET",
-      "/api/playlists",
-    );
-    select.textContent = "";
-    if (playlists.length === 0) {
-      select.appendChild(new Option("You have no playlists", ""));
-      return;
-    }
-    for (const playlist of playlists) {
-      const label =
-        playlist.trackCount === undefined
-          ? playlist.name
-          : `${playlist.name} (${playlist.trackCount} tracks)`;
-      select.appendChild(new Option(label, String(playlist.id)));
-    }
-    playlistsLoaded = true;
+    await destination.loadPlaylists();
   } catch (error) {
-    select.textContent = "";
-    select.appendChild(new Option("Could not load playlists", ""));
     showError(el("commit-error"), (error as Error).message);
   }
 }
@@ -276,6 +262,15 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Working...";
   try {
+    const across = destination.across;
+    if (across !== undefined) {
+      const text = await destination.commitAcross(across, trackIds.flatMap((id) => listed.get(id) ?? []), target);
+      if (text !== undefined) {
+        showError(resultNode, text);
+        setStep("playlist-steps", 3);
+      }
+      return;
+    }
     const result = await api<{
       playlist?: Playlist;
       added: TrackId[];

@@ -26,6 +26,7 @@ import { el, setStep, showError } from "../dom.js";
 import { coverSlot, setCover } from "../artwork.js";
 import { PlanControls } from "../plan.js";
 import { groupHead, readTerms, trackRow } from "../tracks.js";
+import { Destination } from "../transfer.js";
 
 type Preference = "newest" | "oldest" | "highest-quality";
 
@@ -60,7 +61,9 @@ type CommitTarget =
   | { type: "existing"; playlistId: PlaylistId };
 
 let resolvedAlbums: ResolvedAlbum[] = [];
-let playlistsLoaded = false;
+let destination: Destination;
+/** The fetched tracks, to send to another service. */
+const fetchedTracks = new Map<TrackId, Track>();
 
 /**
  * Entries that could not be matched to any Qobuz release in the resolve step,
@@ -102,6 +105,7 @@ export function initAlbumsView(): void {
     fit: "tail",
     onUpdate: () => updateCommitButton(),
   });
+  destination = new Destination({ field: "album-on-field", playlists: "album-playlist-select", onChange: onTargetChange });
   el("resolve-albums").addEventListener("click", () => void onResolve());
   el("commit-albums").addEventListener("click", () => void onCommit());
   el("album-prefer").addEventListener("change", onPreferChange);
@@ -243,6 +247,8 @@ function renderPreview(result: ResolveResponse): void {
   fetchAttempted = false;
   committed = false;
   el("album-plan").hidden = true;
+  fetchedTracks.clear();
+  destination.show();
 
   el("albums-preview").hidden = false;
   showError(el("commit-albums-error"), undefined);
@@ -443,31 +449,9 @@ function selectedTarget(): string {
 }
 
 async function loadPlaylists(): Promise<void> {
-  if (playlistsLoaded) {
-    return;
-  }
-  const select = el<HTMLSelectElement>("album-playlist-select");
   try {
-    const { playlists } = await api<{ playlists: Playlist[] }>(
-      "GET",
-      "/api/playlists",
-    );
-    select.textContent = "";
-    if (playlists.length === 0) {
-      select.appendChild(new Option("You have no playlists", ""));
-      return;
-    }
-    for (const playlist of playlists) {
-      const label =
-        playlist.trackCount === undefined
-          ? playlist.name
-          : `${playlist.name} (${playlist.trackCount} tracks)`;
-      select.appendChild(new Option(label, String(playlist.id)));
-    }
-    playlistsLoaded = true;
+    await destination.loadPlaylists();
   } catch (error) {
-    select.textContent = "";
-    select.appendChild(new Option("Could not load playlists", ""));
     showError(el("commit-albums-error"), (error as Error).message);
   }
 }
@@ -559,11 +543,27 @@ async function writePlaylist(node: HTMLElement): Promise<void> {
   }
 
   el<HTMLButtonElement>("commit-albums").textContent = "Saving...";
+  const across = destination.across;
+  if (across !== undefined) {
+    const text = await destination.commitAcross(across, trackIds.flatMap((id) => fetchedTracks.get(id) ?? []), target);
+    if (text !== undefined) {
+      markAdded();
+      node.hidden = false;
+      node.textContent = `${text}${skippedAlbums()}`;
+    }
+    return;
+  }
   const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
     "POST",
     "/api/commit",
     { tool: "playlist-from-albums", target, trackIds },
   );
+  markAdded();
+  reportWrite(node, target, result);
+}
+
+/** Lock the fetched albums once their tracks are written: the cycle is complete. */
+function markAdded(): void {
   committed = true;
   for (const group of groupsWithState("ready")) {
     group.dataset["state"] = "added";
@@ -573,7 +573,6 @@ async function writePlaylist(node: HTMLElement): Promise<void> {
     }
     setGroupStatus(group, "Added");
   }
-  reportWrite(node, target, result);
 }
 
 /** Lock a fetched album's version and list its tracks, grouped by disc. */
@@ -591,6 +590,7 @@ function markGroupReady(
   const discs = new Set(tracks.map(({ track }) => track.discNumber));
   let currentDisc: number | undefined;
   for (const { track, exclusion } of tracks) {
+    fetchedTracks.set(track.id, track);
     if (discs.size > 1 && track.discNumber !== currentDisc) {
       currentDisc = track.discNumber;
       const heading = document.createElement("div");
@@ -754,7 +754,7 @@ function reportWrite(
   node.hidden = false;
   const added = result.added.length;
   const tracks = `${added} track${added === 1 ? "" : "s"}`;
-  let text =
+  const text =
     target.type === "new"
       ? `Created "${result.playlist?.name ?? target.name}" with ${tracks}.`
       : `Added ${tracks} to the playlist${
@@ -762,6 +762,12 @@ function reportWrite(
             ? ` (${result.skipped.length} already present, skipped)`
             : ""
         }.`;
+  node.textContent = `${text}${skippedAlbums()}`;
+}
+
+/** The albums left out of the write, as sentences to append to its report. */
+function skippedAlbums(): string {
+  let text = "";
   const unavailable = groupsWithState("unavailable").map(groupName);
   if (unavailable.length > 0) {
     text += ` Skipped ${unavailable.length} album${
@@ -777,5 +783,5 @@ function reportWrite(
     text +=
       " These may be restricted in your region; check them manually on Qobuz to see if they are available.";
   }
-  node.textContent = text;
+  return text;
 }

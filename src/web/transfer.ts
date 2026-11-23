@@ -5,13 +5,15 @@
  */
 
 import type { SongMatch } from "../features/match.js";
+import type { ManagerPlaylist } from "../features/playlist-manager.js";
 import type { Pick, TransferDestination, TransferPlan, TransferResult } from "../features/transfer.js";
 import { labelOf } from "../services/errors.js";
 import type { PlaylistId, TrackId } from "../services/ids.js";
 import type { ServiceName } from "../services/names.js";
-import { api, type Track } from "./api.js";
+import { api, type Playlist, type Track } from "./api.js";
 import { openDialog } from "./dialog.js";
-import { connectedServices } from "./service.js";
+import { el } from "./dom.js";
+import { chosenService, connectedServices } from "./service.js";
 
 /** Songs to send: as the page holds them, or a whole playlist. */
 export type Songs = { tracks: readonly TransferTrack[] } | { playlistId: PlaylistId };
@@ -80,6 +82,138 @@ export function describeTransfer(to: ServiceName, name: string, result: Transfer
     parts.push(`${labelOf(to)} did not take ${result.missing.length}`);
   }
   return `${parts.join("; ")}.`;
+}
+
+/** The service the page is on; with all of them shown, the first connected. */
+export function homeService(): ServiceName | undefined {
+  const chosen = chosenService();
+  return chosen === undefined || chosen === "all" ? connectedServices()[0] : chosen;
+}
+
+/** A new playlist, or one of the user's, as a tool's commit bar chooses. */
+export type PlaylistTarget =
+  | { type: "new"; name: string; isPublic: boolean }
+  | { type: "existing"; playlistId: PlaylistId };
+
+export interface DestinationOptions {
+  /** The id of the commit bar's hidden "On" field: a label holding its caption. */
+  field: string;
+  /** The id of the select of the user's playlists to add to, when the tool offers one. */
+  playlists?: string;
+  /** Called when another service is chosen. */
+  onChange?: () => void;
+}
+
+/**
+ * Which connected service a tool's songs go to, and the user's playlists
+ * there. The "On" select shows with two services or more, set to the page's.
+ * The songs cross over (reviewed first, through `/api/transfer`) only when
+ * another service is chosen; on the page's own, the tool writes as it always
+ * has.
+ */
+export class Destination {
+  readonly #options: DestinationOptions;
+  #select: HTMLSelectElement | undefined;
+  #offered: string | undefined;
+  /** Whose playlists the picker lists: a service, or "" for the page's. */
+  #listed: string | undefined;
+
+  constructor(options: DestinationOptions) {
+    this.#options = options;
+  }
+
+  /** Offer the connected services; call as the commit bar shows (the accounts load after the views). */
+  show(): void {
+    const services = connectedServices();
+    if (services.join() === this.#offered) {
+      return;
+    }
+    this.#offered = services.join();
+    const before = this.#select?.value as ServiceName | undefined;
+    this.#select?.remove();
+    const home = homeService();
+    const chosen = before !== undefined && services.includes(before) ? before : home;
+    this.#select = chosen === undefined ? undefined : serviceSelect(chosen);
+    const field = el(this.#options.field);
+    field.hidden = this.#select === undefined;
+    if (this.#select !== undefined) {
+      field.append(this.#select);
+      this.#select.addEventListener("change", () => this.#options.onChange?.());
+    }
+  }
+
+  /** The service chosen, when it is not the page's: the songs must cross to it. */
+  get across(): ServiceName | undefined {
+    const to = this.#select?.value;
+    return to === undefined || to === chosenService() ? undefined : (to as ServiceName);
+  }
+
+  /**
+   * List the user's playlists where the songs go, once per service: on the
+   * page's, as the tool always has; on another, the ones the user can add to.
+   * @throws the request's error, the picker saying it failed.
+   */
+  async loadPlaylists(): Promise<void> {
+    const to = this.across;
+    if (this.#options.playlists === undefined || this.#listed === (to ?? "")) {
+      return;
+    }
+    const select = el<HTMLSelectElement>(this.#options.playlists);
+    const kept = select.value;
+    select.textContent = "";
+    select.append(new Option("Loading...", ""));
+    this.#listed = undefined;
+    let playlists: Playlist[];
+    try {
+      playlists =
+        to === undefined
+          ? (await api<{ playlists: Playlist[] }>("GET", "/api/playlists")).playlists
+          : (await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists", undefined, to)).playlists.filter(
+              (playlist) => playlist.owned && playlist.managed?.mode !== "mirror",
+            );
+    } catch (error) {
+      if (this.across === to) {
+        select.textContent = "";
+        select.append(new Option("Could not load playlists", ""));
+      }
+      throw error;
+    }
+    if (this.across !== to) {
+      return; // Another service was chosen meanwhile; its own load fills the picker.
+    }
+    select.textContent = "";
+    if (playlists.length === 0) {
+      select.append(new Option("You have no playlists", ""));
+    }
+    for (const playlist of playlists) {
+      const label = playlist.trackCount === undefined ? playlist.name : `${playlist.name} (${playlist.trackCount} tracks)`;
+      const option = new Option(label, String(playlist.id));
+      option.dataset["name"] = playlist.name;
+      select.append(option);
+    }
+    if ([...select.options].some((option) => option.value === kept)) {
+      select.value = kept;
+    }
+    this.#listed = to ?? "";
+  }
+
+  /**
+   * Copy songs the page holds to `to`, once reviewed there: what to tell the
+   * user, or undefined when the review was cancelled and nothing was written.
+   */
+  async commitAcross(to: ServiceName, tracks: readonly TransferTrack[], target: PlaylistTarget): Promise<string | undefined> {
+    const picks = await reviewTransfer({ tracks }, to);
+    if (picks === undefined) {
+      return undefined;
+    }
+    const result = await sendPicks(to, target, picks);
+    return describeTransfer(to, target.type === "new" ? (result.name ?? target.name) : this.#playlistName(), result);
+  }
+
+  #playlistName(): string {
+    const { playlists } = this.#options;
+    return (playlists === undefined ? undefined : el<HTMLSelectElement>(playlists).selectedOptions[0]?.dataset["name"]) ?? "the playlist";
+  }
 }
 
 /** What matching needs of a song. */

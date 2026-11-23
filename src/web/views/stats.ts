@@ -12,6 +12,7 @@
 import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
+import { Destination, type TransferTrack } from "../transfer.js";
 
 interface Bucket {
   key: string;
@@ -31,6 +32,8 @@ interface LibraryStats {
   topArtists: Bucket[];
   topArtistsShare: number;
   headline: string;
+  /** What matching needs of each track, to copy a bucket to another service. */
+  songs: TransferTrack[];
 }
 
 type Source = { type: "favourites" | "everything" } | { type: "playlist"; playlistId: PlaylistId };
@@ -38,9 +41,12 @@ type Source = { type: "favourites" | "everything" } | { type: "playlist"; playli
 let loadedFor: string | undefined;
 let chosen: Bucket | undefined;
 let request = 0;
+let songs = new Map<TrackId, TransferTrack>();
+let destination: Destination;
 
 /** Wire up the stats view. Call once on load. */
 export function initStatsView(): void {
+  destination = new Destination({ field: "stats-on-field" });
   el("stats-source").addEventListener("change", () => void load());
   el("stats-commit").addEventListener("click", () => void onCommit());
   window.addEventListener("hashchange", loadIfShown);
@@ -109,6 +115,7 @@ async function load(): Promise<void> {
 }
 
 function render(stats: LibraryStats): void {
+  songs = new Map(stats.songs.map((song) => [song.id, song]));
   el("stats-headline").textContent = stats.headline;
   el("stats-body").hidden = stats.trackCount === 0;
   if (stats.trackCount === 0) {
@@ -229,6 +236,7 @@ function playlistButton(bucket: Bucket, label: string): HTMLButtonElement {
 /** Offer to save a bucket as a new playlist, under its suggested name. */
 function openSaveBar(bucket: Bucket): void {
   chosen = bucket;
+  destination.show();
   el("stats-save").hidden = false;
   el("stats-save-count").textContent = `${bucket.label}: ${tracks(bucket.count)}`;
   const name = el<HTMLInputElement>("stats-playlist-name");
@@ -260,14 +268,19 @@ async function onCommit(): Promise<void> {
 
   button.disabled = true;
   button.textContent = "Saving...";
+  const target = { type: "new", name, isPublic: el<HTMLInputElement>("stats-playlist-public").checked } as const;
   try {
+    const across = destination.across;
+    if (across !== undefined) {
+      const text = await destination.commitAcross(across, chosen.trackIds.flatMap((id) => songs.get(id) ?? []), target);
+      if (text !== undefined) {
+        showError(resultNode, text);
+      }
+      return;
+    }
     const result = await api<{ playlist?: Playlist; added: TrackId[] }>("POST", "/api/commit", {
       tool: "stats",
-      target: {
-        type: "new",
-        name,
-        isPublic: el<HTMLInputElement>("stats-playlist-public").checked,
-      },
+      target,
       trackIds: chosen.trackIds,
     });
     showError(

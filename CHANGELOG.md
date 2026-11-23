@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Spotify's missing top tracks and similar artists are taken from Qobuz or TIDAL.
 - `accounts`, `forget <service>` (deletes what is kept about it, History
   included) and `sync` commands.
+- With more than one music service connected, the playlists made by Playlist
+  from artists, Playlist from albums, Similar artists, Word play, Combine,
+  Library stats and New releases can go to any of them (the *On* choice beside
+  the playlist's name). Songs bound for another service are looked up there and
+  shown for review first; a new or existing playlist on the page's own service
+  is written as before.
 - **Playlists**: a playlist manager in the web UI. Lists your playlists (rename,
   describe, make public or private, duplicate, delete) and opens one as a draft
   with every song on one page: search, select with clicks, shift-click or the

@@ -15,6 +15,7 @@ import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, setStep, showError } from "../dom.js";
 import { qualityPill, readTerms, titleOf, trackText } from "../tracks.js";
+import { Destination } from "../transfer.js";
 
 type Mode = "contains" | "exact" | "sentence" | "acrostic" | "a-to-z";
 
@@ -68,9 +69,11 @@ let splitIndex = 0;
 /** Per split, per slot: 0 for the chosen song, n for alternative n-1. */
 let picks: number[][] = [];
 let playlists: Promise<Playlist[]> | undefined;
+let destination: Destination;
 
 /** Wire up the word play view. Call once on load. */
 export function initWordPlayView(): void {
+  destination = new Destination({ field: "wp-on-field", playlists: "wp-playlist-select", onChange: onTargetChange });
   for (const radio of document.querySelectorAll('input[name="wp-mode"]')) {
     radio.addEventListener("change", onModeChange);
   }
@@ -123,7 +126,7 @@ function onTargetChange(): void {
   el("wp-existing-fields").hidden = !existing;
   el("wp-commit").textContent = existing ? "Add to playlist" : "Create playlist";
   if (existing) {
-    void fillPlaylistSelect(el<HTMLSelectElement>("wp-playlist-select"), el("wp-commit-error"));
+    destination.loadPlaylists().catch((error: unknown) => showError(el("wp-commit-error"), (error as Error).message));
   }
 }
 
@@ -217,6 +220,7 @@ async function onFind(): Promise<void> {
     splitIndex = 0;
     picks = plan.splits.map((split) => split.slots.map(() => 0));
     el<HTMLInputElement>("wp-playlist-name").value = plan.suggestedName;
+    destination.show();
     renderPlan();
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -503,6 +507,15 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Working...";
   try {
+    const across = destination.across;
+    if (across !== undefined) {
+      const text = await destination.commitAcross(across, selectedTracks(), target);
+      if (text !== undefined) {
+        showError(resultNode, text);
+        setStep("wp-steps", 3);
+      }
+      return;
+    }
     const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/word-play/commit",

@@ -19,6 +19,7 @@ import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from 
 import { el, setStep, showError } from "../dom.js";
 import { parsePlaylistId } from "../../features/qobuz-links.js";
 import { PlanControls } from "../plan.js";
+import { Destination } from "../transfer.js";
 import { keepUpdated } from "./managed.js";
 import {
   groupHead,
@@ -123,6 +124,9 @@ type CommitTarget =
 
 let playlistsLoaded = false;
 let controls: PlanControls;
+let destination: Destination;
+/** The listed tracks, to send to another service. */
+let shownTracks = new Map<TrackId, Track>();
 
 /** Wire up the similar-artists view. Call once on load. */
 /** Open the Managed view with a new-releases feed of these artists and their similar artists. */
@@ -173,6 +177,7 @@ export function initSimilarView(): void {
       el<HTMLButtonElement>("commit-similar").disabled = controls.count() === 0;
     },
   });
+  destination = new Destination({ field: "similar-on-field", playlists: "similar-playlist-select", onChange: onTargetChange });
   el("resolve-similar").addEventListener("click", () => void onResolve());
   el("commit-similar").addEventListener("click", () => void onCommit());
   for (const radio of document.querySelectorAll('input[name="similar-source"]')) {
@@ -430,6 +435,13 @@ function renderPreview(plan: PlanResponse, fromPlaylist: boolean): void {
     );
   }
 
+  shownTracks = new Map(
+    [...plan.seeds, ...plan.similar]
+      .flatMap((entry) => [...entry.tracks, ...entry.excluded.map((e) => e.track)])
+      .map((track) => [track.id, track]),
+  );
+  destination.show();
+
   // Expanding a playlist most naturally adds back into it (when it is yours).
   const sourceId = sourcePlaylistId();
   if (fromPlaylist && sourceId !== undefined) {
@@ -535,7 +547,16 @@ function onTargetChange(): void {
   el<HTMLButtonElement>("commit-similar").textContent =
     target === "new" ? "Create playlist" : "Add to playlist";
   if (target === "existing") {
-    void loadPlaylists();
+    void loadDestinations();
+  }
+}
+
+/** Fill the destination's picker with the playlists where the songs go. */
+async function loadDestinations(): Promise<void> {
+  try {
+    await destination.loadPlaylists();
+  } catch (error) {
+    showError(el("commit-similar-error"), (error as Error).message);
   }
 }
 
@@ -544,7 +565,10 @@ function onTargetChange(): void {
  * it is one of yours (a pasted link may be someone else's).
  */
 async function preselectExisting(playlistId: PlaylistId): Promise<void> {
-  await loadPlaylists();
+  if (destination.across !== undefined) {
+    return; // The source playlist is on the page's service, not where the songs go.
+  }
+  await loadDestinations();
   const select = el<HTMLSelectElement>("similar-playlist-select");
   if (![...select.options].some((option) => option.value === String(playlistId))) {
     return;
@@ -573,15 +597,12 @@ function sourcePlaylistId(): PlaylistId | undefined {
   return chosen === "" ? undefined : (chosen as PlaylistId);
 }
 
-/** Fill both playlist pickers (source and destination) once. */
+/** Fill the source playlist picker once. */
 async function loadPlaylists(): Promise<void> {
   if (playlistsLoaded) {
     return;
   }
-  const selects = [
-    el<HTMLSelectElement>("similar-source-playlist"),
-    el<HTMLSelectElement>("similar-playlist-select"),
-  ];
+  const selects = [el<HTMLSelectElement>("similar-source-playlist")];
   try {
     const { playlists } = await api<{ playlists: Playlist[] }>("GET", "/api/playlists");
     for (const select of selects) {
@@ -631,6 +652,15 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Working...";
   try {
+    const across = destination.across;
+    if (across !== undefined) {
+      const text = await destination.commitAcross(across, trackIds.flatMap((id) => shownTracks.get(id) ?? []), target);
+      if (text !== undefined) {
+        showError(resultNode, text);
+        setStep("similar-steps", 3);
+      }
+      return;
+    }
     const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/commit",

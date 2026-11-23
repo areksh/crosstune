@@ -13,6 +13,7 @@ import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
+import { Destination } from "../transfer.js";
 import { keepUpdated } from "./managed.js";
 
 type Source = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
@@ -40,9 +41,11 @@ const FAVOURITES = "favourites";
 let playlists: Playlist[] | undefined;
 let lastSuggestedName = "";
 let plan: CombinePlan | undefined;
+let destination: Destination;
 
 /** Wire up the combine view. Call once on load. */
 export function initCombineView(): void {
+  destination = new Destination({ field: "combine-on-field", playlists: "combine-playlist-select", onChange: onTargetChange });
   addSourceRow();
   addSourceRow();
   el("combine-add").addEventListener("click", () => addSourceRow());
@@ -140,7 +143,6 @@ function playlistLabel(playlist: Playlist): string {
 }
 
 async function loadPlaylists(): Promise<void> {
-  const target = el<HTMLSelectElement>("combine-playlist-select");
   try {
     ({ playlists } = await api<{ playlists: Playlist[] }>("GET", "/api/playlists"));
   } catch (error) {
@@ -148,13 +150,6 @@ async function loadPlaylists(): Promise<void> {
     playlists = [];
   }
   document.querySelectorAll<HTMLSelectElement>(".combine-source").forEach(fillSourceSelect);
-  target.textContent = "";
-  if (playlists.length === 0) {
-    target.appendChild(new Option("You have no playlists", ""));
-  }
-  for (const playlist of playlists) {
-    target.appendChild(new Option(playlistLabel(playlist), String(playlist.id)));
-  }
 }
 
 function chosenSources(): Source[] | string {
@@ -241,6 +236,7 @@ function render(result: CombinePlan): void {
   }
   lastSuggestedName = result.suggestedName;
 
+  destination.show();
   el("combine-review").hidden = false;
   showError(el("combine-commit-error"), undefined);
   showError(el("combine-commit-result"), undefined);
@@ -343,6 +339,9 @@ function onTargetChange(): void {
   el("combine-new-fields").hidden = target !== "new";
   el("combine-existing-fields").hidden = target !== "existing";
   el("combine-commit").textContent = target === "new" ? "Create playlist" : "Add to playlist";
+  if (target === "existing") {
+    destination.loadPlaylists().catch((error: unknown) => showError(el("combine-commit-error"), (error as Error).message));
+  }
 }
 
 function buildTarget(): CommitTarget | string {
@@ -383,6 +382,16 @@ async function onCommit(): Promise<void> {
   const original = button.textContent;
   button.textContent = "Saving...";
   try {
+    const across = destination.across;
+    if (across !== undefined) {
+      const byId = new Map(plan?.tracks.map(({ track }) => [track.id, track]));
+      const text = await destination.commitAcross(across, trackIds.flatMap((id) => byId.get(id) ?? []), target);
+      if (text !== undefined) {
+        showError(resultNode, text);
+        setStep("combine-steps", 3);
+      }
+      return;
+    }
     const result = await api<{ playlist?: Playlist; added: TrackId[]; skipped: TrackId[] }>(
       "POST",
       "/api/commit",

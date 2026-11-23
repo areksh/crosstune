@@ -8,8 +8,10 @@
  * DOM glue; the finding and writing live in src/features/new-releases.ts.
  */
 
-import type { PlaylistId } from "../../services/ids.js";
-import { api, type Album, type FilterInput, type Playlist } from "../api.js";
+import type { AlbumId, PlaylistId, TrackId } from "../../services/ids.js";
+import type { ServiceName } from "../../services/names.js";
+import { api, type Album, type FilterInput, type Playlist, type Track } from "../api.js";
+import { Destination, type PlaylistTarget } from "../transfer.js";
 import { coverSlot } from "../artwork.js";
 import { el, showError } from "../dom.js";
 import { qualityPill, readTerms } from "../tracks.js";
@@ -42,9 +44,12 @@ let releases: Release[] = [];
 let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [], excludeArtists: [] };
 
 let playlistsLoaded = false;
+/** Where a new playlist goes; favourite albums stay on the page's service. */
+let destination: Destination;
 
 /** Wire up the new releases view. Call once on load. */
 export function initNewReleasesView(): void {
+  destination = new Destination({ field: "releases-on-field" });
   el<HTMLInputElement>("releases-since").value = isoDaysAgo(30);
   el("releases-source").addEventListener("change", onSourceChange);
   el("releases-target").addEventListener("change", onTargetChange);
@@ -221,6 +226,7 @@ function render(plan: NewReleasesPlan): void {
     el<HTMLInputElement>("releases-playlist-name").value = `New releases since ${plan.since}`;
   }
 
+  destination.show();
   el("releases-review").hidden = false;
   el("releases-commit-bar").hidden = plan.releases.length === 0;
   showError(el("commit-releases-error"), undefined);
@@ -384,6 +390,14 @@ async function onCommit(): Promise<void> {
   button.disabled = true;
   button.textContent = "Saving...";
   try {
+    const across = destination.across;
+    if (isPlaylist(target) && across !== undefined) {
+      const text = await commitAcross(across, albumIds, { type: "new", name: target.name, isPublic: target.isPublic });
+      if (text !== undefined) {
+        showError(resultNode, text);
+      }
+      return;
+    }
     const result = await api<CommitResult>("POST", "/api/new-releases/commit", {
       albumIds,
       target,
@@ -392,15 +406,44 @@ async function onCommit(): Promise<void> {
     if (result.type === "favourite-albums") {
       showError(resultNode, `Added ${plural(result.added, "release")} to your favourite albums.`);
     } else {
-      let text = `Created "${result.playlist.name}" with ${plural(result.trackCount, "track")}.`;
-      if (result.failedAlbumIds.length > 0) {
-        text += ` ${plural(result.failedAlbumIds.length, "release")} could not be fetched and ${result.failedAlbumIds.length === 1 ? "was" : "were"} left out.`;
-      }
-      showError(resultNode, text);
+      const text = `Created "${result.playlist.name}" with ${plural(result.trackCount, "track")}.`;
+      showError(resultNode, `${text}${leftOut(result.failedAlbumIds.length)}`);
     }
   } catch (error) {
     showError(errorNode, (error as Error).message);
   } finally {
     updateCount();
   }
+}
+
+function isPlaylist(target: unknown): target is { type: "playlist"; name: string; isPublic: boolean } {
+  return (target as { type: string }).type === "playlist";
+}
+
+/**
+ * Put the releases' tracks (as the filter left them, each once) in a new
+ * playlist on another service, once reviewed there. Undefined when cancelled.
+ */
+async function commitAcross(to: ServiceName, albumIds: readonly AlbumId[], target: PlaylistTarget): Promise<string | undefined> {
+  const { fetched } = await api<{ fetched: { albumId: AlbumId; tracks: { track: Track; exclusion?: unknown }[] }[] }>(
+    "POST",
+    "/api/album-tracks",
+    { albumIds, filter: activeFilter },
+  );
+  const tracks = new Map<TrackId, Track>();
+  for (const { track, exclusion } of fetched.flatMap((album) => album.tracks)) {
+    if (exclusion === undefined && !tracks.has(track.id)) {
+      tracks.set(track.id, track);
+    }
+  }
+  if (tracks.size === 0) {
+    throw new Error("No tracks could be fetched for these releases; nothing was created");
+  }
+  const text = await destination.commitAcross(to, [...tracks.values()], target);
+  return text === undefined ? undefined : `${text}${leftOut(albumIds.length - fetched.length)}`;
+}
+
+/** " 2 releases could not be fetched and were left out.", or "" for none. */
+function leftOut(failed: number): string {
+  return failed === 0 ? "" : ` ${plural(failed, "release")} could not be fetched and ${failed === 1 ? "was" : "were"} left out.`;
 }
