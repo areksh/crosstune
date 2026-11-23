@@ -226,4 +226,10 @@ describe("discovery source", () => {
     expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
     expect(second.state.served?.map((entry) => entry.rotation)).toHaveLength(2);
   });
+
+  it("fails the run, rather than keep a short rotation, when an artist's tracks cannot be read", async () => {
+    const c = client();
+    c.getArtistTopTracks!.mockRejectedValue(new Error("HTTP 500"));
+    await expect(resolveDiscovery(c, def, { ...ctx, state: {} })).rejects.toThrow(/top tracks/);
+  });
 });

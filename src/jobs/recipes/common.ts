@@ -91,6 +91,11 @@ export async function similarSnapshot(
       depth: 1,
       filter,
     });
+    // The snapshot is kept for weeks: a partial one would drop the similar
+    // artists of whoever could not be looked up, so keep the previous list.
+    if (walk.failedArtists.length > 0) {
+      throw new Error(`could not look up ${walk.failedArtists.map((artist) => artist.name).join(", ")}`);
+    }
     return {
       similar: {
         takenAt: now.toISOString(),
