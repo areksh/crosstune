@@ -11,6 +11,7 @@
 import {
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -31,9 +32,14 @@ export function saveToken(
   token: string,
   filePath: string = defaultSessionPath(),
 ): void {
-  mkdirSync(dirname(filePath), { recursive: true });
+  mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
   const data: StoredSession = { userAuthToken: token };
-  writeFileSync(filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
+  // Through a temporary file and a rename, as the other stores do: writing the
+  // file in place would, if interrupted, leave it truncated and the user
+  // silently signed out.
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(data, null, 2), { mode: 0o600 });
+  renameSync(temporary, filePath);
 }
 
 /** Load the saved token, or undefined if none is stored or the file is unusable. */
