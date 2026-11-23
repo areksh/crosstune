@@ -402,8 +402,12 @@ function parseSpotifyCsv(content: string): ParsedTrack[] {
       const item: ParsedTrack = {};
       const title = at(row, titleAt);
       if (title !== undefined) item.title = title;
-      const artists = (at(row, artistsAt) ?? "")
-        .split(",")
+      // Newer Exportify exports join the artists with ";" (a name can hold a
+      // comma: "Tyler, The Creator"); older ones with ",". A field with a
+      // semicolon is split on semicolons only.
+      const credit = at(row, artistsAt) ?? "";
+      const artists = credit
+        .split(credit.includes(";") ? ";" : ",")
         .map((name) => name.trim())
         .filter((name) => name.length > 0);
       if (artists.length > 0) {

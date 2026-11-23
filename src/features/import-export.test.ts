@@ -483,6 +483,26 @@ describe("Spotify (Exportify) parsing", () => {
     ]);
   });
 
+  it("splits the artists on semicolons when a newer export uses them, keeping commas in names", () => {
+    const newer = [
+      EXPORTIFY_HEADER,
+      exportifyRow({
+        name: "EARFQUAKE",
+        artists: "Tyler, The Creator;Playboi Carti",
+        album: "IGOR",
+        isrc: "USQX91900537",
+      }),
+      exportifyRow({ name: "Yonkers", artists: "Tyler, The Creator", album: "Goblin", isrc: "USQX91100001" }),
+    ].join("\n");
+    const items = parseCollection(newer, "spotify", "tracks").items;
+    expect(items[0]).toMatchObject({
+      artist: "Tyler, The Creator, Playboi Carti",
+      artists: ["Tyler, The Creator", "Playboi Carti"],
+    });
+    // Without a semicolon there is no telling a comma in a name from a separator.
+    expect(items[1]).toMatchObject({ artists: ["Tyler", "The Creator"] });
+  });
+
   it("refuses to read a Spotify export as albums or artists", () => {
     expect(() => parseCollection(exportify, "spotify", "albums")).toThrow(/tracks/);
   });
