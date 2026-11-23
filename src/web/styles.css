@@ -195,16 +195,24 @@ button.tab[aria-pressed="true"] {
 }
 
 .topbar-gap {
-  flex: 1;
+  flex: 0;
 }
 
 /* The ask box: one line until focused, a few while typing or pasting a list. */
 .ask {
   position: relative;
   flex: 1;
-  max-width: 460px;
+  max-width: 560px;
   height: 36px;
-  margin-left: 8px;
+  /* The free space is the box's: the links sit at the right. */
+  margin: 0 auto 0 8px;
+}
+
+/* The hint stays on its one line, cut short if the window is narrow. */
+.ask textarea:placeholder-shown {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The box and its suggestions grow downward, over the page, not out of the bar. */
