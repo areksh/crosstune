@@ -200,6 +200,19 @@ export class FakeQobuz {
     this.favourites.artists = this.favourites.artists.filter((id) => !ids.includes(id));
   }
 
+  async getTrack(trackId: number): Promise<Track> {
+    this.#call("getTrack", trackId);
+    if (trackId > 100_000) {
+      throw new QobuzError("api-response", "track/get failed with HTTP 404");
+    }
+    return { id: trackId, title: `Track ${trackId}` };
+  }
+
+  async searchTracks(query: string): Promise<Track[]> {
+    this.#call("searchTracks", query);
+    return query === "GBAAA0000001" ? [{ id: 1, title: "Track 1", isrc: "GBAAA0000001" }] : [];
+  }
+
   async getFavoriteTracks(): Promise<Track[]> {
     this.#call("getFavoriteTracks", "");
     return this.favourites.tracks.map((id) => ({ id, title: `Track ${id}` }));

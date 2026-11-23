@@ -5,8 +5,10 @@
  * the only thing between them and the rest of the app.
  */
 
+import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
 import { ServiceError } from "../errors.js";
 import { nativeOf, tagId, type AnyId } from "../ids.js";
+import { normaliseIsrc } from "../isrc.js";
 import type {
   Album,
   AlbumId,
@@ -25,6 +27,9 @@ import { CAN, type Account, type Capabilities, type MusicService, type PlaylistC
 import type { QobuzClient } from "./client.js";
 import type * as Native from "./models.js";
 import type { Release as NativeRelease } from "./releases.js";
+
+/** Results to weigh for an ISRC: one recording is often on many releases. */
+const ISRC_RESULTS = 20;
 
 const CAPABILITIES: Capabilities = {
   topTracks: CAN,
@@ -120,6 +125,24 @@ export class QobuzService implements MusicService {
 
   async searchTracks(query: string, limit?: number, offset?: number): Promise<Track[]> {
     return (await this.#client.searchTracks(query, limit, offset)).map(toTrack);
+  }
+
+  async getTrack(trackId: TrackId): Promise<Track> {
+    return toTrack(await this.#client.getTrack(num(trackId)));
+  }
+
+  /** Qobuz's search takes an ISRC as its query; only results that carry it count. */
+  async findByIsrc(isrcs: readonly string[]): Promise<Map<string, Track[]>> {
+    const wanted = [...new Set(isrcs.map(normaliseIsrc))].filter((isrc) => isrc.length > 0);
+    const results = await mapWithConcurrency(wanted, DEFAULT_CONCURRENCY, async (isrc) => ({
+      isrc,
+      tracks: (await this.#client.searchTracks(isrc, ISRC_RESULTS)).filter(
+        (track) => track.isrc !== undefined && normaliseIsrc(track.isrc) === isrc,
+      ),
+    }));
+    return new Map(
+      results.filter(({ tracks }) => tracks.length > 0).map(({ isrc, tracks }) => [isrc, tracks.map(toTrack)]),
+    );
   }
 
   async getArtist(artistId: ArtistId): Promise<Artist> {

@@ -27,6 +27,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
+import { normaliseIsrc } from "../services/isrc.js";
 import { shortId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
@@ -161,11 +162,6 @@ function hasKnownQuality(track: Quality): boolean {
 /** Whether a track is below {@link BEST_QUALITY} (so an upgrade may exist). */
 export function isBelowBestQuality(track: Quality): boolean {
   return compareQuality(BEST_QUALITY, track) > 0;
-}
-
-/** ISRCs compare case-insensitively, ignoring hyphens and spaces. */
-function normaliseIsrc(isrc: string): string {
-  return isrc.replace(/[\s-]/g, "").toUpperCase();
 }
 
 /**

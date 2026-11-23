@@ -20,6 +20,7 @@ describeServiceContract("qobuz", () => {
     dropped: t(66),
     albums: [tagId("qobuz", "0060254735156")],
     artists: [t(7)],
+    recording: { isrc: "GBAAA0000001", track: t(1), absent: "GBZZZ9999999" },
     requests: () => fake.calls.length,
   };
 });
@@ -93,6 +94,28 @@ describe("QobuzService", () => {
     const service = adapter({ getPlaylist });
     await expect(service.getPlaylist(tagId("qobuz", "abc"))).rejects.toMatchObject({ kind: "bad-id" });
     expect(getPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("finds recordings by ISRC, trusting only equal ones", async () => {
+    const searchTracks = vi.fn(async (query: string) =>
+      query === "GBF089400010"
+        ? [
+            { id: 1, title: "Roads", isrc: "GB-F08-94-00010" },
+            { id: 2, title: "Other", isrc: "GBF089400011" },
+            { id: 3, title: "No code" },
+          ]
+        : [],
+    );
+    const found = await adapter({ searchTracks }).findByIsrc(["gb-f08-94-00010", "USNONE000001", ""]);
+    expect([...found].map(([isrc, tracks]) => [isrc, tracks.map((track) => track.id)])).toEqual([
+      ["GBF089400010", ["qobuz:1"]],
+    ]);
+    expect(searchTracks).toHaveBeenCalledTimes(2);
+  });
+
+  it("looks up one track", async () => {
+    const service = adapter({ getTrack: async (id: number) => ({ id, title: "Roads", streamable: false }) });
+    expect(await service.getTrack(t(12))).toEqual({ id: "qobuz:12", title: "Roads", streamable: false });
   });
 
   it("says who is signed in", () => {

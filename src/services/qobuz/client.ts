@@ -23,6 +23,7 @@ import {
   parsePlaylist,
   parsePlaylistsPage,
   parseAlbumTracks,
+  parseTrackDetails,
   parseTracks,
   parseTracksPage,
   type Album,
@@ -774,6 +775,23 @@ export class QobuzClient {
       throw new QobuzError("api-response", `artist/page returned no artist for ${artistId}`);
     }
     return artist;
+  }
+
+  /**
+   * Look up one track by id, via `track/get`.
+   *
+   * @throws {QobuzError} kind `api-response` ("HTTP 404" when there is none).
+   */
+  async getTrack(trackId: number): Promise<Track> {
+    const response = await this.#signedGet("trackget", paths.trackGet, [["track_id", String(trackId)]]);
+    if (!response.ok) {
+      throw new QobuzError("api-response", `track/get failed with HTTP ${response.status}`);
+    }
+    const track = parseTrackDetails(await response.json());
+    if (track === undefined) {
+      throw new QobuzError("api-response", `track/get returned no track for ${trackId}`);
+    }
+    return track;
   }
 
   /**

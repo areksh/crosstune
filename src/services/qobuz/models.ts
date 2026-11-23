@@ -153,6 +153,11 @@ function parseAlbum(item: unknown): Album | undefined {
   return album;
 }
 
+/** Parse a track/get response, or undefined if it is no track. */
+export function parseTrackDetails(response: unknown): Track | undefined {
+  return parseTrack(response);
+}
+
 /** Parse a single album object (e.g. an album/get response), or undefined if it is not one. */
 export function parseAlbumDetails(response: unknown): Album | undefined {
   return parseAlbum(response);

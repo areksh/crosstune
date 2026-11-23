@@ -10,6 +10,7 @@ export const BASE_URL = "https://www.qobuz.com/api.json/0.2";
 export const paths = {
   userLogin: "/user/login",
   oauthCallback: "/oauth/callback",
+  trackGet: "/track/get",
   trackGetFileUrl: "/track/getFileUrl",
   favoriteGetUserFavorites: "/favorite/getUserFavorites",
   trackSearch: "/track/search",

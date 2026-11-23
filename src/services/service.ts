@@ -82,6 +82,10 @@ export interface MusicReads {
   searchArtists(query: string, limit?: number, offset?: number): Promise<Artist[]>;
   searchAlbums(query: string, limit?: number, offset?: number): Promise<Album[]>;
   searchTracks(query: string, limit?: number, offset?: number): Promise<Track[]>;
+  /** @throws a not-found error when the service no longer has it. */
+  getTrack(trackId: TrackId): Promise<Track>;
+  /** Tracks by ISRC (normalised, see ./isrc.ts); an ISRC nothing has is left out. */
+  findByIsrc(isrcs: readonly string[]): Promise<Map<string, Track[]>>;
   getArtist(artistId: ArtistId): Promise<Artist>;
   getArtistTopTracks(artistId: ArtistId, limit?: number): Promise<Track[]>;
   getSimilarArtists(artistId: ArtistId, limit: number): Promise<Artist[]>;
@@ -126,6 +130,8 @@ export const MUSIC_READS = [
   "searchArtists",
   "searchAlbums",
   "searchTracks",
+  "getTrack",
+  "findByIsrc",
   "getArtist",
   "getArtistTopTracks",
   "getSimilarArtists",

@@ -19,6 +19,8 @@ export interface ContractWorld {
   dropped?: TrackId;
   albums: AlbumId[];
   artists: ArtistId[];
+  /** A track of the catalogue with its ISRC, and an ISRC nothing has. */
+  recording?: { isrc: string; track: TrackId; absent: string };
   /** How many requests the fake API has seen. */
   requests(): number;
 }
@@ -145,6 +147,28 @@ export function describeServiceContract(name: ServiceName, make: () => ContractW
       const playlist = await service.createPlaylist("Dropped");
       await service.addTracksToPlaylist(playlist.id, [tracks[0]!, dropped, tracks[1]!]);
       expect(ids(await service.getPlaylistTracks(playlist.id))).toEqual([tracks[0], tracks[1]]);
+    });
+
+    it("looks up a track, and says when there is none", async () => {
+      const { service, tracks } = make();
+      expect((await service.getTrack(tracks[0]!)).id).toBe(tracks[0]);
+      const missing = tagId<TrackId>(name, name === "qobuz" ? 987_654 : "missing");
+      const error = await service.getTrack(missing).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(isNotFound(error), String(error)).toBe(true);
+    });
+
+    it("finds recordings by ISRC, however it is written", async () => {
+      const { service, recording } = make();
+      if (recording === undefined || !service.capabilities.searchByIsrc.ok) {
+        return;
+      }
+      const loose = recording.isrc.toLowerCase();
+      const found = await service.findByIsrc([loose, recording.absent]);
+      expect([...found.keys()]).toEqual([recording.isrc.toUpperCase()]);
+      expect(ids(found.get(recording.isrc.toUpperCase())!)).toContain(recording.track);
     });
 
     it("does nothing for empty lists", async () => {

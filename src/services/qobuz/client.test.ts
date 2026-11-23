@@ -39,6 +39,8 @@ interface FetchOptions {
   trackSearch?: unknown;
   playlist?: unknown;
   userPlaylists?: unknown;
+  track?: unknown;
+  trackStatus?: number;
   album?: unknown;
   playlistGet?: unknown;
   playlistGetStatus?: number;
@@ -128,6 +130,9 @@ function makeFetch(options: FetchOptions): typeof fetch {
     }
     if (path.endsWith("/playlist/addTracks")) {
       return new Response(JSON.stringify({ status: "success" }), { status: 200 });
+    }
+    if (path.endsWith("/track/get")) {
+      return new Response(JSON.stringify(options.track ?? {}), { status: options.trackStatus ?? 200 });
     }
     if (path.endsWith("/album/get")) {
       return new Response(JSON.stringify(options.album ?? {}), { status: 200 });
@@ -966,6 +971,27 @@ describe("QobuzClient.getArtist", () => {
   it("throws when the response names no artist", async () => {
     const { client } = await initedClient({ artistTracks: { top_tracks: [] } });
     await expect(client.getArtist(1)).rejects.toThrow(/artist/);
+  });
+});
+
+describe("QobuzClient.getTrack", () => {
+  it("reads a track from track/get", async () => {
+    const { client, recorded } = await initedClient({
+      track: { id: 12, title: "Roads", isrc: "GBF089400010", streamable: true, performer: { id: 3, name: "Portishead" } },
+    });
+    await expect(client.getTrack(12)).resolves.toMatchObject({ id: 12, title: "Roads", isrc: "GBF089400010", streamable: true });
+    const request = recorded.find((r) => r.url.pathname.endsWith("/track/get"));
+    expect(request?.url.searchParams.get("track_id")).toBe("12");
+  });
+
+  it("says HTTP 404 for a track that is gone", async () => {
+    const { client } = await initedClient({ trackStatus: 404 });
+    await expect(client.getTrack(12)).rejects.toThrow(/HTTP 404/);
+  });
+
+  it("raises when the answer is no track", async () => {
+    const { client } = await initedClient({ track: { status: "error" } });
+    await expect(client.getTrack(12)).rejects.toMatchObject({ kind: "api-response" });
   });
 });
 

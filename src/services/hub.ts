@@ -19,6 +19,7 @@ type Unrouted =
   | "searchArtists"
   | "searchAlbums"
   | "searchTracks"
+  | "findByIsrc"
   | "getUserPlaylists"
   | "getFavoriteTracks"
   | "getFavoriteAlbums"
@@ -84,6 +85,10 @@ export class ServiceHub implements Routed {
     for (const { service, share } of calls) {
       await use(service, share);
     }
+  }
+
+  async getTrack(trackId: TrackId) {
+    return this.#of(trackId).getTrack(trackId);
   }
 
   async getArtist(artistId: ArtistId) {
@@ -225,6 +230,10 @@ class ScopedService extends ServiceHub implements MusicService {
 
   async searchTracks(query: string, limit?: number, offset?: number) {
     return this.service(this.name).searchTracks(query, ...optional(limit, offset));
+  }
+
+  async findByIsrc(isrcs: readonly string[]) {
+    return this.service(this.name).findByIsrc(isrcs);
   }
 
   async getUserPlaylists() {

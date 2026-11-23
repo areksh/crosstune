@@ -22,6 +22,7 @@
  * for hand-editing or moving lists between services.
  */
 
+import { normaliseIsrc } from "../services/isrc.js";
 import {
   readAlbumId,
   readId,
@@ -775,11 +776,6 @@ async function resolveArtist(
   const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
   const id = (exact ?? candidates[0])?.id;
   return id === undefined ? undefined : { id, via: "search" };
-}
-
-/** ISRCs compare case-insensitively, ignoring hyphens and spaces. */
-function normaliseIsrc(isrc: string): string {
-  return isrc.replace(/[\s-]/g, "").toUpperCase();
 }
 
 /**

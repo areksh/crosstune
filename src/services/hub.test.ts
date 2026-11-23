@@ -34,7 +34,8 @@ describe("ServiceHub", () => {
     const { hub, qobuz, tidal } = world();
     await hub.getPlaylistTracks(t(1));
     await hub.getAlbum(q(1));
-    expect(tidal.calls).toEqual([["getPlaylistTracks", "tidal:1"]]);
+    await hub.getTrack(t(4));
+    expect(tidal.calls).toEqual([["getPlaylistTracks", "tidal:1"], ["getTrack", "tidal:4"]]);
     expect(qobuz.calls).toEqual([["getAlbum", "qobuz:1"]]);
   });
 
@@ -81,11 +82,13 @@ describe("ServiceHub", () => {
     await view.searchTracks("roads", 5);
     await view.createPlaylist("Mix", { isPublic: true });
     await view.getFavoriteTracks();
+    await view.findByIsrc(["X"]);
     await view.getPlaylistTracks(q(3));
     expect(tidal.calls).toEqual([
       ["searchTracks", "roads", 5],
       ["createPlaylist", "Mix", { isPublic: true }],
       ["getFavoriteTracks"],
+      ["findByIsrc", ["X"]],
     ]);
     expect(qobuz.calls).toEqual([["getPlaylistTracks", "qobuz:3"]]);
   });

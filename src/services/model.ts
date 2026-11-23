@@ -12,6 +12,9 @@ export type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId, UserId } from "./
 export { ServiceError } from "./errors.js";
 export { classifyRelease, RELEASE_TYPES, type ReleaseType } from "./releases.js";
 
+/** How good a track sounds, as services that give no bit depth grade it. */
+export type QualityTier = "lossy" | "lossless" | "hires";
+
 export interface Artist {
   id: ArtistId;
   name: string;
@@ -58,6 +61,12 @@ export interface Track {
   image?: string;
   /** Length in seconds, when present. */
   duration?: number;
+  /** How good it sounds, where a service says only that and not {@link bitDepth}. */
+  quality?: QualityTier;
+  /** A link to it on its service. */
+  url?: string;
+  /** Not a song (a podcast episode, a video, a local file): shown, never matched. */
+  other?: "episode" | "video" | "local";
   /**
    * Whether the service can currently stream the track, when the response says.
    * `false` marks a track that has gone unplayable (rights withdrawn), which
@@ -93,6 +102,12 @@ export interface Album {
   image?: string;
   /** Whether the service can currently stream the album, when the response says. */
   streamable?: boolean;
+  /** How good it sounds, where a service says only that. */
+  quality?: QualityTier;
+  /** Its barcode (UPC or EAN), when the service gives it. */
+  upc?: string;
+  /** A link to it on its service. */
+  url?: string;
 }
 
 export interface Playlist {
@@ -109,6 +124,8 @@ export interface Playlist {
   updatedAt?: string;
   /** Id of the user it belongs to. */
   ownerId?: UserId;
+  /** A link to it on its service. */
+  url?: string;
 }
 
 /** An album release of an artist, with its type and (when known) its main artist id. */
