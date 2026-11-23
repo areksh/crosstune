@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TIDAL and Spotify**, beside Qobuz, through their official APIs. Connect
+  each from the new **Accounts** page (or `login tidal|spotify`); each needs an
+  app you register, and Spotify's must be owned by a Premium account. The UI now
+  opens with nothing connected, and a service whose sign-in expires stops only
+  what uses it. Choose the service in the sidebar, or **All services** where a
+  view can show them together (Playlists, Library stats, Combine).
+- **Copy to another service**: from a playlist's menu, or by choosing another
+  service for a new playlist made from a selection. Songs are matched by ISRC,
+  then by name; uncertain ones are shown for you to choose, and your choices are
+  remembered. `copy` does the same from the command line.
+- **Linked playlists**: the same playlist on several services, kept the same in
+  both directions on a schedule (or `sync`). A conflict writes nothing and is
+  shown on every page until you settle it.
+- Spotify's missing top tracks and similar artists are taken from Qobuz or TIDAL.
+- `accounts`, `forget <service>` (deletes what is kept about it, History
+  included) and `sync` commands.
 - **Playlists**: a playlist manager in the web UI. Lists your playlists (rename,
   describe, make public or private, duplicate, delete) and opens one as a draft
   with every song on one page: search, select with clicks, shift-click or the

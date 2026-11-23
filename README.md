@@ -13,6 +13,36 @@ API that the Qobuz web player uses. That makes the integration inherently
 unofficial and subject to breakage when Qobuz changes their web bundle. See
 [docs/adr/](docs/adr/) for the architectural decisions behind the project.
 
+## Several services
+
+qobuz-helper also works with **TIDAL** and **Spotify**, through their official
+APIs. Connect each on the **Accounts** page of the web UI, or with
+`qobuz-helper login tidal` / `login spotify`:
+
+- TIDAL and Spotify each ask you to register a free app of your own and paste
+  its **client id**; the Accounts page shows the steps and the redirect address
+  to register (`http://127.0.0.1:53683/callback/<service>`). The client secret
+  is not needed.
+- Spotify's app must be owned by an account with **Premium**, and Spotify ends
+  the sign-in six months after you authorise it (the UI warns you in time).
+  Spotify gives no top tracks or similar artists to such apps; with Qobuz or
+  TIDAL connected, they are taken from there and matched back.
+- Choose the service in the sidebar. Playlists, Library stats and Combine can
+  show **all services** at once; every song and playlist names its service.
+- **Copy to another service** (a playlist's menu, or "On" when making a new
+  playlist) matches songs by ISRC, then by name. Uncertain matches are shown for
+  you to choose; your choices are remembered (`matches.json`).
+- **Linked playlists** (Managed playlists) keep one playlist the same on several
+  services, both ways. On a conflict nothing is written, and every page says so
+  until you settle it. `qobuz-helper sync` syncs them now; `run-due` exits with
+  3 while any is in conflict.
+- **Disconnect and forget** (or `forget <service>`) deletes what qobuz-helper
+  keeps about a service, its History entries included.
+
+Spotify's and TIDAL's terms limit combining their content with other services';
+showing them side by side and comparing them is done here for your own use,
+each item labelled with its service.
+
 ## Tools
 
 - **Playlist from artists** -- build a playlist from just a list of artists,
