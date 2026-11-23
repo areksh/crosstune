@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The ask box** at the top of the web UI (Ctrl+K): paste links or a list of
+  artists or albums, or type a playlist's name or a tool, and pick what to do.
+  It replaces Home's paste box; Home shows the playlists changed most recently.
+- **Playlist covers** from Qobuz, TIDAL and Spotify in the library, on a
+  playlist's page and over its tools (with album covers on), and a playlist's
+  header tinted by its real cover (ADR-0015).
+- The web UI **asks once** whether to show album covers, saying what that tells
+  the services' image servers; *Settings* keeps the switch.
+
 - **TIDAL and Spotify**, beside Qobuz, through their official APIs. Connect
   each from the new **Accounts** page (or `login tidal|spotify`); each needs an
   app you register, and Spotify's must be owned by a Premium account. The UI now
@@ -139,7 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   box and drops its list of tools, which are under *+ New* and on each
   playlist. When the page has to load afresh (a tool on another service, or on
   another playlist than it last showed), it asks first if a tool has a preview
-  you have not saved.
+  you have not saved. It no longer asks after a scan that found nothing to
+  save, and does ask about a half-filled managed playlist or an import not yet
+  previewed.
+- On All playlists, *Stats* is now *Library stats*: it always counted your
+  Favourites too. On touch screens, tapping a playlist's cover in the library
+  opens it instead of ticking it.
 - **The app is now called crosstune**, as it works with TIDAL and Spotify as
   well as Qobuz: the command is `crosstune`, and its settings live in
   `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that

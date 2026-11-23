@@ -993,22 +993,26 @@ sampling rate in kHz), in gold for hi-res. When the page has to load afresh
 (a tool on another service, or on another playlist than it last showed), it
 asks first if a tool has a preview you have not saved.
 
-With no playlist open, the page shows a paste box, *Start with a link or a list*: paste
-links (Qobuz, Spotify or TIDAL), artist names or "Artist - Album" lines, one per line. It says what
-it found ("Found 1 playlist, 1 album and 1 artist.") and offers the tools that
-fit -- build a playlist from the artists or the albums, find similar artists,
-and for a playlist link: similar artists from it, upgrade & repair, library
-stats or the deduplicator (the last three when the playlist is yours). A
-button opens the tool with the list filled in. Nothing is looked up until the
-tool runs. The artists, albums and similar-artists lists take links as well as
-names (see [Links](#links)), and *Similar artists* can start from a
-pasted playlist link, not only from one of your playlists.
+The **ask box** at the top (Ctrl+K, or `/`) takes anything: paste links
+(Qobuz, Spotify or TIDAL), artist names or "Artist - Album" lines, one per line
+(Shift+Enter for a new line), and it offers the tools that fit -- build a
+playlist from the artists or the albums, find similar artists, and for a
+playlist link: similar artists from it, and (when the playlist is yours) open it,
+find repeats in it, upgrade it or see its stats. One line is also looked up
+among your playlists and the tools: "tech" opens *Techno*, "repeats" finds
+repeats in the playlist that is open (or your Favourites). Enter picks the
+first suggestion. Nothing is looked up until the tool runs. The artists, albums
+and similar-artists lists take links as well as names (see [Links](#links)).
+With no playlist open, the page shows the playlists you changed most recently.
 
 Album covers are off by default; until you turn them on, each cover is drawn
-from the album's or playlist's name. Tick *Show album covers* in *Settings* to
-show the real ones; your browser then loads them straight from the services'
-image servers (no sign-in details are involved). While it is off, no image is
-requested at all. The setting is remembered in this browser.
+from the album's or playlist's name. The first time a service is connected, the
+page asks once whether to show them; *Show album covers* in *Settings* changes
+it later. With covers on, your browser loads them straight from the services'
+image servers (no sign-in details are involved) -- playlists' own covers too --
+and a playlist's header takes its colour from its cover, read in the page
+(ADR-0015). While covers are off, no image is requested at all. The setting is
+remembered in this browser.
 
 **Playlist from artists:**
 
