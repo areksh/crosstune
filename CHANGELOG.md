@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered. `copy` does the same from the command line.
 - **Linked playlists**: the same playlist on several services, kept the same in
   both directions on a schedule (or `sync`). A conflict writes nothing and is
-  shown on every page until you settle it.
+  shown on every page until you settle it, with each copy's changes side by
+  side; a linked playlist is marked in Playlists and on its own page.
 - Spotify's missing top tracks and similar artists are taken from Qobuz or TIDAL.
 - Spotify and TIDAL links work wherever a list is typed, as Qobuz's do. A link
   to another service than the one a tool runs on is found again there: an

@@ -4,7 +4,7 @@ import { MemoryMatches } from "../features/match.js";
 import { ServiceError } from "../services/errors.js";
 import type { PlaylistId, ServiceName } from "../services/ids.js";
 import { emptyLinkState, type LinkCopies, type LinkState } from "./model.js";
-import { linkAsSame, resolveConflict, syncLink, type SyncOutcome } from "./run.js";
+import { compareCopies, linkAsSame, resolveConflict, syncLink, type SyncOutcome } from "./run.js";
 import { SyncAccount } from "./world.test-support.js";
 
 const NOW = new Date("2026-11-23T12:00:00Z");
@@ -711,5 +711,59 @@ describe("any mix of edits", () => {
       expect(w.writes(), `round ${round}`).toEqual([]);
     }
     expect(synced).toBeGreaterThan(150);
+  });
+});
+
+describe("comparing the copies", () => {
+  const compare = (w: ReturnType<typeof world>) =>
+    compareCopies({ clients: w.accounts, copies: w.copies, state: w.state, matches: w.matches });
+
+  it("shows what each copy changed since the last sync, side by side", async () => {
+    const w = await linked([1, 2, 3, 4]);
+    w.edit("qobuz", (songs) => [...without(2)(songs), 5]);
+    w.at("qobuz").account.rename(w.copies.qobuz!, "Better");
+    w.edit("tidal", (songs) => [songs[3]!, ...songs.slice(0, 3)]);
+    expect(await compare(w)).toEqual({
+      since: "last-sync",
+      copies: [
+        {
+          service: "qobuz",
+          name: "Better",
+          songs: 4,
+          renamed: true,
+          reordered: false,
+          added: [{ id: "qobuz:5", title: "Song 5", artist: expect.any(String) }],
+          removed: [{ id: "tidal:2", title: "Song 2", artist: expect.any(String) }],
+        },
+        { service: "tidal", name: "Mix", songs: 4, renamed: false, reordered: true, added: [], removed: [] },
+      ],
+    });
+  });
+
+  it("names a song no copy has any more by its id", async () => {
+    const w = await linked([1, 2, 3]);
+    w.edit("qobuz", without(2));
+    w.edit("tidal", without(2));
+    const result = await compare(w);
+    expect("copies" in result && result.copies[0]?.removed).toEqual([{ id: "qobuz:2", title: "a song no copy has now" }]);
+  });
+
+  it("shows what only each copy has, for a first link", async () => {
+    const w = world([1, 2, 3]);
+    w.edit("qobuz", (songs) => [...songs, 4]);
+    w.edit("tidal", without(1));
+    expect(await compare(w)).toMatchObject({
+      since: "in-common",
+      copies: [
+        { service: "qobuz", songs: 4, added: [{ id: "qobuz:1" }, { id: "qobuz:4" }], removed: [] },
+        { service: "tidal", songs: 2, added: [], removed: [] },
+      ],
+    });
+  });
+
+  it("gives the conflicts that stop the copies being read", async () => {
+    const w = await linked([1, 2]);
+    w.at("tidal").account.remove(w.copies.tidal!);
+    expect(await compare(w)).toEqual({ conflicts: [{ kind: "gone", service: "tidal" }] });
   });
 });

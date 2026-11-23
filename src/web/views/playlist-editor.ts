@@ -71,6 +71,8 @@ import { enableDrag } from "../drag-list.js";
 import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
+import { knownLinks, LINKS_CHANGED } from "./links.js";
+import { linkMark } from "../../sync/wording.js";
 
 interface Editor {
   playlist: ManagerPlaylist;
@@ -319,10 +321,22 @@ function renderHead(): void {
   const { playlist } = current();
   el("pl-name").textContent = playlist.name;
   const notice = managedNotice(playlist);
+  const mark = linkMark(playlist.id, knownLinks()?.links ?? []);
   const node = el("pl-notice");
-  node.hidden = notice === undefined && playlist.owned;
+  node.hidden = notice === undefined && mark === undefined && playlist.owned;
   node.textContent = "";
-  if (!playlist.owned) {
+  node.classList.toggle("urgent", mark?.conflict === true);
+  if (mark !== undefined) {
+    // A linked copy: its edits reach the other copies on the next sync.
+    const link = document.createElement("a");
+    link.href = "#/managed";
+    link.textContent = mark.conflict ? "Choose in Managed playlists" : "Managed playlists";
+    node.append(
+      `${mark.text}.`,
+      mark.conflict ? " Nothing is synced until you choose. " : " Changes saved here reach the other copies on the next sync. ",
+      link,
+    );
+  } else if (!playlist.owned) {
     node.textContent = "This playlist belongs to someone else. You can copy songs from it, not change it.";
   } else if (notice !== undefined) {
     node.append(notice, " ");
@@ -1618,6 +1632,11 @@ async function offerRebase(outcome: Extract<SaveOutcome, { status: "changed" }>,
 
 /** Wire up the editor. Call once on load. */
 export function initPlaylistEditor(): void {
+  window.addEventListener(LINKS_CHANGED, () => {
+    if (editor !== undefined) {
+      renderHead();
+    }
+  });
   const list = el("pl-songs");
   list.addEventListener("click", onRowClick);
   list.addEventListener("keydown", onListKey);

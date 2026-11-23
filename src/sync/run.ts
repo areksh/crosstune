@@ -143,6 +143,57 @@ export async function resolveConflict(
   return carryOut({ ...input, state }, { ...state, base }, read.copies, input.choice, input.dryRun === true);
 }
 
+/** One copy, as it differs: since the last sync, or from what all copies have. */
+export interface CopySide {
+  service: ServiceName;
+  name: string;
+  songs: number;
+  renamed: boolean;
+  reordered: boolean;
+  added: SongRef[];
+  removed: SongRef[];
+}
+
+export type CopyComparison = { since: "last-sync" | "in-common"; copies: CopySide[] } | { conflicts: Conflict[] };
+
+/**
+ * The copies side by side, to settle a conflict knowing what each changed: the
+ * songs added to and removed from each since the last sync, and whether it was
+ * reordered or renamed. A first link has no last sync: then each copy's
+ * additions are the songs only it has, against what they all have in common.
+ * Writes nothing.
+ */
+export async function compareCopies(input: Pick<SyncInput, "clients" | "copies" | "state" | "matches">): Promise<CopyComparison> {
+  const read = await readCopies(input);
+  if ("conflicts" in read) {
+    return { conflicts: read.conflicts };
+  }
+  const { base: last } = input.state;
+  const base = last ?? (await commonBase(input, read.copies));
+  const byId = new Map(read.copies.flatMap((copy) => copy.entries.map((track) => [track.id, track] as const)));
+  /** A song gone from `service`, named as a copy that still has it names it. */
+  const named = (index: number, service: ServiceName): SongRef => {
+    const { ids } = base.songs[index]!;
+    const there = Object.values(ids).flatMap((id) => byId.get(id) ?? []);
+    return there[0] === undefined ? { id: ids[service]!, title: "a song no copy has now" } : refOf(there[0]);
+  };
+  return {
+    since: last === undefined ? "in-common" : "last-sync",
+    copies: read.copies.map((copy) => {
+      const changes = findChanges(base, copy);
+      return {
+        service: copy.service,
+        name: copy.name,
+        songs: songsOf(copy).length,
+        renamed: last !== undefined && copy.name !== last.name,
+        reordered: changes.moved.size > 0,
+        added: changes.additions.map((place) => refOf(place.track)),
+        removed: changes.removed.map((index) => named(index, copy.service)),
+      };
+    }),
+  };
+}
+
 // ---- Reading ----------------------------------------------------------------
 
 async function readCopies(

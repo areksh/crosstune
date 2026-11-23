@@ -55,6 +55,8 @@ export async function linkRoutes(req: ApiRequest, service: LinksService): Promis
           ? ok(await service.chooseMatch(id, body["key"], track))
           : bad("choose a song, or none");
       }
+      case "compare":
+        return ok(await service.compare(id));
       case "pause":
         return ok(await service.setEnabled(id, false));
       case "resume":

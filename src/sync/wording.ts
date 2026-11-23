@@ -7,8 +7,8 @@
 import type { RunResultSummary } from "../jobs/model.js";
 import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
 import type { Conflict, LinkState, Question, SongRef } from "./model.js";
-import type { CopyChange } from "./run.js";
-import type { LinksSummary } from "./runner.js";
+import type { CopyChange, CopySide } from "./run.js";
+import type { Link, LinksSummary } from "./runner.js";
 
 const label = (service: ServiceName): string => SERVICE_LABELS[service];
 
@@ -190,4 +190,45 @@ export function attentionBadge(attention: LinkAttention): { count: number; text:
   return attention.links === 0
     ? undefined
     : { count: attention.links, text: `${attention.links} need you`, urgent: attention.conflicted > 0 };
+}
+
+/** How many songs a side names before counting the rest. */
+const NAMED = 10;
+
+function songList(songs: readonly SongRef[]): string {
+  const names = songs.slice(0, NAMED).map(songName);
+  const rest = songs.length - names.length;
+  return rest > 0 ? `${names.join(", ")} and ${rest} more` : names.join(", ");
+}
+
+/** One copy's column when a conflict's copies are shown side by side. */
+export function describeSide(side: CopySide, since: "last-sync" | "in-common"): { title: string; lines: string[] } {
+  const title = `${label(side.service)}: ${side.name}, ${plural(side.songs, "song")}`;
+  if (since === "in-common") {
+    return {
+      title,
+      lines: [side.added.length === 0 ? "Nothing that the others do not have." : `Only here: ${songList(side.added)}.`],
+    };
+  }
+  const lines = [
+    ...(side.renamed ? ["Renamed."] : []),
+    ...(side.reordered ? ["Reordered."] : []),
+    ...(side.added.length > 0 ? [`Added ${plural(side.added.length, "song")}: ${songList(side.added)}.`] : []),
+    ...(side.removed.length > 0 ? [`Removed ${plural(side.removed.length, "song")}: ${songList(side.removed)}.`] : []),
+  ];
+  return { title, lines: lines.length > 0 ? lines : ["No change since the last sync."] };
+}
+
+/** The mark on a playlist that is a copy in a link: loud while its copies disagree. */
+export function linkMark(
+  playlistId: string,
+  links: readonly { link: Pick<Link, "copies">; state: Pick<LinkState, "conflicts"> }[],
+): { text: string; conflict: boolean } | undefined {
+  const view = links.find(({ link }) => Object.values(link.copies).includes(playlistId as never));
+  if (view === undefined) {
+    return undefined;
+  }
+  const others = (Object.keys(view.link.copies) as ServiceName[]).filter((service) => view.link.copies[service] !== playlistId);
+  const conflict = view.state.conflicts.length > 0;
+  return { text: `Linked with ${andList(others.map(label))}${conflict ? ": the copies disagree" : ""}`, conflict };
 }

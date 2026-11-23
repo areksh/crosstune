@@ -2505,6 +2505,36 @@ button.history-undo {
   color: var(--text);
 }
 
+.link-sides {
+  margin: 4px 0 10px;
+}
+
+.link-sides-title {
+  margin: 0 0 6px;
+  color: var(--text-2);
+}
+
+.link-sides-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.link-side {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.link-side-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.link-side ul {
+  margin: 0;
+}
+
 .link-conflict-hint {
   margin: 0;
   color: var(--text-2);
@@ -2711,6 +2741,17 @@ input[type="search"] {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.pl-badge.pl-conflict {
+  border-color: var(--error);
+  color: var(--error);
+  font-weight: 600;
+}
+
+#pl-notice.urgent {
+  border-color: var(--error);
+  color: var(--error);
 }
 
 .pl-badge.pl-duplicate,

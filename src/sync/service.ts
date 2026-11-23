@@ -10,7 +10,7 @@ import { labelOf } from "../services/errors.js";
 import { parseId, SERVICES, type ServiceName, type TrackId } from "../services/ids.js";
 import type { RunRecord } from "../jobs/stores.js";
 import { emptyLinkState, type LinkState } from "./model.js";
-import { linkAsSame, resolveConflict, type SyncOutcome } from "./run.js";
+import { compareCopies, linkAsSame, resolveConflict, type CopyComparison, type SyncOutcome } from "./run.js";
 import type { Choice } from "./plan.js";
 import { isLinkEntry, pausedByUndo, runLinks, savingEntries, validateLink, type InvalidLink, type Link, type LinkConnect, type LinksSummary } from "./runner.js";
 
@@ -49,6 +49,8 @@ export interface LinksService {
    * first, so that no sync reads the undo half-done as the user's edits.
    */
   undone(entryId: string): Promise<string[]>;
+  /** The copies side by side: what each changed since the last sync. Writes nothing. */
+  compare(id: string): Promise<CopyComparison>;
 }
 
 export function linksService(deps: LinksServiceDeps): LinksService {
@@ -167,6 +169,12 @@ export function linksService(deps: LinksServiceDeps): LinksService {
     // Only an undo of a link's own entry waits for the lock.
     undone: async (entryId) =>
       isLinkEntry(deps, entryId) ? deps.lock(async () => pausedByUndo(deps, entryId, now())) : [],
+
+    compare: async (id) => {
+      const link = find(id);
+      const clients = await clientsFor(link);
+      return compareCopies({ clients, copies: link.copies, state: deps.state.load(id), matches: deps.matches });
+    },
 
     remove: async (id) => {
       find(id);

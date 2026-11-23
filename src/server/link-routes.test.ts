@@ -17,6 +17,7 @@ function setup() {
     chooseMatch: vi.fn(async () => ({ reports: [], conflicts: 0 })),
     setEnabled: vi.fn(() => ({ id: "abcdef01" })),
     remove: vi.fn(),
+    compare: vi.fn(async () => ({ since: "last-sync", copies: [] })),
   } as unknown as LinksService & Record<string, ReturnType<typeof vi.fn>>;
   const deps: ApiDeps = {
     service: undefined as never,
@@ -56,6 +57,8 @@ describe("link routes", () => {
     expect(service.chooseMatch).toHaveBeenCalledWith("abcdef01", "k", null);
     await call("POST", "/api/links/abcdef01/answer", { key: "k", answer: "removed" });
     expect(service.answer).toHaveBeenCalledWith("abcdef01", "k", "removed");
+    expect(await call("POST", "/api/links/abcdef01/compare")).toEqual({ status: 200, body: { since: "last-sync", copies: [] } });
+    expect(service.compare).toHaveBeenCalledWith("abcdef01");
   });
 
   it("answer 404 for a link that is not there, and 400 for a bad definition", async () => {

@@ -12,8 +12,10 @@ import {
   describeLinkResult,
   describeLinksSummary,
   describeQuestion,
+  describeSide,
   fixFor,
   linkAttention,
+  linkMark,
 } from "./wording.js";
 
 const song = (title: string, artist?: string) => ({ title, id: `qobuz:${title}` as TrackId, ...(artist !== undefined && { artist }) });
@@ -171,5 +173,58 @@ describe("andList", () => {
     expect(andList([])).toBe("");
     expect(andList(["A"])).toBe("A");
     expect(andList(["A", "B", "C"])).toBe("A, B and C");
+  });
+});
+
+describe("describeSide", () => {
+  const side = { service: "qobuz" as const, name: "Mix", songs: 3, renamed: false, reordered: false, added: [], removed: [] };
+
+  it("titles a copy with its name and song count, and says when nothing changed", () => {
+    expect(describeSide(side, "last-sync")).toEqual({ title: "Qobuz: Mix, 3 songs", lines: ["No change since the last sync."] });
+  });
+
+  it("lists what was added and removed, and a rename or reorder", () => {
+    const changed = { ...side, renamed: true, reordered: true, added: [song("A", "X")], removed: [song("B"), song("C")] };
+    expect(describeSide(changed, "last-sync")).toEqual({
+      title: "Qobuz: Mix, 3 songs",
+      lines: ["Renamed.", "Reordered.", "Added 1 song: A by X.", "Removed 2 songs: B, C."],
+    });
+  });
+
+  it("says what only it has, for a first link", () => {
+    expect(describeSide({ ...side, added: [song("A")] }, "in-common").lines).toEqual(["Only here: A."]);
+    expect(describeSide(side, "in-common").lines).toEqual(["Nothing that the others do not have."]);
+  });
+
+  it("names the first songs of a long list and counts the rest", () => {
+    const many = Array.from({ length: 12 }, (_, n) => song(`S${n}`));
+    expect(describeSide({ ...side, added: many }, "last-sync").lines[0]).toBe(
+      "Added 12 songs: S0, S1, S2, S3, S4, S5, S6, S7, S8, S9 and 2 more.",
+    );
+  });
+});
+
+describe("linkMark", () => {
+  const view = (copies: Record<string, string>, conflicts: Conflict[] = []) => ({
+    link: { id: "abcdef01", name: "Mix", copies },
+    state: { ...emptyLinkState(), conflicts },
+  });
+
+  it("marks a playlist that is a copy, naming the others", () => {
+    expect(linkMark("qobuz:1", [view({ qobuz: "qobuz:1", spotify: "spotify:x" })])).toEqual({
+      text: "Linked with Spotify",
+      conflict: false,
+    });
+  });
+
+  it("marks a copy whose link is in conflict loudly", () => {
+    expect(linkMark("spotify:x", [view({ qobuz: "qobuz:1", spotify: "spotify:x" }, [{ kind: "first-link" }])])).toEqual({
+      text: "Linked with Qobuz: the copies disagree",
+      conflict: true,
+    });
+  });
+
+  it("leaves other playlists unmarked", () => {
+    expect(linkMark("qobuz:2", [view({ qobuz: "qobuz:1", spotify: "spotify:x" })])).toBeUndefined();
   });
 });

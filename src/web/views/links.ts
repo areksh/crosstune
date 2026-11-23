@@ -11,7 +11,7 @@ import { describeSchedule } from "../../jobs/format.js";
 import type { ManagerPlaylist } from "../../features/playlist-manager.js";
 import { serviceOf, shortId, SERVICES, SERVICE_LABELS, type PlaylistId, type ServiceName, type TrackId } from "../../services/ids.js";
 import type { Question } from "../../sync/model.js";
-import type { SyncOutcome } from "../../sync/run.js";
+import type { CopyComparison, SyncOutcome } from "../../sync/run.js";
 import type { InvalidLink, LinksSummary } from "../../sync/runner.js";
 import type { LinkView } from "../../sync/service.js";
 import {
@@ -20,6 +20,7 @@ import {
   describeLinkResult,
   describeLinksSummary,
   describeQuestion,
+  describeSide,
   fixFor,
   songName,
 } from "../../sync/wording.js";
@@ -39,10 +40,18 @@ export const LINKS_CHANGED = "qobuz-helper:links";
 
 const label = (service: ServiceName): string => SERVICE_LABELS[service];
 
+/** The list as last loaded, for the marks on linked playlists. */
+let known: LinksList | undefined;
+
+export function knownLinks(): LinksList | undefined {
+  return known;
+}
+
 /** The list, or undefined where this server has no linked playlists. */
 export async function fetchLinks(): Promise<LinksList | undefined> {
   try {
-    return await api<LinksList>("GET", "/api/links", undefined, "all");
+    known = await api<LinksList>("GET", "/api/links", undefined, "all");
+    return known;
   } catch (error) {
     if ((error as Error).message === "not found") {
       return undefined;
@@ -358,6 +367,7 @@ function renderConflicts(view: LinkView, card: HTMLElement): HTMLElement {
     row().appendChild(button("Remove the link...", () => void removeLink(view, card), false));
     return box;
   }
+  box.appendChild(sideBySide(view));
   box.appendChild(text("p", "link-conflict-hint", "Each choice shows what it would write to every copy before writing anything."));
   const services = servicesOf(view);
   type Option = [string, (service: ServiceName) => void];
@@ -373,6 +383,45 @@ function renderConflicts(view: LinkView, card: HTMLElement): HTMLElement {
       actions.appendChild(button(caption.replace("%s", label(service)), () => choose(service)));
     }
   }
+  return box;
+}
+
+/** The copies in columns, each with what it changed: filled once they are read. */
+function sideBySide(view: LinkView): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "link-sides";
+  box.setAttribute("aria-live", "polite");
+  box.appendChild(text("p", "link-conflict-hint", "Reading the copies..."));
+  void api<CopyComparison>("POST", `/api/links/${view.link.id}/compare`, {}, "all").then(
+    (compared) => {
+      box.textContent = "";
+      if ("conflicts" in compared) {
+        box.appendChild(text("p", "link-conflict-hint", compared.conflicts.map(describeConflict).join(" ")));
+        return;
+      }
+      box.appendChild(
+        text(
+          "p",
+          "link-sides-title",
+          compared.since === "last-sync" ? "What each copy changed since the last sync:" : "What only each copy has:",
+        ),
+      );
+      const columns = document.createElement("div");
+      columns.className = "link-sides-columns";
+      for (const side of compared.copies) {
+        const { title, lines } = describeSide(side, compared.since);
+        const column = document.createElement("section");
+        column.className = "link-side";
+        column.append(text("h4", "link-side-title", title), list(lines));
+        columns.appendChild(column);
+      }
+      box.appendChild(columns);
+    },
+    (error: unknown) => {
+      box.textContent = "";
+      box.appendChild(text("p", "link-conflict-hint", `The copies could not be read: ${(error as Error).message}`));
+    },
+  );
   return box;
 }
 

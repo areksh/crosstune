@@ -148,4 +148,16 @@ describe("linksService", () => {
     await expect(service.run("ffffffff")).rejects.toThrow(/No link/);
     await expect(service.create({ name: "", copies: {} })).rejects.toThrow();
   });
+
+  it("compares the copies without writing or taking the lock", async () => {
+    const { service, q, t } = setup();
+    const a = q.seed("Mix", [1, 2]);
+    const b = t.seed("Mix", [1, 2]);
+    await service.create({ name: "Mix", copies: { qobuz: a, tidal: b } });
+    q.edit(a, (songs) => [...songs, 3]);
+    q.writes = [];
+    const compared = await service.compare("abcdef01");
+    expect(compared).toMatchObject({ since: "last-sync", copies: [{ service: "qobuz", added: [{ id: "qobuz:3" }] }, { service: "tidal", added: [] }] });
+    expect(q.writes).toEqual([]);
+  });
 });

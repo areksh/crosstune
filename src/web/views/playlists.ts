@@ -17,6 +17,8 @@ import { el, showError } from "../dom.js";
 import { groupHead, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, songCount } from "./playlist-actions.js";
 import { closeEditor, initPlaylistEditor, onDeleted, openEditor } from "./playlist-editor.js";
+import { knownLinks, LINKS_CHANGED } from "./links.js";
+import { linkMark } from "../../sync/wording.js";
 
 let playlists: ManagerPlaylist[] = [];
 const ticked = new Set<PlaylistId>();
@@ -39,6 +41,12 @@ export function initPlaylistsView(): void {
   el("pl-artists-close").addEventListener("click", closeArtists);
   el("pl-artists-find").addEventListener("click", () => void findArtists());
   el("pl-artists-remove").addEventListener("click", () => void removeArtists());
+  // The marks on linked playlists follow the links as they load.
+  window.addEventListener(LINKS_CHANGED, () => {
+    if (playlists.length > 0) {
+      renderList();
+    }
+  });
   route();
 }
 
@@ -157,9 +165,9 @@ function renderRow(playlist: ManagerPlaylist): HTMLElement {
 
   const badges = document.createElement("span");
   badges.className = "pl-badges";
-  const add = (text: string, title = ""): void => {
+  const add = (text: string, title = "", className = "pl-badge"): void => {
     const node = document.createElement("span");
-    node.className = "pl-badge";
+    node.className = className;
     node.textContent = text;
     node.title = title;
     badges.append(node);
@@ -178,6 +186,10 @@ function renderRow(playlist: ManagerPlaylist): HTMLElement {
   }
   if (playlist.managed !== undefined) {
     add("managed", managedNotice(playlist));
+  }
+  const mark = linkMark(playlist.id, knownLinks()?.links ?? []);
+  if (mark !== undefined) {
+    add(mark.conflict ? "linked: copies disagree" : "linked", mark.text, mark.conflict ? "pl-badge pl-conflict" : "pl-badge");
   }
 
   const menu = document.createElement("details");
