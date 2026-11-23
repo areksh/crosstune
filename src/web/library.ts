@@ -6,15 +6,19 @@
  */
 
 import type { ManagerPlaylist } from "../features/playlist-manager.js";
-import type { PlaylistId } from "../services/ids.js";
+import { serviceOf, type PlaylistId } from "../services/ids.js";
 import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
 import { linkMark } from "../sync/wording.js";
 import { coverBackground, generatedCover } from "../ui/cover-art.js";
-import { libraryRows, sidebarRows, type LibraryRow, type SidebarRow } from "../ui/library.js";
+import { groupActions, libraryRows, sidebarRows, type LibraryRow, type SidebarRow } from "../ui/library.js";
 import { routeHash, type Route } from "../ui/routes.js";
 import { api } from "./api.js";
 import { el } from "./dom.js";
-import { currentTab, TAB_CHANGED } from "./shell.js";
+import { chooseTab, currentTab, TAB_CHANGED } from "./shell.js";
+import { openDialog } from "./dialog.js";
+import { chosenService, rememberService } from "./service.js";
+import { useSources } from "./views/combine.js";
+import { startRemoveArtists } from "./views/playlists.js";
 import { knownLinks, LINKS_CHANGED } from "./views/links.js";
 
 /** Fired on `window` each time the playlists have been read. */
@@ -91,6 +95,7 @@ function render(): void {
   });
   el("lib-playlists").replaceChildren(...rows.map(playlistRow));
   el("lib-library").replaceChildren(...libraryRows(connected, currentTab()).map(libraryRow));
+  renderGroup();
   if (connected.length === 0) {
     status.hidden = false;
     status.replaceChildren("No music service is connected yet. ", settingsLink());
@@ -153,7 +158,128 @@ function playlistRow(playlist: SidebarRow): HTMLLIElement {
     count.textContent = playlist.trackCount.toLocaleString();
     link.append(count);
   }
+  // A tick beside the row (not in its link), to act on several at once.
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.className = "lib-tick";
+  box.checked = ticked.has(playlist.id);
+  box.setAttribute("aria-label", `Tick ${playlist.name}`);
+  box.addEventListener("change", () => {
+    if (box.checked) {
+      ticked.add(playlist.id);
+    } else {
+      ticked.delete(playlist.id);
+    }
+    renderGroup();
+  });
+  item.classList.add("lib-item");
+  item.prepend(box);
   return item;
+}
+
+// ---- Ticked playlists ---------------------------------------------------------
+
+const ticked = new Set<PlaylistId>();
+
+function tickedPlaylists(): ManagerPlaylist[] {
+  return playlists.filter((playlist) => ticked.has(playlist.id));
+}
+
+function renderGroup(): void {
+  // Playlists gone since (deleted, or a service signed out) drop out.
+  const known = new Set(playlists.map((playlist) => playlist.id));
+  [...ticked].filter((id) => !known.has(id)).forEach((id) => ticked.delete(id));
+  const chosen = tickedPlaylists();
+  el("lib-group").hidden = chosen.length === 0;
+  document.querySelector(".sidebar")?.classList.toggle("ticking", chosen.length > 0);
+  el("lib-group-count").textContent = `${chosen.length} ticked`;
+  const actions = groupActions(chosen);
+  const buttons: HTMLButtonElement[] = [];
+  if (actions.combine) {
+    buttons.push(groupButton("Combine", () => combineTicked(chosen)));
+  }
+  const removeFrom = actions.removeArtists;
+  if (removeFrom !== undefined) {
+    buttons.push(
+      groupButton("Remove artists", () => {
+        startRemoveArtists(chosen.map((playlist) => playlist.id));
+        location.hash = routeHash({ kind: "all", service: removeFrom });
+      }),
+    );
+  }
+  if (actions.delete) {
+    buttons.push(groupButton("Delete...", () => void deleteTicked(chosen), "secondary small danger-text"));
+  }
+  buttons.push(
+    groupButton("Clear", () => {
+      ticked.clear();
+      render();
+    }),
+  );
+  el("lib-group-actions").replaceChildren(...buttons);
+}
+
+function groupButton(text: string, act: () => void, className = "secondary small"): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = text;
+  button.addEventListener("click", act);
+  return button;
+}
+
+/** Combine the ticked playlists: on their service, or on all of them when they span several. */
+function combineTicked(chosen: readonly ManagerPlaylist[]): void {
+  const services = new Set(chosen.map((playlist) => serviceOf(playlist.id)));
+  const [only] = services;
+  const on = services.size === 1 && only !== undefined ? only : "all";
+  if (on === "all" && currentTab() !== "all") {
+    chooseTab("all");
+  }
+  const target = routeHash({ kind: "new", tool: "combine" });
+  const reloading = chosenService() !== on;
+  useSources(
+    chosen.map((playlist) => playlist.id),
+    reloading,
+  );
+  if (reloading) {
+    rememberService(on);
+    history.pushState(null, "", target);
+    location.reload();
+    return;
+  }
+  location.hash = target;
+}
+
+async function deleteTicked(chosen: readonly ManagerPlaylist[]): Promise<void> {
+  const list = document.createElement("ul");
+  for (const playlist of chosen) {
+    const item = document.createElement("li");
+    item.textContent = `${playlist.name} (${SERVICE_LABELS[serviceOf(playlist.id)]})`;
+    list.append(item);
+  }
+  const ok = await openDialog({
+    title: `Delete ${chosen.length} playlist${chosen.length === 1 ? "" : "s"}?`,
+    body: [list, "Each can be made again from History, with the songs it had, except any the service no longer plays."],
+    confirm: "Delete",
+    danger: true,
+  });
+  if (!ok) {
+    return;
+  }
+  const failed: string[] = [];
+  for (const playlist of chosen) {
+    try {
+      await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
+      ticked.delete(playlist.id);
+    } catch (error) {
+      failed.push(`${playlist.name}: ${(error as Error).message}`);
+    }
+  }
+  await refreshLibrary();
+  if (failed.length > 0) {
+    await openDialog({ title: "Some were not deleted", body: failed, confirm: "Close", cancel: null });
+  }
 }
 
 function libraryRow(entry: LibraryRow): HTMLLIElement {

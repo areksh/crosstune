@@ -154,6 +154,54 @@ async function loadPlaylists(): Promise<void> {
     playlists = [];
   }
   document.querySelectorAll<HTMLSelectElement>(".combine-source").forEach(fillSourceSelect);
+  applyHandedSources();
+}
+
+const SOURCES_KEY = "crosstune:combine-sources";
+
+/**
+ * Start Combine on these playlists (ticked in the library). Kept in
+ * sessionStorage, so it survives the page loading afresh on another service.
+ */
+export function useSources(ids: readonly PlaylistId[], reloading: boolean): void {
+  try {
+    sessionStorage.setItem(SOURCES_KEY, JSON.stringify(ids));
+  } catch {
+    // Storage unavailable: kept for this page only.
+    handed = [...ids];
+  }
+  // Applied now only when this page stays: else the next page applies it.
+  if (!reloading && playlists !== undefined) {
+    applyHandedSources();
+  }
+}
+
+let handed: string[] | undefined;
+
+function applyHandedSources(): void {
+  let ids = handed;
+  handed = undefined;
+  try {
+    const stored = sessionStorage.getItem(SOURCES_KEY);
+    sessionStorage.removeItem(SOURCES_KEY);
+    const parsed: unknown = stored === null ? undefined : JSON.parse(stored);
+    if (Array.isArray(parsed) && parsed.every((id) => typeof id === "string")) {
+      ids = parsed as string[];
+    }
+  } catch {
+    // Nothing stored.
+  }
+  if (ids === undefined) {
+    return;
+  }
+  while (el("combine-source-list").children.length < ids.length) {
+    addSourceRow();
+  }
+  const selects = [...document.querySelectorAll<HTMLSelectElement>(".combine-source")];
+  selects.forEach((select, index) => {
+    const id = ids![index] ?? "";
+    select.value = [...select.options].some((option) => option.value === id) ? id : "";
+  });
 }
 
 function chosenSources(): Source[] | string {

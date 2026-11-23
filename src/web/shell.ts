@@ -49,6 +49,11 @@ export function initShell(connected: readonly ServiceName[]): void {
   });
 }
 
+/** Show this tab, as a click on it would. */
+export function chooseTab(tab: Tab): void {
+  choose(tab);
+}
+
 function choose(tab: Tab): void {
   if (tab === current) {
     return;

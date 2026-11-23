@@ -368,6 +368,58 @@ button.tab[aria-pressed="true"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* Ticks: shown on hover or focus, and on every row once one is ticked. */
+.lib-item {
+  position: relative;
+}
+
+.lib-tick {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 1;
+  opacity: 0;
+}
+
+.lib-item:hover .lib-tick,
+.lib-tick:focus-visible,
+.lib-tick:checked,
+.sidebar.ticking .lib-tick {
+  opacity: 1;
+}
+
+.lib-item:hover .lib-cover,
+.sidebar.ticking .lib-item .lib-cover,
+.lib-item:has(.lib-tick:focus-visible) .lib-cover {
+  visibility: hidden;
+}
+
+.lib-group {
+  position: sticky;
+  bottom: -24px;
+  margin: 14px -12px -24px;
+  padding: 12px 14px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--line-strong);
+}
+
+.lib-group-count {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lib-group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+button.danger-text {
+  color: var(--error);
+}
+
 .lib-glyph {
   width: 26px;
   text-align: center;

@@ -63,7 +63,8 @@ function hostedBy(route: Route): Hosted | undefined {
     case "new": {
       const tab = currentTab();
       return {
-        service: tab === "all" ? workingService() : tab,
+        // Under "All", the page's own choice stands (Combine can work on all of them).
+        service: tab === "all" ? undefined : tab,
         back: "#/",
         name: "New playlist",
         title: toolLabel(route.tool),

@@ -101,7 +101,15 @@ async function load(): Promise<void> {
       playlists = result.playlists;
       const ids = new Set(playlists.map((p) => p.id));
       [...ticked].filter((id) => !ids.has(id)).forEach((id) => ticked.delete(id));
-      renderList();
+      if (handedArtists !== undefined) {
+        ticked.clear();
+        handedArtists.filter((id) => ids.has(id)).forEach((id) => ticked.add(id));
+        handedArtists = undefined;
+        renderList();
+        openArtists();
+      } else {
+        renderList();
+      }
     }
   } catch (error) {
     if (mine === request) {
@@ -302,6 +310,14 @@ async function remove(playlist: ManagerPlaylist): Promise<void> {
 
 function tickedPlaylists(): ManagerPlaylist[] {
   return playlists.filter((p) => ticked.has(p.id));
+}
+
+/** Playlists to remove artists from, ticked in the library: applied once the list is read. */
+let handedArtists: PlaylistId[] | undefined;
+
+/** Open "Remove artists" on these playlists of one service ("#/all/<service>" must be on its way). */
+export function startRemoveArtists(ids: readonly PlaylistId[]): void {
+  handedArtists = [...ids];
 }
 
 function openArtists(): void {

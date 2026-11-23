@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ManagerPlaylist } from "../features/playlist-manager.js";
 import type { PlaylistId } from "../services/ids.js";
-import { libraryRows, sidebarRows, tabsFor, validTab } from "./library.js";
+import { groupActions, libraryRows, sidebarRows, tabsFor, validTab } from "./library.js";
 
 function pl(id: string, name: string, updatedAt?: string, trackCount?: number): ManagerPlaylist {
   return {
@@ -86,5 +86,27 @@ describe("libraryRows", () => {
 
   it("has nothing when no service is connected", () => {
     expect(libraryRows([], "all")).toEqual([]);
+  });
+});
+
+describe("groupActions", () => {
+  const own = (id: string, owned = true) => ({ id: id as PlaylistId, owned });
+
+  it("offers Combine for two or more, across services", () => {
+    expect(groupActions([own("qobuz:1"), own("tidal:x")]).combine).toBe(true);
+    expect(groupActions([own("qobuz:1")]).combine).toBe(false);
+  });
+
+  it("offers Remove artists only for one service's own playlists", () => {
+    expect(groupActions([own("qobuz:1"), own("qobuz:2")]).removeArtists).toBe("qobuz");
+    expect(groupActions([own("qobuz:1")]).removeArtists).toBe("qobuz");
+    expect(groupActions([own("qobuz:1"), own("tidal:x")]).removeArtists).toBeUndefined();
+    expect(groupActions([own("qobuz:1"), own("qobuz:2", false)]).removeArtists).toBeUndefined();
+  });
+
+  it("offers Delete only when every ticked playlist is the user's", () => {
+    expect(groupActions([own("qobuz:1"), own("tidal:x")]).delete).toBe(true);
+    expect(groupActions([own("qobuz:1", false)]).delete).toBe(false);
+    expect(groupActions([]).delete).toBe(false);
   });
 });

@@ -67,3 +67,26 @@ export function libraryRows(connected: readonly ServiceName[], tab: Tab): Librar
     { kind: "new-releases" },
   ];
 }
+
+export interface GroupActions {
+  combine: boolean;
+  /** The service whose playlists artists can be removed from, when all are one's and the user's. */
+  removeArtists?: ServiceName;
+  delete: boolean;
+}
+
+/**
+ * What can be done with the ticked playlists at once: Combine two or more
+ * (across services too); Remove artists from one service's own playlists
+ * (the removal reads and writes on one service); Delete the user's own.
+ */
+export function groupActions(ticked: readonly { id: PlaylistId; owned: boolean }[]): GroupActions {
+  const owned = ticked.length > 0 && ticked.every((playlist) => playlist.owned);
+  const services = new Set(ticked.map((playlist) => serviceOf(playlist.id)));
+  const [only] = services;
+  return {
+    combine: ticked.length >= 2,
+    ...(owned && services.size === 1 && only !== undefined && { removeArtists: only }),
+    delete: owned,
+  };
+}
