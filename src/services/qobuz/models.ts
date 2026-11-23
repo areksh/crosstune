@@ -34,24 +34,44 @@ export interface Playlist extends Omit<Neutral.Playlist, "id" | "ownerId"> {
 export interface TracksPage {
   tracks: Track[];
   total: number;
+  /**
+   * How many items Qobuz returned on this page, read or not: what the next
+   * page's offset moves on by (an item that cannot be read is still one).
+   */
+  returned: number;
 }
 
 /** A page of playlists plus the total available, for paginated fetches. */
 export interface PlaylistsPage {
   playlists: Playlist[];
   total: number;
+  /**
+   * How many items Qobuz returned on this page, read or not: what the next
+   * page's offset moves on by (an item that cannot be read is still one).
+   */
+  returned: number;
 }
 
 /** A page of albums plus the total available, for paginated fetches. */
 export interface AlbumsPage {
   albums: Album[];
   total: number;
+  /**
+   * How many items Qobuz returned on this page, read or not: what the next
+   * page's offset moves on by (an item that cannot be read is still one).
+   */
+  returned: number;
 }
 
 /** A page of artists plus the total available, for paginated fetches. */
 export interface ArtistsPage {
   artists: Artist[];
   total: number;
+  /**
+   * How many items Qobuz returned on this page, read or not: what the next
+   * page's offset moves on by (an item that cannot be read is still one).
+   */
+  returned: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +94,11 @@ function imageOf(value: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/** How many items a page's container holds, whether or not they parse. */
+function rawCount(container: Record<string, unknown>): number {
+  return Array.isArray(container["items"]) ? container["items"].length : 0;
 }
 
 function itemsOf(value: unknown, key: string): unknown[] {
@@ -183,7 +208,7 @@ export function parseAlbumsPage(response: unknown): AlbumsPage {
   const container =
     isRecord(response) && isRecord(response["albums"]) ? response["albums"] : {};
   const total = typeof container["total"] === "number" ? container["total"] : 0;
-  return { albums: parseAlbums(response), total };
+  return { albums: parseAlbums(response), total, returned: rawCount(container) };
 }
 
 /** Parse an artists container into its artists plus the total (for pagination). */
@@ -191,7 +216,7 @@ export function parseArtistsPage(response: unknown): ArtistsPage {
   const container =
     isRecord(response) && isRecord(response["artists"]) ? response["artists"] : {};
   const total = typeof container["total"] === "number" ? container["total"] : 0;
-  return { artists: parseArtists(response), total };
+  return { artists: parseArtists(response), total, returned: rawCount(container) };
 }
 
 /** Parse the `tracks.items` list of a tracks container (e.g. artist/get?extra=tracks). */
@@ -293,7 +318,7 @@ export function parseTracksPage(response: unknown): TracksPage {
   const container =
     isRecord(response) && isRecord(response["tracks"]) ? response["tracks"] : {};
   const total = typeof container["total"] === "number" ? container["total"] : 0;
-  return { tracks: parseTracks(response), total };
+  return { tracks: parseTracks(response), total, returned: rawCount(container) };
 }
 
 /** Parse a single track object, pulling artist, ISRC and album when present. */
@@ -543,5 +568,5 @@ export function parsePlaylistsPage(response: unknown): PlaylistsPage {
       ? response["playlists"]
       : {};
   const total = typeof container["total"] === "number" ? container["total"] : 0;
-  return { playlists: parsePlaylists(response), total };
+  return { playlists: parsePlaylists(response), total, returned: rawCount(container) };
 }

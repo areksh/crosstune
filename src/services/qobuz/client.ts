@@ -510,13 +510,14 @@ export class QobuzClient {
       this.#ensureOk(response, "artist/getReleasesList");
       const page = parseReleasesPage(await response.json());
       releases.push(...page.releases.slice(0, maxReleases - releases.length));
-      if (!page.hasMore || page.releases.length === 0) {
+      if (!page.hasMore || page.returned === 0) {
         return { releases, truncated: false };
       }
       if (releases.length >= maxReleases) {
         return { releases, truncated: true };
       }
-      offset += page.releases.length;
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
     }
   }
 
@@ -617,7 +618,7 @@ export class QobuzClient {
   async getFavoriteAlbums(): Promise<Album[]> {
     return this.#collectFavorites("albums", (json) => {
       const page = parseAlbumsPage(json);
-      return { items: page.albums, total: page.total };
+      return { items: page.albums, total: page.total, returned: page.returned };
     });
   }
 
@@ -629,7 +630,7 @@ export class QobuzClient {
   async getFavoriteArtists(): Promise<Artist[]> {
     return this.#collectFavorites("artists", (json) => {
       const page = parseArtistsPage(json);
-      return { items: page.artists, total: page.total };
+      return { items: page.artists, total: page.total, returned: page.returned };
     });
   }
 
@@ -682,8 +683,9 @@ export class QobuzClient {
       this.#ensureOk(response, "playlist/getUserPlaylists");
       const page = parsePlaylistsPage(await response.json());
       all.push(...page.playlists);
-      offset += page.playlists.length;
-      if (page.playlists.length === 0 || all.length >= page.total) {
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }
@@ -932,7 +934,7 @@ export class QobuzClient {
    */
   async #collectFavorites<T>(
     type: "albums" | "artists",
-    parse: (json: unknown) => { items: T[]; total: number },
+    parse: (json: unknown) => { items: T[]; total: number; returned: number },
   ): Promise<T[]> {
     const session = this.#requireSession();
     const pageSize = 500;
@@ -966,8 +968,9 @@ export class QobuzClient {
       this.#ensureOk(response, "getUserFavorites");
       const page = parse(await response.json());
       all.push(...page.items);
-      offset += page.items.length;
-      if (page.items.length === 0 || all.length >= page.total) {
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }
@@ -1012,7 +1015,15 @@ export class QobuzClient {
     }
   }
 
-  /** Page through a track source until every track has been collected. */
+  /**
+   * Page through a track source until every track has been collected.
+   *
+   * The offset moves on by the items Qobuz returned, and the paging stops on
+   * them too, never by the tracks that parsed: an item that cannot be read
+   * would otherwise start the next page one early, reading the page's last
+   * entry twice -- with the same playlist-track id, so that removing "the
+   * extra copy" would delete the only real entry.
+   */
   async #collectAllTracks(
     fetchPage: (limit: number, offset: number) => Promise<TracksPage>,
   ): Promise<Track[]> {
@@ -1022,8 +1033,8 @@ export class QobuzClient {
     for (;;) {
       const page = await fetchPage(pageSize, offset);
       all.push(...page.tracks);
-      offset += page.tracks.length;
-      if (page.tracks.length === 0 || all.length >= page.total) {
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }

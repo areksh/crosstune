@@ -31,6 +31,11 @@ export interface Release extends Album {
 export interface ReleasesPage {
   releases: Release[];
   hasMore: boolean;
+  /**
+   * How many items Qobuz returned on this page, read or not: what the next
+   * page's offset moves on by (an item that cannot be read is still one).
+   */
+  returned: number;
 }
 
 /** An artist's releases as fetched, and whether a cap cut the list short. */
@@ -52,7 +57,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function parseReleasesPage(response: unknown): ReleasesPage {
   if (!isRecord(response)) {
-    return { releases: [], hasMore: false };
+    return { releases: [], hasMore: false, returned: 0 };
   }
   const container = isRecord(response["albums"])
     ? response["albums"]
@@ -77,7 +82,7 @@ export function parseReleasesPage(response: unknown): ReleasesPage {
     const offset = typeof container["offset"] === "number" ? container["offset"] : 0;
     hasMore = items.length > 0 && offset + items.length < container["total"];
   }
-  return { releases, hasMore };
+  return { releases, hasMore, returned: items.length };
 }
 
 /** Parse one release item, tolerating both known shapes. */

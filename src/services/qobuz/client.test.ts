@@ -468,6 +468,96 @@ describe("QobuzClient secret probe", () => {
   });
 });
 
+describe("QobuzClient paging past items it cannot read", () => {
+  /**
+   * A signed-in client whose `path` serves `items` (under `key`) a page at a
+   * time, as Qobuz does: `limit` and `offset` honoured, `total` the full count.
+   */
+  async function serving(path: string, key: string, items: unknown[], hasMore = false) {
+    const base = makeFetch({ recorded: [], loginBody: validSessionBody() });
+    const offsets: number[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith(path)) {
+        const limit = Number(url.searchParams.get("limit"));
+        const offset = Number(url.searchParams.get("offset"));
+        offsets.push(offset);
+        const page = items.slice(offset, offset + limit);
+        const container = hasMore
+          ? { items: page, has_more: offset + limit < items.length }
+          : { items: page, total: items.length, offset, limit };
+        return new Response(JSON.stringify({ [key]: container }), { status: 200 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.loginWithOAuthCode("code");
+    return { client, offsets };
+  }
+
+  /** 501 items of which the 10th is one Qobuz sent but we cannot read. */
+  function withOneMalformed<T>(make: (i: number) => T): unknown[] {
+    return Array.from({ length: 501 }, (_, i) => (i === 9 ? { id: "broken" } : make(i)));
+  }
+
+  it("reads each playlist entry once, by the items Qobuz returned, not those it parsed", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, title: `T${i}`, playlist_track_id: 5000 + i }));
+    const { client, offsets } = await serving("/playlist/get", "tracks", items);
+
+    const tracks = await client.getPlaylistTracks(1);
+
+    const entries = tracks.map((t) => t.playlistTrackId);
+    expect(new Set(entries).size).toBe(entries.length);
+    expect(tracks).toHaveLength(500);
+    expect(entries).toContain(5500);
+    expect(offsets).toEqual([0, 500]);
+  });
+
+  it("reads each favourite track once", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, title: `T${i}` }));
+    const { client } = await serving("/favorite/getUserFavorites", "tracks", items);
+
+    const ids = (await client.getFavoriteTracks()).map((t) => t.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each favourite album once", async () => {
+    const items = withOneMalformed((i) => ({ id: `a${i}`, title: `A${i}`, artist: { name: "X" } }));
+    const { client } = await serving("/favorite/getUserFavorites", "albums", items);
+
+    const ids = (await client.getFavoriteAlbums()).map((a) => a.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each playlist once", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, name: `P${i}` }));
+    const { client } = await serving("/playlist/getUserPlaylists", "playlists", items);
+
+    const ids = (await client.getUserPlaylists()).map((p) => p.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each release once", async () => {
+    const items = withOneMalformed((i) => ({ id: `r${i}`, title: `R${i}` }));
+    const { client, offsets } = await serving("/artist/getReleasesList", "albums", items, true);
+
+    const { releases, truncated } = await client.getArtistReleases(1, 1000);
+
+    const ids = releases.map((r) => r.id);
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+    expect(truncated).toBe(false);
+    expect(offsets).toEqual([0, 100, 200, 300, 400, 500]);
+  });
+});
+
 describe("QobuzClient sign-in refused mid-session (HTTP 401)", () => {
   /** A signed-in client to which Qobuz then answers every request with `status`. */
   async function refusedWith(status: number) {
