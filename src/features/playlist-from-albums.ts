@@ -35,6 +35,7 @@ import { stopsEverySong } from "./match.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
   createPlaylistWithTracks,
+  ensureTracksToAdd,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
 import { shapePlaylist, uniqueGroups, type AlbumOrder } from "./playlist-shape.js";
@@ -553,7 +554,8 @@ export interface BuildAlbumPlaylistResult {
  * Resolve albums, pick one version each (per `preference`), then create and
  * fill a new playlist with their tracks.
  *
- * @throws {Error} if no album entries are given.
+ * @throws {Error} if no album entries are given, or no track is left to add
+ *   (so no empty playlist is created).
  */
 export async function buildPlaylistFromAlbums(
   client: AlbumPlaylistBuilderClient,
@@ -574,6 +576,8 @@ export async function buildPlaylistFromAlbums(
  * chosen versions' tracks, and create and fill a new playlist with them: the
  * write half of {@link buildPlaylistFromAlbums}, shared with the discography
  * mode (see ./discography.ts).
+ *
+ * @throws {Error} if no track is left to add (so no empty playlist is created).
  */
 export async function writeAlbumPlaylist(
   client: AlbumTracksClient & PlaylistWriterClient & FavouriteTracksClient,
@@ -632,6 +636,11 @@ export async function writeAlbumPlaylist(
     excludedCount: entry.tracks.filter((t) => t.exclusion !== undefined).length,
   }));
 
+  ensureTracksToAdd(trackIds, [
+    ["not found", unresolvedAlbums],
+    ["every release excluded", excludedAlbums],
+    ["could not fetch tracks", failedAlbums],
+  ]);
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
     trackIds,

@@ -467,7 +467,8 @@ export async function addTracksToExistingPlaylist(
 /**
  * Resolve artists, then create and fill a new playlist with their top tracks.
  *
- * @throws {Error} if no artist names are given.
+ * @throws {Error} if no artist names are given, or no track is left to add
+ *   (so no empty playlist is created).
  */
 export async function buildPlaylistFromArtists(
   client: PlaylistBuilderClient,
@@ -502,6 +503,10 @@ export async function buildPlaylistFromArtists(
     excludedCount: resolved.excluded.length,
   }));
 
+  ensureTracksToAdd(trackIds, [
+    ["not found", unresolvedArtists],
+    ["no tracks available for", emptyArtists.map((empty) => empty.artist.name)],
+  ]);
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
     trackIds,
@@ -519,6 +524,28 @@ export async function buildPlaylistFromArtists(
     durationSeconds: shaped.seconds,
     droppedToFit: shaped.dropped.length,
   };
+}
+
+/**
+ * Refuse to create an empty playlist: when there are no tracks, throw, saying
+ * why from the labelled lists given (empty ones left out), else that every
+ * track was left out (by the filter, the picker or the length).
+ *
+ * @throws {Error} if `trackIds` is empty.
+ */
+export function ensureTracksToAdd(
+  trackIds: readonly TrackId[],
+  reasons: readonly (readonly [label: string, items: readonly string[]])[],
+): void {
+  if (trackIds.length > 0) {
+    return;
+  }
+  const why = reasons
+    .filter(([, items]) => items.length > 0)
+    .map(([label, items]) => `${label}: ${items.join(", ")}`);
+  throw new Error(
+    `No tracks to add (${why.length > 0 ? why.join("; ") : "every track was left out"}); nothing was created`,
+  );
 }
 
 /**

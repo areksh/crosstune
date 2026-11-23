@@ -734,6 +734,49 @@ describe("buildPlaylistFromAlbums", () => {
     expect(client.createPlaylist).not.toHaveBeenCalled();
   });
 
+  it("creates nothing when no album yields a track, saying why", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Radiohead OK Computer": [album({ id: "okc", title: "OK Computer", artist: "Radiohead" })],
+      },
+    });
+    client.getAlbumTracks.mockRejectedValue(new Error("album/get failed with HTTP 404"));
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [
+          { artist: "Ghost", album: "Missing" },
+          { artist: "Radiohead", album: "OK Computer" },
+        ],
+        playlistName: "Mix",
+      }),
+    ).rejects.toThrow(
+      "No tracks to add (not found: Ghost - Missing; could not fetch tracks: Radiohead - OK Computer); nothing was created",
+    );
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when every release is excluded", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Portishead Dummy": [
+          album({ id: "live", title: "Dummy", artist: "Portishead", version: "Live" }),
+        ],
+      },
+    });
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [{ artist: "Portishead", album: "Dummy" }],
+        playlistName: "Mix",
+        filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+      }),
+    ).rejects.toThrow(
+      "No tracks to add (every release excluded: Portishead - Dummy); nothing was created",
+    );
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
   it("throws when no albums are given", async () => {
     const client = stubClient({});
     await expect(

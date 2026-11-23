@@ -166,6 +166,36 @@ describe("buildPlaylistFromArtists", () => {
     expect(client.getArtistTopTracks).toHaveBeenCalledWith(1, 3);
   });
 
+  it("creates nothing when no artist yields a track, saying why", async () => {
+    const client = stubClient({
+      artistsByQuery: { Quiet: [{ id: 1, name: "Quiet" }] },
+      tracksByArtist: { 1: [] },
+    });
+
+    await expect(
+      buildPlaylistFromArtists(client, { artists: ["Ghost Band", "Quiet"], playlistName: "P" }),
+    ).rejects.toThrow(
+      "No tracks to add (not found: Ghost Band; no tracks available for: Quiet); nothing was created",
+    );
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when the filter leaves no track", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }] },
+      tracksByArtist: { 1: [{ id: 100, title: "Live Song" }] },
+    });
+
+    await expect(
+      buildPlaylistFromArtists(client, {
+        artists: ["A"],
+        playlistName: "P",
+        filter: compileTrackFilter({ excludeTracks: ["live"] }),
+      }),
+    ).rejects.toThrow("No tracks to add (every track was left out); nothing was created");
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
   it("throws when given no artists", async () => {
     const client = stubClient({});
     await expect(
