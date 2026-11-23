@@ -165,6 +165,7 @@ export class PlaylistEditor {
       const going = new Set(places.map((place) => open.view.ids[place]!));
       const plan = planRemoval(open.view.uris, new Set(places));
       await this.#checkReturnable(open, plan);
+      await this.#stillAsRead(open);
       for (const batch of batches(plan.whole)) {
         await this.#deleteSongs(open, batch);
       }
@@ -384,6 +385,18 @@ export class PlaylistEditor {
   }
 
   /** The playlist as it is, or undefined if it cannot be read. */
+  /**
+   * Stop, having written nothing, if the playlist changed since it was read.
+   * The first DELETE can name no snapshot (a read's is stale), so it removes
+   * every copy there is then: one added meanwhile would go too.
+   */
+  async #stillAsRead(open: Open): Promise<void> {
+    const now = await this.#load(open.native);
+    if (now.uris.length !== open.view.uris.length || now.uris.some((uri, place) => uri !== open.view.uris[place])) {
+      throw changedMeanwhile();
+    }
+  }
+
   async #look(native: string): Promise<Read | undefined> {
     return this.#load(native).catch(() => undefined);
   }

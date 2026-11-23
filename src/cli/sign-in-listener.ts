@@ -46,7 +46,10 @@ export function signInListener(options: {
     }
   };
 
+  // Bumped by close: a binding started before it lets the port go when done.
+  let closes = 0;
   const close = (): void => {
+    closes += 1;
     clearTimeout(timer);
     server?.close();
     server?.closeAllConnections();
@@ -59,6 +62,7 @@ export function signInListener(options: {
   };
 
   const bind = (): Promise<Listening> => {
+    const asOf = closes;
     const candidate = http.createServer((req, res) => {
       const target = req.url ?? "/";
       // Only a top-level GET to this address, carrying a query, can be a sign-in.
@@ -96,6 +100,11 @@ export function signInListener(options: {
         });
       });
       candidate.listen(port, "127.0.0.1", () => {
+        if (closes !== asOf) {
+          candidate.close();
+          resolve({ ok: false, problem: "The sign-in listener was closed." });
+          return;
+        }
         server = candidate;
         resolve({ ok: true });
       });

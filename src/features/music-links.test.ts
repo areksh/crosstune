@@ -165,6 +165,16 @@ describe("linkNotFound", () => {
     expect(linkNotFound(link, new ServiceError("qobuz", "ambiguous", "2 Qobuz artists are called X"))).toBe("2 Qobuz artists are called X");
     expect(linkNotFound(link, new Error("HTTP 500"))).toBe("no Spotify artist has this id");
   });
+
+  it("says when the link's own service could not be asked, rather than that it has no such item", async () => {
+    const { ServiceError } = await import("../services/errors.js");
+    const link = { kind: "artist", id: "spotify:4uLU6hMCjMI75M1A2tKUQC" } as const;
+    const expired = new ServiceError("spotify", "authentication", "Spotify did not accept the sign-in; connect Spotify again");
+    expect(linkNotFound(link, expired)).toBe("Spotify did not accept the sign-in; connect Spotify again");
+    expect(linkNotFound(link, new ServiceError("spotify", "not-found", "Spotify has no such thing (GET /artists/x)"))).toBe(
+      "no Spotify artist has this id",
+    );
+  });
 });
 
 describe("describeLinkMismatch", () => {

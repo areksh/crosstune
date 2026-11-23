@@ -191,6 +191,11 @@ describe("describeSide", () => {
     });
   });
 
+  // Against what all copies share, a song two of three have is not "only here".
+  it("says what is not on every copy, for a first link of three or more", () => {
+    expect(describeSide({ ...side, added: [song("A")] }, "in-common", 3).lines).toEqual(["Not on every copy: A."]);
+  });
+
   it("says what only it has, for a first link", () => {
     expect(describeSide({ ...side, added: [song("A")] }, "in-common").lines).toEqual(["Only here: A."]);
     expect(describeSide(side, "in-common").lines).toEqual(["Nothing that the others do not have."]);

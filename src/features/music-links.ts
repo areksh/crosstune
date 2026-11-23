@@ -32,7 +32,7 @@
  * ({@link classifyPaste}) as well as the server and the CLI.
  */
 
-import { labelOf, ServiceError } from "../services/errors.js";
+import { isNotFound, labelOf, ServiceError } from "../services/errors.js";
 import { parseId, readId, tagId, type AlbumId, type ArtistId, type PlaylistId, type TrackId } from "../services/ids.js";
 
 /** A link to one item on a service. */
@@ -205,10 +205,14 @@ export function describeLinkMismatch(link: MusicLink, wanted: MusicLinkKind): st
  * has no such item. "no Qobuz artist has this id".
  */
 export function linkNotFound(link: MusicLink, error: unknown): string {
-  if (error instanceof ServiceError && ["not-found", "not-connected", "ambiguous"].includes(error.kind)) {
+  const service = link.kind === "label" ? "qobuz" : parseId(link.id)?.service;
+  // The link's own service saying it has no such thing: the plain sentence.
+  // Anything else -- not found here, ambiguous, or the other service could not
+  // be asked (signed out, unreachable) -- says what happened.
+  const noSuchItem = isNotFound(error) && error instanceof ServiceError && error.service === service;
+  if (error instanceof ServiceError && !noSuchItem) {
     return error.message;
   }
-  const service = link.kind === "label" ? "qobuz" : parseId(link.id)?.service;
   return `no ${service === undefined ? "" : `${labelOf(service)} `}${link.kind} has this id`;
 }
 

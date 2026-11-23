@@ -74,6 +74,15 @@ describe("signInListener", () => {
     expect(await next).toEqual({ ok: false, message: "TIDAL says the sign-in was declined." });
   });
 
+  // Review: a close while the port was still being bound left it bound.
+  it("lets the port go when closed while it is still starting", async () => {
+    const { listener, port } = await setup();
+    const listening = listener.listen();
+    listener.close();
+    await listening;
+    expect(await visit(port, "/callback/tidal?code=c")).toBe("refused");
+  });
+
   it("says the port is in use when another program holds it", async () => {
     const { listener, port } = await setup();
     const other = net.createServer();

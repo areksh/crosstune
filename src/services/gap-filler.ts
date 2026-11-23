@@ -7,7 +7,8 @@
  * Likewise an artist or album id of another service -- a pasted Spotify link
  * in a tool running on Qobuz -- is read there and found again here: an artist
  * by its exact name (none when several here have it: a namesake is a guess),
- * an album by its barcode, else its exact title and artist.
+ * an album by its barcode, else its exact title and artist (none when several
+ * editions share them and the barcode cannot tell).
  */
 
 import { matchTracks, type MatchMemory } from "../features/match.js";
@@ -22,7 +23,8 @@ const FILLED = ["topTracks", "similarArtists"] as const;
 
 /**
  * `service`, with its gaps filled from `donors` (other connected services,
- * asked in order). A service without gaps is returned as it is.
+ * asked in order), and other services' artist and album ids found here.
+ * Every service is wrapped; its capabilities are its own where it has no gaps.
  */
 export function fillGaps(service: MusicService, donors: () => readonly MusicService[], matches: MatchMemory): MusicService {
   const label = labelOf(service.name);
@@ -82,13 +84,31 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
       const theirs = await owner(albumId).getAlbum(albumId);
       const candidates = await service.searchAlbums(`${theirs.artist} ${theirs.title}`, 20);
       const barcode = barcodeOf(theirs);
-      const found =
-        (barcode === undefined ? undefined : candidates.find((album) => barcodeOf(album) === barcode)) ??
-        candidates.find((album) => sameText(album.title, theirs.title) && sameText(album.artist, theirs.artist));
-      if (found === undefined) {
+      const byBarcode = barcode === undefined ? undefined : candidates.find((album) => barcodeOf(album) === barcode);
+      if (byBarcode !== undefined) {
+        return byBarcode;
+      }
+      const same = candidates.filter((album) => sameText(album.title, theirs.title) && sameText(album.artist, theirs.artist));
+      if (same.length > 1 && barcode !== undefined) {
+        // A search may leave barcodes out (Spotify's does): the full albums have them.
+        const full = await Promise.all(same.map((album) => (album.upc === undefined ? service.getAlbum(album.id) : album)));
+        const found = full.find((album) => barcodeOf(album) === barcode);
+        if (found !== undefined) {
+          return found;
+        }
+      }
+      if (same.length > 1) {
+        // An edition is a guess between them (explicit, clean, a reissue): the user chooses.
+        throw new ServiceError(
+          service.name,
+          "ambiguous",
+          `${same.length} ${label} albums are ${theirs.artist} - ${theirs.title}; paste a ${label} link or type "Artist - Album" to choose`,
+        );
+      }
+      if (same[0] === undefined) {
         throw notHere(`${theirs.artist} - ${theirs.title}`);
       }
-      return found;
+      return same[0];
     },
     getArtistTopTracks: async (artistId: ArtistId, limit = 10): Promise<Track[]> => {
       if (service.capabilities.topTracks.ok) {

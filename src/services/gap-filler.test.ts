@@ -202,8 +202,29 @@ describe("fillGaps: another service's ids", () => {
   });
 
   it("else by its exact title and artist", async () => {
-    const filled = fillGaps(here(), () => [there()], new MemoryMatches());
+    const base = here({ searchAlbums: vi.fn(async () => [album("qobuz", "a", { title: "Dummy (Live)" }), album("qobuz", "b")]) } as Partial<MusicService>);
+    const filled = fillGaps(base, () => [there()], new MemoryMatches());
     expect((await filled.getAlbum(tagId<AlbumId>("spotify", "x"))).id).toBe("qobuz:b");
+  });
+
+  // Spotify's search gives albums without their barcode: the full album has it.
+  it("reads the barcodes of same-titled editions to tell them apart", async () => {
+    const theirs = there({ getAlbum: vi.fn(async () => album("spotify", "x", { upc: "042282855329" })) } as Partial<MusicService>);
+    const base = here({
+      searchAlbums: vi.fn(async () => [album("qobuz", "clean"), album("qobuz", "explicit")]),
+      getAlbum: vi.fn(async (id: AlbumId) => album("qobuz", "z", { id, ...(id === "qobuz:explicit" && { upc: "0042282855329" }) })),
+    } as Partial<MusicService>);
+    const filled = fillGaps(base, () => [theirs], new MemoryMatches());
+    expect((await filled.getAlbum(tagId<AlbumId>("spotify", "x"))).id).toBe("qobuz:explicit");
+  });
+
+  it("chooses no edition when several share the title and none has the barcode", async () => {
+    const base = here({ searchAlbums: vi.fn(async () => [album("qobuz", "a"), album("qobuz", "b")]) } as Partial<MusicService>);
+    const filled = fillGaps(base, () => [there()], new MemoryMatches());
+    await expect(filled.getAlbum(tagId<AlbumId>("spotify", "x"))).rejects.toMatchObject({
+      kind: "ambiguous",
+      message: expect.stringMatching(/2 Qobuz albums are Portishead - Dummy/),
+    });
   });
 
   it("says when the album is not here", async () => {

@@ -410,6 +410,21 @@ describe("moving in a playlist", () => {
 
   // Live, a read names a stale snapshot; a DELETE against it removed nothing,
   // and taking out one copy of a repeated song added another (2026-11-23).
+  // Review: with no snapshot to name, a copy added meanwhile would go with the others.
+  it("writes nothing when the playlist changed while it was getting ready", async () => {
+    const { fake, service, read, now } = world("abca");
+    const ids = await read();
+    fake.before = ({ method, path }) => {
+      if (method === "GET" && path.startsWith("/tracks")) {
+        fake.before = undefined;
+        fake.edit("p", (list) => [...list, song("a")]);
+      }
+    };
+    await expect(service.removeTracksFromPlaylist(P, [ids[3]!])).rejects.toMatchObject({ kind: "conflict" });
+    expect(now()).toBe("abcaa");
+    expect(fake.seen.filter((r) => r.method === "DELETE")).toEqual([]);
+  });
+
   it("takes out one copy of a repeated song though a read names a stale snapshot", async () => {
     const { fake, service, read, now } = world("abca");
     fake.edit("p", (list) => [...list, song("b")]);

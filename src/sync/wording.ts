@@ -202,12 +202,18 @@ function songList(songs: readonly SongRef[]): string {
 }
 
 /** One copy's column when a conflict's copies are shown side by side. */
-export function describeSide(side: CopySide, since: "last-sync" | "in-common"): { title: string; lines: string[] } {
+export function describeSide(
+  side: CopySide,
+  since: "last-sync" | "in-common",
+  copies = 2,
+): { title: string; lines: string[] } {
   const title = `${label(side.service)}: ${side.name}, ${plural(side.songs, "song")}`;
   if (since === "in-common") {
+    // Against what every copy has: with three or more, another copy may have it too.
+    const which = copies > 2 ? "Not on every copy" : "Only here";
     return {
       title,
-      lines: [side.added.length === 0 ? "Nothing that the others do not have." : `Only here: ${songList(side.added)}.`],
+      lines: [side.added.length === 0 ? "Nothing that the others do not have." : `${which}: ${songList(side.added)}.`],
     };
   }
   const lines = [

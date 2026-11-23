@@ -403,13 +403,17 @@ function sideBySide(view: LinkView): HTMLElement {
         text(
           "p",
           "link-sides-title",
-          compared.since === "last-sync" ? "What each copy changed since the last sync:" : "What only each copy has:",
+          compared.since === "last-sync"
+            ? "What each copy changed since the last sync:"
+            : compared.copies.length > 2
+              ? "What each copy has that not every copy has:"
+              : "What only each copy has:",
         ),
       );
       const columns = document.createElement("div");
       columns.className = "link-sides-columns";
       for (const side of compared.copies) {
-        const { title, lines } = describeSide(side, compared.since);
+        const { title, lines } = describeSide(side, compared.since, compared.copies.length);
         const column = document.createElement("section");
         column.className = "link-side";
         column.append(text("h4", "link-side-title", title), list(lines));
