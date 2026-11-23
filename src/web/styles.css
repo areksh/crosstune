@@ -198,6 +198,118 @@ button.tab[aria-pressed="true"] {
   flex: 1;
 }
 
+/* The ask box: one line until focused, a few while typing or pasting a list. */
+.ask {
+  position: relative;
+  flex: 1;
+  max-width: 460px;
+  height: 36px;
+  margin-left: 8px;
+}
+
+/* The box and its suggestions grow downward, over the page, not out of the bar. */
+.ask-pop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+}
+
+.ask textarea {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 16px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+}
+
+.ask textarea:focus {
+  border-color: var(--line-strong);
+  background: var(--panel);
+  outline: none;
+}
+
+.ask-menu {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.ask-option {
+  padding: 8px 12px;
+  border-radius: var(--radius-s);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.ask-option[aria-selected="true"],
+.ask-option:hover {
+  background: var(--surface-3);
+}
+
+/* Home: the playlists changed most recently. */
+.home-sub {
+  margin: 8px 0 12px;
+  font-size: 18px;
+}
+
+.home-recent {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+  max-width: 980px;
+  margin-bottom: 28px;
+}
+
+.home-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.home-card:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.home-card-cover {
+  aspect-ratio: 1;
+  width: 100%;
+  margin-bottom: 6px;
+  border-radius: 10px;
+}
+
+.home-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.home-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .top-link {
   padding: 6px 10px;
   border-radius: 999px;
@@ -1184,64 +1296,6 @@ button:disabled {
 }
 
 /* Home: the paste box hero above the tool list. */
-.paste-hero {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  margin-bottom: 40px;
-}
-
-.paste-hero h1 {
-  font-weight: 750;
-  font-size: 60px;
-  line-height: 0.95;
-  letter-spacing: -0.01em;
-  max-width: 14ch;
-}
-
-.paste-box {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
-}
-
-.paste-box textarea {
-  white-space: pre;
-}
-
-.paste-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 16px;
-}
-
-.paste-found {
-  margin: 0 auto 0 0;
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.paste-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.paste-box .hint {
-  margin: 0;
-}
-
-@media (max-width: 760px) {
-  .paste-hero h1 {
-    font-size: 44px;
-  }
-}
-
 /* The review's plan settings: order, length, and how the playlist plays. */
 .plan-strip {
   display: flex;
@@ -2148,6 +2202,13 @@ button.small {
     height: auto;
     padding: 10px 16px;
     row-gap: 8px;
+  }
+
+  .ask {
+    order: 11;
+    flex-basis: 100%;
+    max-width: none;
+    margin-left: 0;
   }
 
   .tabs {

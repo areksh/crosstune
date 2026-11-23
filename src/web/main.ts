@@ -13,6 +13,7 @@ import type { AccountView } from "../accounts/accounts.js";
 import { SERVICE_LABELS } from "../services/names.js";
 import { api } from "./api.js";
 import { askAboutArtwork, initArtworkToggle } from "./artwork.js";
+import { initAsk } from "./ask.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
 import { parseRoute, redirectFor, viewOf, type Route } from "../ui/routes.js";
@@ -198,6 +199,7 @@ function showLinks(list: LinksList | undefined): void {
 guardUnsavedPlaylist();
 initArtworkToggle();
 initFavouritesView();
+initAsk();
 initHomeView();
 initPlaylistView();
 initAlbumsView();

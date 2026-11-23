@@ -1,130 +1,54 @@
 /**
- * Home view: the paste box.
- *
- * As the user pastes links or a list, the (tested, pure) classifier sorts the
- * lines into artist, album, playlist and track links, "Artist - Album" lines
- * and plain names; the view says what it found and offers a button for each
- * tool that fits. A button stores the input for that tool (see ../prefill.ts)
- * and opens it. Nothing is sent to the server until the tool runs.
+ * Home: the library with no playlist open -- the playlists changed most
+ * recently, as cards, above the last recorded change (views/history.ts).
+ * What the home paste box did is now the ask box in the top bar (../ask.ts).
  */
 
-import { classifyPaste, type PasteSummary } from "../../features/music-links.js";
-import { el } from "../dom.js";
-import { storePrefill, type Prefill } from "../prefill.js";
+import { serviceOf } from "../../services/ids.js";
+import { SERVICE_LABELS } from "../../services/names.js";
+import { coverBackground, generatedCover } from "../../ui/cover-art.js";
 import { routeHash } from "../../ui/routes.js";
-import { knownPlaylist } from "../library.js";
+import { artworkInto } from "../artwork.js";
+import { el } from "../dom.js";
+import { libraryPlaylists, LIBRARY_LOADED } from "../library.js";
+import { songCount } from "./playlist-actions.js";
 
-interface Suggestion {
-  label: string;
-  /** Where the tool opens. */
-  hash: string;
-  /** What to fill in it, when the address does not say. */
-  prefill?: Prefill;
-  /** The main suggestion is drawn as the primary button. */
-  primary?: boolean;
-}
+/** How many playlists Home shows. */
+const RECENT = 6;
 
 /** Wire up the home view. Call once on load. */
 export function initHomeView(): void {
-  const paste = el<HTMLTextAreaElement>("home-paste");
-  paste.addEventListener("input", () => render(classifyPaste(paste.value)));
-  render(classifyPaste(paste.value));
+  window.addEventListener(LIBRARY_LOADED, render);
+  render();
 }
 
-function render(found: PasteSummary): void {
-  el("home-found").textContent = found.summary;
-  const tools = el("home-tools");
-  tools.textContent = "";
-  for (const suggestion of suggestionsFor(found)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = suggestion.label;
-    if (suggestion.primary !== true) {
-      button.className = "secondary";
-    }
-    button.addEventListener("click", () => {
-      if (suggestion.prefill !== undefined) {
-        storePrefill(suggestion.prefill);
-      }
-      location.hash = suggestion.hash;
-    });
-    tools.appendChild(button);
-  }
-
-  const notes: string[] = [];
-  if (found.playlists.length > 0) {
-    notes.push(
-      "Upgrade & repair, Library stats and the Deduplicator open on the playlist when it is one of yours.",
-    );
-  }
-  if (found.playlists.length > 1) {
-    notes.push("Only the first playlist link is used.");
-  }
-  if (found.tracks.length > 0 || found.other.length > 0) {
-    notes.push("Track and label links are not used by a tool yet.");
-  }
-  const note = el("home-note");
-  note.hidden = notes.length === 0;
-  note.textContent = notes.join(" ");
+function render(): void {
+  const recent = [...libraryPlaylists()]
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+    .slice(0, RECENT);
+  const box = el("home-recent");
+  box.replaceChildren(...recent.map(card));
+  box.hidden = recent.length === 0;
+  el("view-home").querySelector(".home-sub")?.toggleAttribute("hidden", recent.length === 0);
 }
 
-/** The tools that fit what was pasted, the likeliest first. */
-function suggestionsFor(found: PasteSummary): Suggestion[] {
-  const suggestions: Suggestion[] = [];
-  if (found.artists.length > 0) {
-    const artists = found.artists.join("\n");
-    suggestions.push(
-      {
-        label: "Build a playlist from these artists",
-        hash: routeHash({ kind: "new", tool: "artists" }),
-        prefill: { view: "playlist", fields: { artists } },
-        primary: true,
-      },
-      {
-        label: "Find similar artists",
-        hash: routeHash({ kind: "new", tool: "similar" }),
-        prefill: {
-          view: "similar",
-          radios: { "similar-source": "artists" },
-          fields: { "similar-artists": artists },
-        },
-      },
-    );
-  }
-  if (found.albums.length > 0) {
-    suggestions.push({
-      label: "Build a playlist from these albums",
-      hash: routeHash({ kind: "new", tool: "albums" }),
-      prefill: {
-        view: "albums",
-        radios: { "album-source": "list" },
-        fields: { albums: found.albums.join("\n") },
-      },
-      primary: found.artists.length === 0,
-    });
-  }
-  const playlist = found.playlists[0];
-  if (playlist !== undefined) {
-    suggestions.push(
-      {
-        label: "Similar artists from this playlist",
-        hash: routeHash({ kind: "new", tool: "similar" }),
-        prefill: {
-          view: "similar",
-          radios: { "similar-source": "playlist" },
-          fields: { "similar-source-link": playlist.line },
-        },
-        primary: suggestions.length === 0,
-      },
-      // These three work on the user's own playlists only.
-      ...(knownPlaylist(playlist.id)?.owned === true
-        ? [
-            { label: "Upgrade & repair", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "upgrade" }) },
-            { label: "Library stats", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "stats" }) },
-            { label: "Find duplicates", hash: routeHash({ kind: "playlist", id: playlist.id, tool: "repeats" }) },
-          ]
-        : []),
-    );
-  }
-  return suggestions;
+function card(playlist: ReturnType<typeof libraryPlaylists>[number]): HTMLAnchorElement {
+  const link = document.createElement("a");
+  link.className = "home-card";
+  link.href = routeHash({ kind: "playlist", id: playlist.id });
+  const cover = document.createElement("span");
+  cover.className = "home-card-cover gen-cover";
+  cover.setAttribute("aria-hidden", "true");
+  cover.style.background = coverBackground(generatedCover(playlist.name));
+  artworkInto(cover, playlist.image);
+  const name = document.createElement("span");
+  name.className = "home-card-name";
+  name.textContent = playlist.name;
+  const meta = document.createElement("span");
+  meta.className = "home-card-meta";
+  meta.textContent = [SERVICE_LABELS[serviceOf(playlist.id)], playlist.trackCount === undefined ? undefined : songCount(playlist.trackCount)]
+    .filter((part) => part !== undefined)
+    .join(" · ");
+  link.append(cover, name, meta);
+  return link;
 }

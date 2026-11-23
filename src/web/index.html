@@ -19,6 +19,21 @@
     <header class="topbar">
       <a class="brand" href="#/">crosstune</a>
       <div id="tabs" class="tabs" role="group" aria-label="Show playlists from"></div>
+      <div class="ask">
+        <div class="ask-pop">
+        <textarea
+          id="ask"
+          rows="1"
+          placeholder="Paste a link, type an artist, a playlist or a tool…  (Ctrl+K)"
+          aria-label="Ask: paste links or a list, or type a playlist, an artist or a tool"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="ask-menu"
+          aria-expanded="false"
+        ></textarea>
+        <ul id="ask-menu" class="ask-menu" role="listbox" aria-label="Suggestions" hidden></ul>
+        </div>
+      </div>
       <span class="topbar-gap"></span>
       <a id="nav-jobs" class="top-link" href="#/jobs">Jobs</a>
       <a id="nav-history" class="top-link" href="#/history">History</a>
@@ -82,28 +97,17 @@
         </nav>
         <!-- Home -->
         <section id="view-home" class="view">
-          <section class="paste-hero" aria-labelledby="home-title">
-            <h1 id="home-title">Start with a link or a list</h1>
-            <p class="lede">
-              Paste Qobuz, Spotify or TIDAL links, or artists or albums one per line. crosstune
-              works out what they are and suggests a tool. Or pick a tool below.
-            </p>
-            <div class="paste-box">
-              <label for="home-paste" class="field-label">Links or a list</label>
-              <textarea
-                id="home-paste"
-                rows="4"
-                placeholder="https://play.qobuz.com/playlist/...&#10;https://play.qobuz.com/album/...&#10;Portishead&#10;Massive Attack - Mezzanine"
-              ></textarea>
-              <div class="paste-actions">
-                <p id="home-found" class="paste-found" aria-live="polite">
-                  Paste links or a list to begin.
-                </p>
-                <div id="home-tools" class="paste-tools"></div>
-              </div>
-              <p id="home-note" class="hint" hidden></p>
+          <header class="view-header">
+            <div class="view-title">
+              <h1 id="home-title">Your library</h1>
+              <p class="lede">
+                Open a playlist on the left, or paste links, artists or albums into the box at
+                the top (Ctrl+K): it suggests what to do with them.
+              </p>
             </div>
-          </section>
+          </header>
+          <h2 class="home-sub">Recently changed</h2>
+          <div id="home-recent" class="home-recent"></div>
           <!-- The latest recorded change, filled in by views/history.ts. -->
           <div id="home-last-change" class="last-change" hidden>
             <span class="last-change-label">Last change</span>

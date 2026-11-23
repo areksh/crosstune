@@ -76,6 +76,11 @@ export async function refreshLibrary(): Promise<void> {
   }
 }
 
+/** The playlists the sidebar knows (from every connected service). */
+export function libraryPlaylists(): readonly ManagerPlaylist[] {
+  return playlists;
+}
+
 /** A playlist the sidebar knows, so its page can show its name at once. */
 export function knownPlaylist(id: PlaylistId): ManagerPlaylist | undefined {
   return playlists.find((playlist) => playlist.id === id);
