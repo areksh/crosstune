@@ -34,5 +34,15 @@ Spotify and TIDAL links are read everywhere, another service's artist or album
 found again here (never a guess between namesakes).
 
 
-Needs the user: TIDAL client id, Spotify client id (Premium owner), one real
-sign-in to each, and leave to run probes with scratch playlists.
+Live (2026-11-23, after the user registered both apps and signed in): the
+probes ran on scratch playlists, each deleted after; results are at the top of
+the TIDAL and Spotify adapters. Fixed from them: Spotify removals named a read's
+stale snapshot and removed nothing (one copy of a repeat became two); Spotify
+ignores an empty description; TIDAL listed an ISRC's track twice and refuses
+names over 250 characters. A live TIDAL<->Spotify two-way sync then worked:
+each side's edit reached the other, a second run changed nothing, and renames
+on both sides were a conflict that wrote nothing.
+
+Open: whether a Spotify playlist made "private" shows as such in the app
+(reads always say public); library and favourites writes, playlist size limits
+and unavailable or relinked tracks are not yet probed.
