@@ -220,6 +220,10 @@ export interface RecordableClient {
   getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   /** Used to name playlists in labels; optional. */
   getPlaylist?(playlistId: PlaylistId): Promise<Playlist>;
+  /** Read before adding favourites, so only what is new is sent and recorded; optional. */
+  getFavoriteTracks?(): Promise<{ id: AnyId }[]>;
+  getFavoriteAlbums?(): Promise<{ id: AnyId }[]>;
+  getFavoriteArtists?(): Promise<{ id: AnyId }[]>;
 }
 
 /** Ids per request when the recorder splits a bulk change (as the client does). */
@@ -232,6 +236,12 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   }
   return out;
 }
+
+const READ_FAVOURITES = {
+  tracks: "getFavoriteTracks",
+  albums: "getFavoriteAlbums",
+  artists: "getFavoriteArtists",
+} as const satisfies Record<FavouriteType, string>;
 
 type AnyMethod = (...args: never[]) => Promise<unknown>;
 
@@ -272,9 +282,22 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
   };
 
   const favourites = (method: string, kind: Operation["kind"], type: FavouriteType) =>
-    async (ids: readonly AnyId[]): Promise<void> => {
+    async (sent: readonly AnyId[]): Promise<void> => {
       // Every id first: one of another service must not stop it half-way.
-      checkAllOn(client as { name?: ServiceName }, ids);
+      checkAllOn(client as { name?: ServiceName }, sent);
+      let ids = sent;
+      if (kind === "add-favourites") {
+        // Only what is new: re-adding a favourite re-dates it, and undoing
+        // would remove one the user already had.
+        const read = raw[READ_FAVOURITES[type]];
+        if (read !== undefined) {
+          const known = new Set(((await read.apply(client, [] as never)) as { id: AnyId }[]).map((x) => x.id));
+          ids = [...new Set(sent)].filter((id) => !known.has(id));
+        }
+        if (ids.length === 0) {
+          return;
+        }
+      }
       // Batch by batch, so a failure records the batches that went through.
       for (const batch of chunk(ids, BATCH)) {
         await call(method, batch);

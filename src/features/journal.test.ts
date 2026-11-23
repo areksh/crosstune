@@ -498,6 +498,18 @@ describe("recordingClient", () => {
     ]);
   });
 
+  it("adds and records only the favourites that are new, so undo keeps the old ones", async () => {
+    const { store, journal, account, client } = setup();
+    account.favourites.tracks.push(qid(1), qid(2));
+    await journal.run({ tool: "import" }, () => client.addFavoriteTracks!([qid(2), qid(3)]));
+    expect(account.calls).toContain("addFavoriteTracks:3");
+    expect(entriesOf(store)[0]?.ops).toEqual([{ kind: "add-favourites", type: "tracks", ids: [qid(3)] }]);
+    // Nothing new: nothing sent, nothing recorded.
+    await journal.run({ tool: "import" }, () => client.addFavoriteTracks!([qid(1)]));
+    expect(account.calls.filter((c) => c.startsWith("addFavoriteTracks"))).toHaveLength(1);
+    expect(entriesOf(store)).toHaveLength(1);
+  });
+
   it("records a deleted playlist's name and tracks", async () => {
     const { store, journal, account, client } = setup();
     const id = account.seedPlaylist("Old", [qid(4), qid(5)]);

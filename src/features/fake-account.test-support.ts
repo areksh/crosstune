@@ -179,6 +179,18 @@ export class FakeAccount {
     playlist.entries = applyMove([...byId.keys()], playlistTrackIds, insertBefore).map((id) => byId.get(id)!);
   }
 
+  async getFavoriteTracks(): Promise<{ id: TrackId }[]> {
+    return this.favourites.tracks.map((id) => ({ id }));
+  }
+
+  async getFavoriteAlbums(): Promise<{ id: AlbumId }[]> {
+    return this.favourites.albums.map((id) => ({ id }));
+  }
+
+  async getFavoriteArtists(): Promise<{ id: ArtistId }[]> {
+    return this.favourites.artists.map((id) => ({ id }));
+  }
+
   async addFavoriteTracks(ids: readonly TrackId[]): Promise<void> {
     this.#call("addFavoriteTracks", ids.join(","));
     this.favourites.tracks = [...this.favourites.tracks.filter((id) => !ids.includes(id)), ...ids];
