@@ -18,26 +18,27 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 ## Several services
 
 crosstune also works with **TIDAL** and **Spotify**, through their official
-APIs. Connect each on the **Accounts** page of the web UI, or with
+APIs. Connect each in **Settings** in the web UI, or with
 `crosstune login tidal` / `login spotify`:
 
 - TIDAL and Spotify each ask you to register a free app of your own and paste
-  its **client id**; the Accounts page shows the steps and the redirect address
+  its **client id**; Settings shows the steps and the redirect address
   to register (`http://127.0.0.1:53683/callback/<service>`). The client secret
   is not needed.
 - Spotify's app must be owned by an account with **Premium**, and Spotify ends
   the sign-in six months after you authorise it (the UI warns you in time).
   Spotify gives no top tracks or similar artists to such apps; with Qobuz or
   TIDAL connected, they are taken from there and matched back.
-- Choose the service in the sidebar. Playlists, Library stats and Combine can
-  show **all services** at once; every song and playlist names its service.
-  With all of them shown, Combine compares playlists across services: *Only in
+- The library shows your playlists from **all services** at once, each marked
+  with its service; tabs at the top narrow it to one. A tool opened on a
+  playlist works on that playlist's service. Combine compares playlists across
+  services (tick them in the library, or choose *All*): *Only in
   the first* lists what a Qobuz playlist has that a Spotify one lacks (matched
   by ISRC, then artist and title), and *Add these to ...* copies them over.
 - **Copy to another service** (a playlist's menu, or "On" when making a new
   playlist) matches songs by ISRC, then by name. Uncertain matches are shown for
   you to choose; your choices are remembered (`matches.json`).
-- **Linked playlists** (Managed playlists) keep one playlist the same on several
+- **Linked playlists** (under *Jobs*) keep one playlist the same on several
   services, both ways. On a conflict nothing is written, and every page says so
   until you settle it. `crosstune sync` syncs them now; `run-due` exits with
   3 while any is in conflict.
@@ -121,8 +122,9 @@ The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
 chosen discs. Similar artists also never suggests an excluded artist.
 
-There is also a **local web UI** (`crosstune ui`) hosting these tools, each
-with a preview-and-edit step before anything is changed. More to follow.
+There is also a **local web UI** (`crosstune ui`): your playlists from every
+service in one library, each tool opened on the playlist it acts on, with a
+preview-and-edit step before anything is changed (see [Web UI](#web-ui)).
 
 ## Requirements
 
@@ -750,7 +752,7 @@ restore exactly what it found.
 - A deleted playlist (undoing an undo) comes back as a new playlist, with a new
   id and link.
 
-In the web UI, **History** (under *Your data*) lists the entries by day with
+In the web UI, **History** (in the top bar) lists the entries by day with
 their `+`/`-` counts; **Undo** first shows exactly what will be reversed, with
 any notes and warnings, and only acts on confirmation. Undone entries are
 dimmed. The home page shows the latest change with links to undo it or open
@@ -892,7 +894,7 @@ added anew and the old one removed, so the Qobuz app lists it as recently
 added. crosstune keeps the original date, and its smart playlists and
 first/last-added duplicate checks use that one.
 
-In the web UI, *Managed playlists* shows a card per playlist -- made by
+In the web UI, *Jobs* shows a card per managed playlist -- made by
 crosstune, yours, or your favourites -- then what manages it: its source,
 its tidy-ups, its schedule, its last and next pass, and any suggestions to
 accept or ignore (Run now, Preview, Pause, Edit, Delete -- optionally with a
@@ -966,14 +968,32 @@ npm run ui            # build the frontend, then serve it and open the browser
 ```
 
 `crosstune ui` starts a small web server on `127.0.0.1`, opens your browser
-at it, and runs until you stop it with Ctrl-C. A sidebar switches between the
-tools, grouped as *Build*, *Tidy up*, *Explore* and *Your data*; a home page introduces
-each. Multi-step tools show the step you are on at the top, and while you review
-a selection the destination and save button stay docked at the bottom of the
-window. Track rows show a quality badge such as "24/96" (bit depth / sampling
-rate in kHz), lit up for hi-res.
+at it, and runs until you stop it with Ctrl-C.
 
-The home page opens with a paste box, *Start with a link or a list*: paste
+The page starts from your library. The sidebar lists your playlists from every
+connected service (a dot in each service's colour, ⇄ on a linked one), then
+*Favourites* and *All playlists* for each service and *New releases*; the tabs
+at the top (*All*, *Qobuz*, *TIDAL*, *Spotify*) narrow it to one service.
+Open a playlist to edit its songs in place, or use the buttons over them:
+*Find repeats*, *Upgrade*, *Copy to...*, *Link...*, *Stats* and *Export*
+(and, under *More*, *Similar artists* and *Combine*). Each opens that tool on
+the playlist, on its own service; *Favourites* and *All playlists* have the
+same buttons for the whole collection (finding repeats *across* playlists,
+for one). Tick playlists in the sidebar to combine them, remove artists from
+them, or delete them together.
+
+*+ New* holds the tools that make a playlist from scratch: from artists, from
+albums, similar artists, word play, combining playlists, or importing a file.
+*Jobs* holds managed playlists, tidy-ups and linked playlists; *History* every
+change, with undo; *Settings* the accounts, album covers, and import, export
+and backup. Multi-step tools show the step you are on at the top, and while you
+review a selection the destination and save button stay docked at the bottom of
+the window. Track rows show a quality badge such as "24/96" (bit depth /
+sampling rate in kHz), in gold for hi-res. A tool that would have to load the
+page afresh (to work on another service) asks first if another tool has a
+preview you have not saved.
+
+With no playlist open, the page shows a paste box, *Start with a link or a list*: paste
 links (Qobuz, Spotify or TIDAL), artist names or "Artist - Album" lines, one per line. It says what
 it found ("Found 1 playlist, 1 album and 1 artist.") and offers the tools that
 fit -- build a playlist from the artists or the albums, find similar artists,
@@ -984,11 +1004,11 @@ tool runs. The artists, albums and similar-artists lists take links as well as
 names (see [Links](#links)), and *Similar artists* can start from a
 pasted playlist link, not only from one of your playlists.
 
-Album covers are off by default. Tick *Show artwork* at the bottom of the
-sidebar to show them next to tracks and albums; your browser then loads them
-straight from Qobuz's image server (no sign-in details are involved). While it
-is off, no image is requested at all. The setting is remembered in this
-browser.
+Album covers are off by default; until you turn them on, each cover is drawn
+from the album's or playlist's name. Tick *Show album covers* in *Settings* to
+show the real ones; your browser then loads them straight from the services'
+image servers (no sign-in details are involved). While it is off, no image is
+requested at all. The setting is remembered in this browser.
 
 **Playlist from artists:**
 

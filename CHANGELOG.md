@@ -128,7 +128,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is new too: near-black, rounded, with each page tinted by its cover. Album
   artwork is still off until you turn it on; until then covers are drawn from
   the album's or playlist's name, and nothing is fetched. Old addresses
-  (`#/playlists/...`, `#/accounts`) still work.
+  (`#/playlists/...`, `#/accounts`, `#/deduplicate`, `#/managed`, ...) still
+  work.
+- **Tools open inside the playlist they act on.** Find repeats, Upgrade, Stats,
+  Export, Similar artists and Combine open on the playlist (or on Favourites or
+  All playlists) under a bar naming it, with the tool's own source picker out
+  of the way; *Link...* links the playlist from its page. **Favourites** lists
+  its songs. **Tick playlists** in the sidebar to combine them (across services
+  too), remove artists from them, or delete them together. Home keeps the paste
+  box and drops its list of tools, which are under *+ New* and on each
+  playlist. When a tool has to load the page afresh (to work on another
+  service), it asks first if another tool has a preview you have not saved.
 - **The app is now called crosstune**, as it works with TIDAL and Spotify as
   well as Qobuz: the command is `crosstune`, and its settings live in
   `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that
