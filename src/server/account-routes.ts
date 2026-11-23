@@ -62,8 +62,10 @@ export async function accountRoutes(req: ApiRequest, deps: AccountDeps): Promise
         accounts.signOut(name);
         return ok({ accounts: accounts.view() });
       case "POST /forget":
-        accounts.forget(name);
+        // What is kept goes first: if that fails, the account is still there
+        // to forget again from here.
         deps.forget(name);
+        accounts.forget(name);
         return ok({ accounts: accounts.view() });
       default:
         return { status: 404, body: { error: "not found" } };

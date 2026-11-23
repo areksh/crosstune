@@ -1291,7 +1291,7 @@ async function runServe(options: { open: boolean; port?: number }): Promise<void
       if (summary.status !== "nothing-due") {
         logger.info(`${new Date().toISOString()} ${formatRunSummary(summary)}`);
       }
-      await runLinksNow(links);
+      await runLinksNow(links, { exitCode: false });
     } catch (error) {
       logger.warn(`job run failed: ${errorMessage(error)}`);
     } finally {
@@ -1349,8 +1349,7 @@ function linkConnect(connections: Connections): LinkConnect {
 }
 
 /** Sync the links that are due; conflicts are reported and leave a non-zero exit. */
-async function runLinksNow(links: LinksService, options: { all?: boolean } = {}): Promise<void> {
-  const before = links.list().links.filter((view) => view.state.conflicts.length > 0).length;
+async function runLinksNow(links: LinksService, options: { all?: boolean; exitCode?: boolean } = {}): Promise<void> {
   for (const view of links.list().links) {
     const due =
       view.link.enabled &&
@@ -1375,7 +1374,8 @@ async function runLinksNow(links: LinksService, options: { all?: boolean } = {})
   for (const view of conflicts) {
     logger.warn(`${view.link.name}: its copies disagree; nothing is written until you settle it in the web UI.`);
   }
-  if (conflicts.length > 0 || before > 0) {
+  // A run of `run-due` or `sync` that leaves a conflict says so in its exit code.
+  if (conflicts.length > 0 && options.exitCode !== false) {
     process.exitCode = process.exitCode === undefined || process.exitCode === 0 ? EXIT_CONFLICT : process.exitCode;
   }
 }
@@ -1392,7 +1392,12 @@ async function runCopy(hub: ServiceHub, args: CopyArgs): Promise<void> {
     args.name ?? (source.type === "playlist" ? (await hub.getPlaylist(source.playlistId)).name : "Favourites");
   const matches = fileMatches();
   const plan = await resolveTransfer(hub.service(to), tracks, matches);
-  output.assign({ to, counts: plan.counts, matches: plan.matches.map(({ source: from, grade, track, reason }) => ({ source: from.id, grade, track: track?.id ?? null, reason })) });
+  // Keys ending in Id: Qobuz's ids are written in its own form (src/cli/output.ts).
+  output.assign({
+    to,
+    counts: plan.counts,
+    matches: plan.matches.map(({ source: from, grade, track, reason }) => ({ sourceId: from.id, grade, trackId: track?.id ?? null, reason })),
+  });
   const { exact, likely, missing } = plan.counts;
   logger.info(`On ${labelOf(to)}: ${exact} found exactly, ${likely} likely, ${missing} not found.`);
   for (const match of plan.matches.filter((one) => one.grade !== "exact")) {

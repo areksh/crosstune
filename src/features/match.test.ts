@@ -165,7 +165,7 @@ describe("matchTracks", () => {
     ]);
   });
 
-  it.each(["authentication", "quota", "not-connected"])("stops for a %s error, which every song would hit", async (kind) => {
+  it.each(["authentication", "quota", "not-connected", "forbidden"])("stops for a %s error, which every song would hit", async (kind) => {
     const client = tidal([], {
       searchTracks: vi.fn(async () => {
         throw new ServiceError("tidal", kind, "no");

@@ -93,6 +93,9 @@ function signInAgain(config: OAuthConfig): ServiceError {
   return new ServiceError(config.service, "authentication", `${label} did not accept the sign-in; connect ${label} again`);
 }
 
+/** How long a token request may take. */
+const TOKEN_TIMEOUT_MS = 30_000;
+
 async function askForToken(config: OAuthConfig, fields: Record<string, string>): Promise<unknown> {
   const label = labelOf(config.service);
   let response: Response;
@@ -101,6 +104,9 @@ async function askForToken(config: OAuthConfig, fields: Record<string, string>):
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams(fields).toString(),
+      // Well within the refresh lock's two minutes: a hung refresh must not
+      // let another process refresh with the same (rotating) refresh token.
+      signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
     });
   } catch (cause) {
     throw new ServiceError(config.service, "network", `${label} could not be reached to sign in`, { cause });

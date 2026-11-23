@@ -124,7 +124,7 @@ async function matchOne(
 }
 
 /** Errors that every song would run into. */
-const STOPS_EVERY_SONG = new Set(["authentication", "quota", "rate-limited", "not-connected"]);
+const STOPS_EVERY_SONG = new Set(["authentication", "quota", "rate-limited", "not-connected", "forbidden"]);
 
 function missing(source: Track, reason: string): SongMatch {
   return { source, grade: "missing", options: [], reason };
