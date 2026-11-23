@@ -1,7 +1,8 @@
 # Several music services -- design
 
 - Date: 2026-11-23
-- Status: draft, awaiting the user's review
+- Status: awaiting the user's approval; a builder's questions are settled in the
+  text (section 11 lists them)
 - Builds on: ADR-0001, 0002 (local server, resolve/commit), 0003 (import),
   0006 (history), 0007-0008 (jobs), 0009 (drafts).
 - Becomes: ADR-0010 services and tagged ids; ADR-0011 accounts and sign-in;
@@ -111,7 +112,11 @@ no token reaches the page.
 - The user was told that combined views and Library stats do not clearly fit
   these terms, and that the likeliest consequence is thought to be a revoked app
   key. They are included; every item is labelled with, and links to, its
-  service. The README says this plainly. Nothing beyond ids is kept.
+  service. The README says this plainly.
+- What is kept about TIDAL and Spotify: ids, the names and descriptions of the
+  user's own playlists, artist names in job definitions, and History's and the
+  run log's labels -- what undo and jobs need, as for Qobuz. No catalogue
+  metadata is stored.
 
 ## 3. Order of work
 
@@ -133,8 +138,22 @@ comes before Spotify so that the user gets value early.
 
 **Probes.** Before 3 and 5, short scripts check the unconfirmed facts above on
 the user's account with scratch playlists, which are deleted afterwards. Asking
-the user first is required; a probe's answer goes into this document's successor
-(the phase's plan) before code depends on it.
+the user first is required; a probe's answer goes into the phase's plan before
+code depends on it. **A negative answer**: if it takes away something the user
+asked for (signing in, reading or editing playlists or favourites), stop and ask
+the user what to do. Otherwise the capability is declared `no` with its reason
+and the phase goes on.
+
+**Between phases** a connected service must never be half-supported. In phases 2
+and 3 the filter and the CLI's `--service` choose exactly one service, every tool
+runs inside it, and destinations are on it. Choosing several, and crossing, come
+with phase 4. The service field in exports, backups, M3U and `--json` comes with
+phase 3, so a TIDAL id is never written untagged; Qobuz output keeps its existing
+fields. `--service` defaults to Qobuz.
+
+Phase 3 is done when TIDAL passes the contract suite, every tool the table in
+section 7 marks `yes` for TIDAL works on it live with scratch playlists, and the
+rest say why not. Phase 5 is done when the same holds for Spotify.
 
 ## 4. Approaches considered
 
@@ -207,8 +226,8 @@ small client interfaces, never a service folder.
 |---|---|
 | `history.jsonl` | A bare number (or bare album id) reads as Qobuz; new records are tagged |
 | `jobs.json`, `jobs-state/*` | Version 3; older versions read as Qobuz. Reading never rewrites |
-| Backups, CSV, M3U, text | Files written before still import. In phase 1 the output is unchanged; phase 4 adds a `service` column/field and `tidal://`, `spotify:` URIs |
-| `--json` output | Unchanged in phase 1; phase 4 adds tagged ids beside the existing fields |
+| Backups, CSV, M3U, text | Files written before still import. In phase 1 the output is unchanged; phase 3 adds a `service` column/field and `tidal://` URIs, phase 5 `spotify:` ones |
+| `--json` output | Unchanged in phase 1; phase 3 adds tagged ids beside the existing fields |
 | `session.json`, `bundle.json` | Unchanged (Qobuz's) |
 
 CLI flags and the URL hash accept a bare number (Qobuz), a tagged id or a link.
@@ -244,11 +263,20 @@ the change plans correctly.
 - **Expiry**: a warning from 14 days before Spotify's six months end *(call)*.
   `jobs-global.json` flags become per service: one expired sign-in pauses only
   the jobs that use that service.
-- **Disconnecting** deletes its tokens, matches, sync state and History entries,
-  after saying so (Spotify's terms require deletion; done for all *(call)*).
-  Links that include it pause.
-- **Service filter** in the shell: one, several or all connected services,
-  remembered. Hidden with one connected. Unsupported tools stay visible with the
+- **Signing out** drops the token only (today's behaviour for Qobuz) and pauses
+  what uses that service. **Disconnect and forget**, a separate action, also
+  deletes its matches, the links and jobs that use it (listed first; playlists
+  are untouched), and its operations in History. A History entry that also
+  touched other services keeps its label and is marked as no longer undoable, so
+  that no half-undo is possible. This is the one case where History is edited
+  (an exception to ADR-0006, recorded in ADR-0011). Spotify's terms require the
+  deletion; it works the same for every service *(call)*.
+- **A different account** on the same service: the account's id is stored with
+  the token. Signing in as someone else is refused with an explanation unless
+  the first account is forgotten *(call; several accounts per service are out of
+  scope)*.
+- **Service filter** in the shell: one connected service, and from phase 4
+  several or all; remembered. Hidden with one connected. Unsupported tools stay visible with the
   reason.
 - Every song and playlist shows its service and links to it.
 - **Partial failure**: if one service fails in a combined view, the others are
@@ -267,8 +295,10 @@ the change plans correctly.
 - **Choice between copies** on the destination: playable, then the same album,
   then best quality, then earliest release *(call)*.
 - **Remembered**: confirmed, swapped and rejected matches go in `matches.json`,
-  ids only, one record per pair of services. Exact ones are not stored. The user
-  can forget a match. An unplayable remembered match is looked up again.
+  ids only, one record per song and destination service; it answers only in that
+  direction, as two masters on one service can match one song on another. Exact
+  ones are not stored. The user can forget a match. An unplayable remembered
+  match is looked up again.
 - **Destinations**: anything that creates or adds to a playlist, or favourites,
   asks which service, defaulting to the songs' service, or the last used when
   mixed. The review step shows matches whenever any song has to cross.
@@ -278,6 +308,16 @@ the change plans correctly.
 - **Artists and albums** match too, for lists and favourites: albums by UPC where
   known, else artist, title and track count; artists by a shared ISRC among their
   tracks, else exact normalised name. An ambiguous one is always *Likely*.
+- **Sources**: a tool that starts from names (playlist from artists or albums,
+  similar artists, word play, discovery) searches one chosen service per run
+  *(call)*, and its result can go to any. Tools that start from the user's own
+  music (playlists, combine, stats, new releases, smart) take several.
+- **Unattended crossing** (follow, combined, smart and discovery jobs): *Exact*
+  and confirmed matches are written; *Likely* ones wait as suggestions, through
+  the existing suggestions list; *Not found* ones are listed. A song that is
+  wanted but unmatched is never taken as no longer wanted, so it removes
+  nothing. `owned`, `dismissed` and `served` hold destination ids; the job keeps
+  which source song each stands for.
 - **Combined views**: playlists, favourites, stats, History, new releases. Stats
   count a song once when its ISRC matches, with a per-service breakdown.
 - **Comparing**: Combine's "in this but not that" works across services, and can
@@ -316,7 +356,8 @@ With none connected, the tool says what to connect.
 - Entry ids are positional: track id and which copy of it. Each write checks the
   playlist's `snapshot_id` first and stops if it changed.
 - If one copy of a repeated song cannot be removed on its own, the review says
-  that removing it re-adds the kept copies, which resets their added dates.
+  that removing it re-adds the kept copies, which resets their added dates. A
+  job or sync never does this on its own: it waits for the user.
 - Pacing per service, honouring `Retry-After`. `QUOTA_EXCEEDED` stops with a
   plain message and, for jobs, backs off.
 
@@ -336,15 +377,31 @@ every copy or a gap, and the name. Ids only, except the name.
 3. Work out each copy's changes against the state: added, removed, moved,
    renamed.
 4. For each removal, check that the song is still available on that service.
-   Withdrawn, or cannot tell: a gap there; the other copies keep it.
+   Withdrawn: a *withdrawn* gap there; the other copies keep it. Cannot tell: the
+   other copies keep it and it waits for the user as "removed, or withdrawn?";
+   until answered it is neither removed elsewhere nor put back. (If Spotify
+   cannot tell, every Spotify removal asks; answers can be given in bulk.)
 5. Conflicts: stop, record, write nothing anywhere.
-6. Otherwise re-read and stop if a copy changed; then add, move, and lastly
-   remove, confirming each add by reading back. Save the state of what is
-   confirmed.
+6. Otherwise re-read and stop if a copy changed. Record the intended writes
+   (copy, entries before, entries after) *before* the first one; then add, move,
+   and lastly remove, confirming each add by reading back. Save the state and
+   clear the record.
 
-The same change on both sides is agreement. So a sync cut off halfway is safe:
-the next run sees what was already done as agreed. Songs added on both sides are
-all kept, each after the song it followed.
+The same change on both sides is agreement. Songs added on both sides are all
+kept, each after the song it followed.
+
+**Interrupted syncs.** A record of intended writes left behind means the last
+sync did not finish. The next run compares each copy with it before anything
+else: differences it explains are our own unfinished writes, never the user's
+changes, and are completed. If a copy matches neither the record's before, its
+after nor a step between, the user changed it meanwhile: that is a conflict.
+
+**Same song, two ids.** A song is recognised by id, then by ISRC, so an id the
+service replaced is the same song, not a removal and an addition. When two songs
+on one copy match a single one on another, the second is a *same as* gap there:
+nothing is added, and removing that single song waits for the user, who says
+which was meant. Only *not found* gaps are looked for again; *withdrawn* and
+*same as* gaps are not.
 
 **Conflicts** (any one stops that playlist only):
 - a song removed on one copy, and moved or duplicated on another
@@ -352,8 +409,9 @@ all kept, each after the song it followed.
 - renamed differently
 - a linked playlist deleted, or no longer editable
 - a copy emptied, or having lost at least 10 songs and a quarter of the playlist
+- an interrupted sync whose copy was changed meanwhile
 
-**Not conflicts**: a gap (listed, looked for again weekly *(call)*); a *Likely*
+**Not conflicts**: a *not found* gap (listed, looked for again weekly *(call)*); a *Likely*
 match (that song waits for the user; the rest syncs); a withdrawn song; a failed
 read; non-song entries (ignored, kept).
 
@@ -380,7 +438,8 @@ kept, so nothing is redone; resuming goes through the first-link screen.
 - Crossing is tested with two fakes whose native ids deliberately collide.
 - Sync: table tests for every rule, and randomised tests -- random edits on both
   copies, random interruption -- checking that no song is ever lost without a
-  removal by the user, and that syncing twice writes nothing the second time.
+  removal by the user, that a run interrupted at any write completes or stops as
+  a conflict, and that syncing twice writes nothing the second time.
 - Sign-in: wrong, reused and late `state`; two refreshes at once; no token in any
   API response.
 - No live calls in the suite.
@@ -390,3 +449,17 @@ kept, so nothing is redone; resuming goes through the first-link screen.
 File and function names beyond those above, request batching, token refresh
 timing, how phase 1 is cut into commits (each must pass), pacing numbers, UI
 details after the mockups are agreed.
+
+## 11. Calls for the user to check
+
+1. A removal that a service cannot tell from a withdrawal asks the user.
+2. An interrupted sync is finished from a record written beforehand.
+3. Sign out keeps everything; Disconnect and forget deletes that service's data.
+4. One account per service.
+5. Build tools search one service per run; the result can go to any.
+6. Scheduled jobs write only exact or confirmed matches; the rest wait.
+7. One service at a time until phase 4.
+8. Favourites and descriptions are not synced; the project keeps its name.
+9. If a probe takes away something the user asked for, work stops to ask.
+
+Assumed: the user has, or will get, the Spotify Premium account option A needs.
