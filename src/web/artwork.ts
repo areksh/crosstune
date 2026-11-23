@@ -8,6 +8,7 @@
  * this browser only.
  */
 
+import { shouldAskArtwork } from "../ui/artwork-question.js";
 import { coverBackground, coverFromColour, generatedCover, glowBackground } from "../ui/cover-art.js";
 import { el } from "./dom.js";
 
@@ -167,14 +168,48 @@ function apply(): void {
   }
 }
 
+/** Turn covers on or off, remembered in this browser; the Settings checkbox follows. */
+function setArtwork(on: boolean): void {
+  enabled = on;
+  saveSetting(on);
+  el<HTMLInputElement>("show-artwork").checked = on;
+  apply();
+}
+
 /** Wire up the "Show artwork" checkbox. Call once on load. */
 export function initArtworkToggle(): void {
   const checkbox = el<HTMLInputElement>("show-artwork");
   checkbox.checked = enabled;
-  checkbox.addEventListener("change", () => {
-    enabled = checkbox.checked;
-    saveSetting(enabled);
-    apply();
-  });
+  checkbox.addEventListener("change", () => setArtwork(checkbox.checked));
   apply();
+}
+
+const ASKED_KEY = "crosstune:artwork-asked";
+
+function stored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Ask about covers, once (see src/ui/artwork-question.ts). Call when the services are known. */
+export function askAboutArtwork(connected: number): void {
+  if (!shouldAskArtwork(stored(STORAGE_KEY), stored(ASKED_KEY), connected)) {
+    return;
+  }
+  const banner = el("artwork-ask");
+  banner.hidden = false;
+  const answer = (on: boolean): void => {
+    setArtwork(on);
+    try {
+      localStorage.setItem(ASKED_KEY, "yes");
+    } catch {
+      // Storage unavailable: the banner goes for this page.
+    }
+    banner.hidden = true;
+  };
+  el("artwork-ask-yes").addEventListener("click", () => answer(true), { once: true });
+  el("artwork-ask-no").addEventListener("click", () => answer(false), { once: true });
 }

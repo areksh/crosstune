@@ -12,7 +12,7 @@
 import type { AccountView } from "../accounts/accounts.js";
 import { SERVICE_LABELS } from "../services/names.js";
 import { api } from "./api.js";
-import { initArtworkToggle } from "./artwork.js";
+import { askAboutArtwork, initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
 import { parseRoute, redirectFor, viewOf, type Route } from "../ui/routes.js";
@@ -124,6 +124,7 @@ async function loadAccounts(): Promise<void> {
   const connected = accounts.filter((account) => account.status === "connected");
   setConnectedServices(connected.map((account) => account.service));
   initShell(connected.map((account) => account.service));
+  askAboutArtwork(connected.length);
   initLibrary(connected.map((account) => account.service));
   const all = chosenService() === "all" && connected.length > 1;
   const chosen = connected.find((account) => account.service === chosenService()) ?? connected[0];

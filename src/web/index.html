@@ -56,6 +56,21 @@
       <main class="content">
         <!-- What needs the user's attention on any page (src/web/notices.ts). -->
         <div id="notices" class="notices" role="status" hidden></div>
+        <!-- Asked once: album covers (src/web/artwork.ts, src/ui/artwork-question.ts). -->
+        <section id="artwork-ask" class="artwork-ask" aria-labelledby="artwork-ask-title" hidden>
+          <div>
+            <h2 id="artwork-ask-title">Show album covers?</h2>
+            <p>
+              They load from Qobuz, TIDAL and Spotify's image servers, which tells them
+              which albums you look at. Until then covers are drawn from names, and nothing
+              leaves this computer. You can change this in Settings.
+            </p>
+          </div>
+          <div class="artwork-ask-actions">
+            <button id="artwork-ask-yes" type="button">Show covers</button>
+            <button id="artwork-ask-no" type="button" class="secondary">Not now</button>
+          </div>
+        </section>
         <!-- Over a tool opened on a source: where it came from (src/web/main.ts). -->
         <nav id="context-bar" class="context-bar" aria-label="Where this tool works" hidden>
           <span id="context-cover" class="gen-cover context-cover" aria-hidden="true"></span>
