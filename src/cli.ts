@@ -378,7 +378,10 @@ import { TidalClient } from "./services/tidal/client.js";
 import { TIDAL_AUTHORIZE_URL, TIDAL_SCOPES, TIDAL_TOKEN_URL } from "./services/tidal/oauth-config.js";
 import { TidalService } from "./services/tidal/service.js";
 import { fileAccountStore, fileTokenVault, removeTokens } from "./cli/account-store.js";
+import { fileLinkStateStore, fileLinkStore } from "./cli/link-store.js";
 import { fileMatches } from "./cli/match-store.js";
+import type { LinkConnect } from "./sync/runner.js";
+import { linksService, type LinksService } from "./sync/service.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
 import { homeService } from "./jobs/model.js";
@@ -497,6 +500,15 @@ async function main(): Promise<void> {
       output.flush();
       return;
     }
+  }
+
+  // `sync`: sync every linked playlist now, due or not.
+  if (command === "sync") {
+    const connections = openConnections(journal);
+    await connections.accounts.resume();
+    await runLinksNow(openLinks(journal, connections), { all: true });
+    output.flush();
+    return;
   }
 
   // `accounts` only reads what is saved.
@@ -705,6 +717,10 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
     return;
   }
   const outcome = await applyUndo(journal, client, item, plan);
+  const paused = openLinks(journal, undefined).undone(item.id);
+  if (paused.length > 0) {
+    logger.info(`The linked playlist this synced is paused; resume it when its copies are as you want them.`);
+  }
   output.assign({ applied: true, result: outcome });
   logger.info(`\n${formatUndoResult(outcome)}`);
   if (outcome.undone) {
@@ -843,8 +859,10 @@ async function startUi(
   journal: Journal,
   jobs: RunDueDeps,
   options: { port?: number } = {},
+  links?: LinksService,
 ): Promise<RunningServer> {
   return startServer({
+    ...(links !== undefined && { links }),
     accounts: { accounts, hub, listen: () => listener.listen(), forget: (service) => forgetService(service) },
     history: { journal },
     matches: fileMatches(),
@@ -880,7 +898,7 @@ async function runUi(): Promise<void> {
   const connections = openConnections(journal);
   const jobs = jobRunnerDeps(journal, connectThrough(connections));
   await connections.accounts.resume();
-  const server = await startUi(connections, journal, jobs);
+  const server = await startUi(connections, journal, jobs, {}, openLinks(journal, connections));
   logger.info(`\nWeb UI running at ${server.url}`);
   logConnected(connections.accounts);
   logger.info("Open it in your browser (it should open automatically).");
@@ -988,13 +1006,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Executor for `run-due`: run the jobs that are due, then exit. */
+/** Executor for `run-due`: run the jobs and links that are due, then exit. */
 async function runDueCommand(journal: Journal, dryRun: boolean): Promise<void> {
-  const summary = await runDue(
-    jobRunnerDeps(journal, connectThrough(openConnections(journal))),
-    new Date(),
-    { dryRun },
-  );
+  const connections = openConnections(journal);
+  const summary = await runDue(jobRunnerDeps(journal, connectThrough(connections)), new Date(), { dryRun });
+  if (!dryRun) {
+    await runLinksNow(openLinks(journal, connections));
+  }
   output.set("summary", summary);
   logger.info(`${new Date().toISOString()} ${formatRunSummary(summary)}`);
   for (const bad of summary.invalid) {
@@ -1181,8 +1199,9 @@ async function runServe(options: { open: boolean; port?: number }): Promise<void
   const journal = openJournal("web");
   const connections = openConnections(journal);
   const deps = jobRunnerDeps(journal, connectThrough(connections));
+  const links = openLinks(journal, connections);
   await connections.accounts.resume();
-  const server = await startUi(connections, journal, deps, options);
+  const server = await startUi(connections, journal, deps, options, links);
   logger.info(`\nWeb UI running at ${server.url}`);
   logConnected(connections.accounts);
   logger.info("Running due jobs every minute. Press Ctrl-C to stop.");
@@ -1200,6 +1219,7 @@ async function runServe(options: { open: boolean; port?: number }): Promise<void
       if (summary.status !== "nothing-due") {
         logger.info(`${new Date().toISOString()} ${formatRunSummary(summary)}`);
       }
+      await runLinksNow(links);
     } catch (error) {
       logger.warn(`job run failed: ${errorMessage(error)}`);
     } finally {
@@ -1214,6 +1234,82 @@ async function runServe(options: { open: boolean; port?: number }): Promise<void
   connections.listener.close();
   await server.close();
 }
+
+/**
+ * The linked playlists' service. With connections, they are synced with what
+ * is connected; without, only what needs no service works (pausing, undo).
+ */
+function openLinks(journal: Journal, connections: Connections | undefined): LinksService {
+  const dir = configDir();
+  return linksService({
+    links: fileLinkStore(dir),
+    state: fileLinkStateStore(dir),
+    runs: fileRunLog(dir),
+    matches: fileMatches(dir),
+    connect:
+      connections === undefined
+        ? async () => ({ ok: false, reason: "needs-sign-in", message: "not connected" })
+        : linkConnect(connections),
+    journalRun: (label, fn) => journal.run({ tool: "link", label }, fn),
+    lock: async (fn) => {
+      const lock = await acquireLockWithin(jobsLockPath(dir), WRITE_LOCK_WAIT_MS);
+      if (lock === undefined) {
+        throw new Error("A managed playlist is being refreshed; try again in a moment.");
+      }
+      try {
+        return await fn();
+      } finally {
+        lock.release();
+      }
+    },
+  });
+}
+
+/** Connect to the services a link joins, from what is saved. */
+function linkConnect(connections: Connections): LinkConnect {
+  const connect = connectThrough(connections);
+  return async (services) => {
+    const connected = await connect(services);
+    return connected.ok
+      ? { ok: true, clients: new Map(services.map((service) => [service, connections.hub.service(service)])) }
+      : connected;
+  };
+}
+
+/** Sync the links that are due; conflicts are reported and leave a non-zero exit. */
+async function runLinksNow(links: LinksService, options: { all?: boolean } = {}): Promise<void> {
+  const before = links.list().links.filter((view) => view.state.conflicts.length > 0).length;
+  for (const view of links.list().links) {
+    const due =
+      view.link.enabled &&
+      view.state.paused === undefined &&
+      (options.all === true || view.state.nextRunAt === undefined || Date.parse(view.state.nextRunAt) <= Date.now());
+    if (!due) {
+      continue;
+    }
+    try {
+      const summary = await links.run(view.link.id);
+      for (const report of summary.reports) {
+        logger.info(`${new Date().toISOString()} ${report.name}: ${describeResult(report.result)}`);
+      }
+      if (summary.blocked !== undefined) {
+        logger.warn(`${labelOf(summary.blocked.service)}: ${summary.blocked.message}`);
+      }
+    } catch (error) {
+      logger.warn(`${view.link.name}: ${errorMessage(error)}`);
+    }
+  }
+  const conflicts = links.list().links.filter((view) => view.state.conflicts.length > 0);
+  for (const view of conflicts) {
+    logger.warn(`${view.link.name}: its copies disagree; nothing is written until you settle it in the web UI.`);
+  }
+  if (conflicts.length > 0 || before > 0) {
+    process.exitCode = process.exitCode === undefined || process.exitCode === 0 ? EXIT_CONFLICT : process.exitCode;
+  }
+}
+
+/** The exit code of a run that left linked playlists in conflict. */
+const EXIT_CONFLICT = 3;
 
 /** `accounts`: who is signed in to what, from what is saved (nothing is asked of the services). */
 function showAccounts(): void {

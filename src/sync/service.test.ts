@@ -110,6 +110,13 @@ describe("linksService", () => {
     expect([file(), states.size, q.songs(a)]).toEqual([[], 0, [1]]);
   });
 
+  it("pauses a link whose sync was undone", async () => {
+    const { service, q, t, states } = setup();
+    await service.create({ name: "Mix", copies: { qobuz: q.seed("Mix", [1]), tidal: t.seed("Mix", [1]) } });
+    expect(service.undone("e1")).toEqual(["abcdef01"]);
+    expect(states.get("abcdef01")?.paused?.reason).toBe("undone");
+  });
+
   it("refuses ids it does not know", async () => {
     const { service } = setup();
     await expect(service.run("ffffffff")).rejects.toThrow(/No link/);

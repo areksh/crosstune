@@ -55,6 +55,8 @@ export interface StartServerOptions {
   jobs?: ApiDeps["jobs"];
   /** The connected services (see ApiDeps). */
   accounts?: ApiDeps["accounts"];
+  /** Linked playlists (see ApiDeps). */
+  links?: ApiDeps["links"];
   /** Remembered matches (see ApiDeps). */
   matches?: ApiDeps["matches"];
   /** For the playlist manager (see ApiDeps). */
@@ -163,6 +165,7 @@ async function handle(
         nonce,
         port: address,
         ...(options.accounts !== undefined && { accounts: options.accounts }),
+        ...(options.links !== undefined && { links: options.links }),
         ...(options.matches !== undefined && { matches: options.matches }),
         ...(options.history !== undefined && { history: options.history }),
         ...(options.jobs !== undefined && { jobs: options.jobs }),

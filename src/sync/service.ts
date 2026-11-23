@@ -12,7 +12,7 @@ import type { RunRecord } from "../jobs/stores.js";
 import { emptyLinkState, type LinkState } from "./model.js";
 import { linkAsSame, resolveConflict, type SyncOutcome } from "./run.js";
 import type { Choice } from "./plan.js";
-import { runLinks, validateLink, type InvalidLink, type Link, type LinkConnect, type LinksSummary } from "./runner.js";
+import { pausedByUndo, runLinks, validateLink, type InvalidLink, type Link, type LinkConnect, type LinksSummary } from "./runner.js";
 
 export interface LinksServiceDeps {
   links: { load(): { links: Link[]; invalid: InvalidLink[] }; save(links: Link[]): void };
@@ -44,6 +44,8 @@ export interface LinksService {
   chooseMatch(id: string, key: string, track: TrackId | null): Promise<LinksSummary>;
   setEnabled(id: string, enabled: boolean): Link;
   remove(id: string): void;
+  /** A history entry was undone: pause the links it was a sync of. */
+  undone(entryId: string): string[];
 }
 
 export function linksService(deps: LinksServiceDeps): LinksService {
@@ -158,6 +160,8 @@ export function linksService(deps: LinksServiceDeps): LinksService {
       }
       return link;
     },
+
+    undone: (entryId) => pausedByUndo(deps, entryId, now()),
 
     remove: (id) => {
       find(id);
