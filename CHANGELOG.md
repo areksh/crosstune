@@ -86,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Groundwork for other music services: every id now names its service. Nothing
+  looks different: history, managed playlists and backups made before still work,
+  and exports, `--json` and printed ids keep Qobuz's own form. Jobs files are
+  rewritten in a newer form when next saved, which earlier versions refuse.
+- A backup's entries without a usable id are left out of a restore; they used to
+  be sent to Qobuz as id 0.
 - Qobuz API requests now retry an HTTP 400 with exponential backoff (up to five
   times: 500ms, 1s, 2s, 4s, 8s) before failing, so a transient throttle no
   longer stops a run. The secret-probe step is exempt, as it uses a 400 to
