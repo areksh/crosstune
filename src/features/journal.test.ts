@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { qid } from "../services/ids.test-support.js";
 import { ServiceHub } from "../services/hub.js";
+import { tagId } from "../services/ids.js";
+import { FakeQobuz } from "../services/qobuz/fake-qobuz.test-support.js";
+import type { MusicService } from "../services/service.js";
+import { addConfirmed } from "./playlist-add.js";
+import { createPlaylistWithTracks } from "./playlist-from-artists.js";
 import { QobuzService } from "../services/qobuz/service.js";
 import { MUSIC_READS, MUSIC_WRITES } from "../services/service.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
@@ -499,5 +504,34 @@ describe("recordingClient", () => {
     expect(entriesOf(store)[0]?.ops).toEqual([
       { kind: "delete-playlist", playlistId: id, name: "Old", trackIds: [qid(4), qid(5)], isPublic: false },
     ]);
+  });
+});
+
+describe("a mixed list", () => {
+  it("is refused whole, before the first batch, through what the app uses", async () => {
+    const fake = new FakeQobuz();
+    const journal = new Journal({ store: new MemoryStore(), source: "cli" });
+    const hub = new ServiceHub();
+    hub.connect(recordingClient<MusicService>(new QobuzService(fake as never), journal));
+    const ids = [...Array.from({ length: 60 }, (_, i) => qid(i + 1)), tagId<never>("tidal", "x")];
+    for (const client of [hub, hub.scoped("qobuz"), hub.service("qobuz")]) {
+      await expect(client.addFavoriteTracks(ids)).rejects.toThrow();
+      await expect(client.removeFavoriteTracks(ids)).rejects.toThrow();
+    }
+    expect(fake.calls).toEqual([]);
+    expect(journal.items()).toEqual([]);
+  });
+
+  it("creates no playlist for songs of another service", async () => {
+    const fake = new FakeQobuz();
+    const hub = new ServiceHub();
+    hub.connect(new QobuzService(fake as never));
+    const view = hub.scoped("qobuz");
+    const trackIds = [qid(1), tagId<never>("tidal", 2)];
+    await expect(createPlaylistWithTracks(view, { name: "New", trackIds })).rejects.toMatchObject({ kind: "bad-id" });
+    await expect(
+      addConfirmed(view, { type: "new", name: "New", isPublic: false }, trackIds),
+    ).rejects.toMatchObject({ kind: "bad-id" });
+    expect(fake.calls).toEqual([]);
   });
 });

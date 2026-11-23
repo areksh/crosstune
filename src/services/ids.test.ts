@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nativeOf, parseId, readAlbumId, readId, serviceOf, tagId } from "./ids.js";
+import { checkAllOn, nativeOf, parseId, readAlbumId, readId, serviceOf, tagId } from "./ids.js";
 import { ServiceError } from "./errors.js";
 
 describe("tagId", () => {
@@ -69,5 +69,29 @@ describe("readAlbumId", () => {
 
   it.each(["", "qobuz:", "nope:1", "a b", 12, null])("rejects %j", (value) => {
     expect(readAlbumId(value)).toBeUndefined();
+  });
+});
+
+describe("Qobuz ids from outside", () => {
+  it.each(["qobuz:1e2", "qobuz:0x64", "qobuz: 100", "qobuz:0100", "qobuz:100.0", "qobuz:abc", "qobuz:-1"])(
+    "rejects %j, which is not how Qobuz writes one",
+    (id) => {
+      expect(readId(id)).toBeUndefined();
+    },
+  );
+
+  it.each(["qobuz:a b", "qobuz:a/b", "qobuz:a:b"])("rejects the album id %j", (id) => {
+    expect(readAlbumId(id)).toBeUndefined();
+  });
+});
+
+describe("checkAllOn", () => {
+  it("passes ids of the client's service, and checks nothing for a client without a name", () => {
+    expect(() => checkAllOn({ name: "qobuz" }, [tagId("qobuz", 1)])).not.toThrow();
+    expect(() => checkAllOn({}, [tagId("tidal", 1)])).not.toThrow();
+  });
+
+  it("refuses another service's", () => {
+    expect(() => checkAllOn({ name: "qobuz" }, [tagId("qobuz", 1), tagId("tidal", 1)])).toThrow(/tidal:1/);
   });
 });

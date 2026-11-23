@@ -47,11 +47,15 @@ function jsonReplacer(key: string, value: unknown): unknown {
   if (value instanceof Set) {
     return [...value];
   }
-  if (key === "albumIds" && Array.isArray(value)) {
-    return value.map((id) => (typeof id === "string" ? String(legacyId("albumId", id)) : id));
+  if (Array.isArray(value) && value.every((item) => typeof item === "string" && QOBUZ_ID.test(item))) {
+    const item = /albumIds$/i.test(key) ? "albumId" : "id";
+    return value.map((id: string) => legacyId(item, id));
   }
-  return typeof value === "string" ? legacyId(key, value) : value;
+  return typeof value === "string" && ID_KEY.test(key) ? legacyId(key, value) : value;
 }
+
+/** Keys that hold an id; other text is left alone. */
+const ID_KEY = /(^id|Id|^from|^to)$/;
 
 const QOBUZ_ID = /^qobuz:([a-z0-9]+)$/i;
 

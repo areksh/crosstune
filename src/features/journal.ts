@@ -17,7 +17,15 @@
  * happen before the error is rethrown.
  */
 
-import { shortId, type AnyId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
+import {
+  checkAllOn,
+  shortId,
+  type AnyId,
+  type EntryId,
+  type PlaylistId,
+  type ServiceName,
+  type TrackId,
+} from "../services/ids.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
@@ -265,6 +273,8 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
 
   const favourites = (method: string, kind: Operation["kind"], type: FavouriteType) =>
     async (ids: readonly AnyId[]): Promise<void> => {
+      // Every id first: one of another service must not stop it half-way.
+      checkAllOn(client as { name?: ServiceName }, ids);
       // Batch by batch, so a failure records the batches that went through.
       for (const batch of chunk(ids, BATCH)) {
         await call(method, batch);
@@ -272,7 +282,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       }
     };
 
-  const wrappers: Record<string, AnyMethod> = {
+  const wrappers: Record<(typeof MUTATING_METHODS)[number], AnyMethod> = {
     async createPlaylist(name: string, options?: { description?: string; isPublic?: boolean }) {
       const playlist = await call<Playlist>("createPlaylist", name, options);
       const scope = journal.scope();
@@ -476,7 +486,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
   return new Proxy(client, {
     get(target, property) {
       if (typeof property === "string" && property in wrappers && typeof raw[property] === "function") {
-        return wrappers[property];
+        return (wrappers as Record<string, AnyMethod | undefined>)[property];
       }
       // Getters and methods run against the real client (its private fields).
       const value: unknown = Reflect.get(target, property, target);

@@ -218,10 +218,8 @@ function settingsBody(): { body: Record<string, unknown> } | { missing: string }
   if (checkedValue("similar-source", "artists") === "playlist") {
     const playlistId = sourcePlaylistId();
     if (playlistId === undefined) {
-      return { missing: "Choose a playlist." };
-    }
-    if (Number.isNaN(playlistId)) {
-      return { missing: "That is not a Qobuz playlist link." };
+      const pasted = el<HTMLInputElement>("similar-source-link").value.trim().length > 0;
+      return { missing: pasted ? "That is not a Qobuz playlist link." : "Choose a playlist." };
     }
     source = {
       type: "playlist",
@@ -563,8 +561,8 @@ async function preselectExisting(playlistId: PlaylistId): Promise<void> {
 
 /**
  * The source playlist: a pasted link (any playlist) wins over the picker of
- * your playlists. NaN for a link that is not a playlist link; undefined when
- * neither is given.
+ * your playlists. Undefined when neither is given, or the link is not a
+ * playlist's.
  */
 function sourcePlaylistId(): PlaylistId | undefined {
   const link = el<HTMLInputElement>("similar-source-link").value.trim();

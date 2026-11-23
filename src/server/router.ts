@@ -1244,11 +1244,12 @@ function parseCommitInput(body: unknown): Parsed<CommitInput> {
   if (!isRecord(body)) {
     return { ok: false, error: "expected a JSON object" };
   }
-  const trackIds = Array.isArray(body["trackIds"])
-    ? body["trackIds"].flatMap((id: unknown) => readId<TrackId>(id) ?? [])
-    : undefined;
-  if (trackIds === undefined || trackIds.length === 0) {
+  const trackIds = Array.isArray(body["trackIds"]) ? body["trackIds"].map((id: unknown) => readId<TrackId>(id)) : [];
+  if (trackIds.length === 0) {
     return { ok: false, error: "at least one track id is required" };
+  }
+  if (!trackIds.every((id) => id !== undefined)) {
+    return { ok: false, error: "trackIds must be a list of ids" };
   }
 
   const target = parseCommitTarget(body["target"]);
@@ -1340,11 +1341,12 @@ function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
   if (!isRecord(body)) {
     return { ok: false, error: "expected a JSON object" };
   }
-  const albumIds = Array.isArray(body["albumIds"])
-    ? body["albumIds"].flatMap((id: unknown) => readAlbumId(id) ?? [])
-    : undefined;
-  if (albumIds === undefined || albumIds.length === 0) {
+  const albumIds = Array.isArray(body["albumIds"]) ? body["albumIds"].map((id: unknown) => readAlbumId(id)) : [];
+  if (albumIds.length === 0) {
     return { ok: false, error: "at least one album id is required" };
+  }
+  if (!albumIds.every((id) => id !== undefined)) {
+    return { ok: false, error: "albumIds must be a list of ids" };
   }
   const filter = parseFilterInput(body["filter"]);
   if (!filter.ok) {
@@ -1440,15 +1442,21 @@ function parseApplyInput(body: unknown): Parsed<ApplyInput> {
   for (const item of body["removals"]) {
     const id = isRecord(item) ? readId<TrackId>(item["id"]) : undefined;
     if (!isRecord(item) || id === undefined) {
-      continue;
+      return { ok: false, error: "each removal needs the id of a track" };
     }
     const removal: Removal = { id };
-    const playlistTrackId = readId<EntryId>(item["playlistTrackId"]);
-    if (playlistTrackId !== undefined) {
+    if (item["playlistTrackId"] !== undefined) {
+      const playlistTrackId = readId<EntryId>(item["playlistTrackId"]);
+      if (playlistTrackId === undefined) {
+        return { ok: false, error: "playlistTrackId must be an id" };
+      }
       removal.playlistTrackId = playlistTrackId;
     }
-    const playlistId = readId<PlaylistId>(item["playlistId"]);
-    if (playlistId !== undefined) {
+    if (item["playlistId"] !== undefined) {
+      const playlistId = readId<PlaylistId>(item["playlistId"]);
+      if (playlistId === undefined) {
+        return { ok: false, error: "playlistId must be an id" };
+      }
       removal.playlistId = playlistId;
     }
     if (
@@ -1671,7 +1679,7 @@ function parseImportPlan(value: unknown): Parsed<ImportPlan> {
     }
     const id = kind === "albums" ? readAlbumId(item["id"]) : readId<AnyId>(item["id"]);
     if (id === undefined) {
-      continue;
+      return { ok: false, error: "each matched item needs an id" };
     }
     const label = typeof item["label"] === "string" ? item["label"] : shortId(id);
     matched.push({ label, id });

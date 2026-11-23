@@ -125,3 +125,20 @@ describe("QobuzService", () => {
     expect(adapter({ session: undefined }).account()).toBeUndefined();
   });
 });
+
+describe("QobuzService and odd data", () => {
+  it("leaves out albums and releases without an id rather than failing the list", async () => {
+    const service = adapter({
+      searchAlbums: async () => [{ id: "", title: "x", artist: "" }, { id: "a1", title: "y", artist: "" }],
+      getArtistReleases: async () => ({ releases: [{ id: "", title: "x", artist: "", releaseType: "album" }], truncated: false }),
+    });
+    expect((await service.searchAlbums("x")).map((a) => a.id)).toEqual(["qobuz:a1"]);
+    expect((await service.getArtistReleases(t(1))).releases).toEqual([]);
+  });
+
+  it.each(["1e2", "0x64", " 100", "0100", "100.0"])("sends nothing for the id %j", async (native) => {
+    const getPlaylist = vi.fn();
+    await expect(adapter({ getPlaylist }).getPlaylist(tagId("qobuz", native))).rejects.toMatchObject({ kind: "bad-id" });
+    expect(getPlaylist).not.toHaveBeenCalled();
+  });
+});

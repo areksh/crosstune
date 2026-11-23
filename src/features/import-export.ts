@@ -24,6 +24,7 @@
 
 import { normaliseIsrc } from "../services/isrc.js";
 import {
+  checkAllOn,
   readAlbumId,
   readId,
   shortId,
@@ -465,7 +466,7 @@ function parseCollectionCsv(
     return {
       kind,
       items: body.map((row) => ({
-        ...idIf(readId<TrackId>(at(row, "id"))),
+        ...idIf(fileId<TrackId>(at(row, "id"))),
         ...stringIf(at(row, "title"), "title"),
         ...stringIf(at(row, "artist"), "artist"),
         ...stringIf(at(row, "album"), "album"),
@@ -486,7 +487,7 @@ function parseCollectionCsv(
   return {
     kind,
     items: body.map((row) => ({
-      ...idIf(readId<ArtistId>(at(row, "id"))),
+      ...idIf(fileId<ArtistId>(at(row, "id"))),
       ...stringIf(at(row, "name"), "name"),
     })),
   };
@@ -1146,6 +1147,8 @@ export async function restoreBackup(
   const trackIds = backup.favourites.tracks.map((t) => t.id);
   const albumIds = backup.favourites.albums.map((a) => a.id);
   const artistIds = backup.favourites.artists.map((a) => a.id);
+  // All of it first, so that an id of another service leaves nothing half done.
+  checkAllOn(client, [...trackIds, ...albumIds, ...artistIds, ...backup.playlists.flatMap((p) => p.tracks.map((t) => t.id))]);
   await client.addFavoriteTracks(trackIds);
   await client.addFavoriteAlbums(albumIds);
   await client.addFavoriteArtists(artistIds);
@@ -1290,7 +1293,7 @@ function emptyParsed(kind: CollectionKind): ParsedCollection {
 function parsedTrackFromJson(item: unknown): ParsedTrack {
   const out: ParsedTrack = {};
   if (!isRecord(item)) return out;
-  Object.assign(out, idIf(readId<TrackId>(item["id"])));
+  Object.assign(out, idIf(jsonId<TrackId>(item["id"])));
   if (typeof item["title"] === "string") out.title = item["title"];
   if (typeof item["artist"] === "string") out.artist = item["artist"];
   if (typeof item["album"] === "string") out.album = item["album"];
@@ -1310,7 +1313,7 @@ function parsedAlbumFromJson(item: unknown): ParsedAlbum {
 function parsedArtistFromJson(item: unknown): ParsedArtist {
   const out: ParsedArtist = {};
   if (!isRecord(item)) return out;
-  Object.assign(out, idIf(readId<ArtistId>(item["id"])));
+  Object.assign(out, idIf(jsonId<ArtistId>(item["id"])));
   if (typeof item["name"] === "string") out.name = item["name"];
   return out;
 }
@@ -1318,8 +1321,9 @@ function parsedArtistFromJson(item: unknown): ParsedArtist {
 /** A backup's track; none without an id, as a restore writes ids. */
 function exportTrackFromJson(item: unknown): ExportTrack[] {
   const parsed = parsedTrackFromJson(item);
-  if (parsed.id === undefined) return [];
-  const out: ExportTrack = { id: parsed.id, title: parsed.title ?? "" };
+  const id = isRecord(item) ? readId<TrackId>(item["id"]) : undefined;
+  if (id === undefined) return [];
+  const out: ExportTrack = { id, title: parsed.title ?? "" };
   if (parsed.artist !== undefined) out.artist = parsed.artist;
   if (parsed.album !== undefined) out.album = parsed.album;
   if (parsed.isrc !== undefined) out.isrc = parsed.isrc;
@@ -1353,6 +1357,23 @@ function exportPlaylistFromJson(item: unknown): ExportPlaylist {
 }
 
 // --- Misc helpers ----------------------------------------------------------
+
+/**
+ * An id in a file. Only what is surely one of Qobuz's: a file from elsewhere
+ * holds other services' ids, and taking one of those for a Qobuz number would
+ * match a different song without a search.
+ */
+function jsonId<T extends AnyId>(value: unknown): T | undefined {
+  return typeof value === "number" || (typeof value === "string" && value.startsWith("qobuz:"))
+    ? readId<T>(value)
+    : undefined;
+}
+
+/** {@link jsonId} for a CSV cell, where a number is text (maybe a spreadsheet's `12.0`). */
+function fileId<T extends AnyId>(cell: string | undefined): T | undefined {
+  const text = cell?.trim().replace(/\.0+$/, "") ?? "";
+  return /^\d+$/.test(text) || text.startsWith("qobuz:") ? readId<T>(text) : undefined;
+}
 
 function idIf<T extends AnyId>(id: T | undefined): { id?: T } {
   return id === undefined ? {} : { id };

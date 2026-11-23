@@ -51,8 +51,9 @@ const tag = <T extends AnyId>(native: string | number): T => tagId<T>("qobuz", n
 
 /** A tagged id as Qobuz's number. */
 function num(id: AnyId): number {
-  const value = Number(nativeOf("qobuz", id));
-  if (!Number.isSafeInteger(value) || value <= 0) {
+  const native = nativeOf("qobuz", id);
+  const value = Number(native);
+  if (!/^[1-9]\d*$/.test(native) || !Number.isSafeInteger(value)) {
     throw new ServiceError("qobuz", "bad-id", `not a Qobuz id: ${String(id)}`);
   }
   return value;
@@ -78,6 +79,7 @@ function toTrack(track: Native.Track): Track {
   return out as unknown as Track;
 }
 
+const hasId = (album: { id: string }): boolean => album.id.length > 0;
 const toArtist = (artist: Native.Artist): Artist => ({ ...artist, id: tag<ArtistId>(artist.id) });
 const toAlbum = (album: Native.Album): Album => ({ ...album, id: tag<AlbumId>(album.id) });
 
@@ -120,7 +122,7 @@ export class QobuzService implements MusicService {
   }
 
   async searchAlbums(query: string, limit?: number, offset?: number): Promise<Album[]> {
-    return (await this.#client.searchAlbums(query, limit, offset)).map(toAlbum);
+    return (await this.#client.searchAlbums(query, limit, offset)).filter(hasId).map(toAlbum);
   }
 
   async searchTracks(query: string, limit?: number, offset?: number): Promise<Track[]> {
@@ -159,7 +161,7 @@ export class QobuzService implements MusicService {
 
   async getArtistReleases(artistId: ArtistId, maxReleases?: number): Promise<ArtistReleases> {
     const { releases, truncated } = await this.#client.getArtistReleases(num(artistId), maxReleases);
-    return { releases: releases.map(toRelease), truncated };
+    return { releases: releases.filter(hasId).map(toRelease), truncated };
   }
 
   async getAlbum(albumId: AlbumId): Promise<Album> {
@@ -191,7 +193,7 @@ export class QobuzService implements MusicService {
   }
 
   async getFavoriteAlbums(): Promise<Album[]> {
-    return (await this.#client.getFavoriteAlbums()).map(toAlbum);
+    return (await this.#client.getFavoriteAlbums()).filter(hasId).map(toAlbum);
   }
 
   async getFavoriteArtists(): Promise<Artist[]> {

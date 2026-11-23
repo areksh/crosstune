@@ -22,12 +22,14 @@
  */
 
 import {
+  checkAllOn,
   shortId,
   type AlbumId,
   type AnyId,
   type ArtistId,
   type EntryId,
   type PlaylistId,
+  type ServiceName,
   type TrackId,
 } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
@@ -531,6 +533,7 @@ async function recreate(
   unrestored: Unrestored,
 ): Promise<void> {
   try {
+    checkAllOn(client as { name?: ServiceName }, step.trackIds);
     const playlist = await client.createPlaylist(step.name, {
       isPublic: step.isPublic ?? false,
       ...(step.description !== undefined && { description: step.description }),

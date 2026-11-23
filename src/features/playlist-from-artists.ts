@@ -22,7 +22,13 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
-import type { ArtistId, PlaylistId, TrackId } from "../services/ids.js";
+import {
+  checkAllOn,
+  type ArtistId,
+  type PlaylistId,
+  type ServiceName,
+  type TrackId,
+} from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
@@ -54,6 +60,8 @@ export interface ArtistLookupClient {
 
 /** The client surface needed to create a playlist and add tracks to it. */
 export interface PlaylistWriterClient {
+  /** The service playlists are made on, when the client is one service. */
+  readonly name?: ServiceName;
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
@@ -387,6 +395,8 @@ export async function createPlaylistWithTracks(
     isPublic?: boolean;
   },
 ): Promise<Playlist> {
+  // Before anything is made: songs of another service would leave it empty.
+  checkAllOn(client, options.trackIds);
   const playlist = await client.createPlaylist(options.name, {
     ...(options.description !== undefined && { description: options.description }),
     isPublic: options.isPublic ?? false,

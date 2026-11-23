@@ -165,7 +165,7 @@ async function selectIn(selectId: string, playlistId: PlaylistId): Promise<void>
   const select = el<HTMLSelectElement>(selectId);
   const value = String(playlistId);
   if (![...select.options].some((option) => option.value === value)) {
-    select.appendChild(new Option(`Playlist ${value}`, value));
+    select.appendChild(new Option(`Playlist ${shortId(playlistId)}`, value));
   }
   select.value = value;
   syncForm();
@@ -559,7 +559,7 @@ function openForm(job: Job | undefined): void {
   setChecked("managed-combine-match", combined?.matchSongs ?? true);
 
   // Follow.
-  setValue("managed-follow", source?.type === "follow" ? String(source.playlistId) : "");
+  setValue("managed-follow", source?.type === "follow" ? shortId(source.playlistId) : "");
   setChecked("managed-follow-archive", source?.type === "follow" && source.keepRemoved);
 
   // Smart.

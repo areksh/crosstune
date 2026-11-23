@@ -7,7 +7,7 @@
  * depends on are confirmed by reading the playlist back.
  */
 
-import type { PlaylistId, TrackId } from "../services/ids.js";
+import { checkAllOn, type PlaylistId, type ServiceName, type TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import type { Destination } from "./playlist-draft.js";
 
@@ -85,6 +85,9 @@ export async function addConfirmed(
   onCreated: (playlistId: PlaylistId) => void = () => {},
 ): Promise<ConfirmedAdd> {
   const wanted = [...new Set(trackIds)];
+  if (destination.type === "new") {
+    checkAllOn(client as { name?: ServiceName }, wanted);
+  }
   let playlistId: PlaylistId;
   let before = new Set<TrackId>();
   if (destination.type === "new") {

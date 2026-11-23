@@ -245,6 +245,7 @@ import {
   extractJsonFlag,
   logSinksFor,
   omitKeys,
+  toJson,
   type CommandOutput,
 } from "./cli/output.js";
 import { fileTokenStore, restoreOrLogin } from "./cli/session.js";
@@ -828,7 +829,7 @@ function runJobsOffline(args: JobsArgs): boolean {
       }
       output.assign({ ...view });
       logger.info(formatJobList({ jobs: [view], invalid: [], flags: {} }));
-      logger.info(JSON.stringify(view.job, null, 2));
+      logger.info(toJson(view.job).trimEnd());
       for (const run of view.recentRuns) {
         logger.info(`  ${run.at}  ${describeResult(run.result)}`);
       }

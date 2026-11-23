@@ -2426,3 +2426,21 @@ describe("ids in requests", () => {
     expect(svc.getPlaylistTracks).not.toHaveBeenCalled();
   });
 });
+
+describe("damaged ids inside lists", () => {
+  it.each([
+    ["/api/commit", { trackIds: ["qobuz:1", "nope:2"], target: { type: "new", name: "X" } }],
+    ["/api/commit", { trackIds: ["qobuz:1", 12.5, ""], target: { type: "new", name: "X" } }],
+    ["/api/album-tracks", { albumIds: ["a", "b c"] }],
+    ["/api/deduplicate/apply", { source: { type: "favourites" }, removals: [{ id: "qobuz:1" }, { id: "nope" }] }],
+    ["/api/deduplicate/apply", { source: { type: "playlist", playlistId: 5 }, removals: [{ id: 1, playlistTrackId: "qobuz:1e2" }] }],
+    ["/api/import/commit", { plan: { kind: "tracks", matched: [{ label: "a", id: "qobuz:1" }, { label: "b", id: "x y" }] }, target: { type: "favourites" } }],
+  ])("refuse the whole request: %s %j", async (path, body) => {
+    const svc = service();
+    const res = await handleApi(request("POST", path, body), deps({ service: svc }));
+    expect(res.status).toBe(400);
+    for (const write of ["createPlaylist", "addTracksToPlaylist", "addFavoriteTracks", "removeFavoriteTracks", "removeTracksFromPlaylist"] as const) {
+      expect(svc[write]).not.toHaveBeenCalled();
+    }
+  });
+});

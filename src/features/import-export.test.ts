@@ -723,3 +723,37 @@ describe("ids in exported files", () => {
     expect(parsed.items.map((item) => ("id" in item ? item.id : undefined))).toEqual(["qobuz:12", "qobuz:13"]);
   });
 });
+
+describe("ids in files from elsewhere", () => {
+  const search = () => vi.fn(async () => [{ id: qid(5), title: "Roads", artist: "Portishead" }] as Track[]);
+
+  it.each([
+    ["json", JSON.stringify({ tracks: [{ id: "77640617", title: "Roads", artist: "Portishead" }] })],
+    ["json", JSON.stringify({ tracks: [{ id: "spotify:track:4iV5", title: "Roads", artist: "Portishead" }] })],
+    ["json", JSON.stringify({ tracks: [{ id: "tidal:9", title: "Roads", artist: "Portishead" }] })],
+    ["csv", "title,artist,id\nRoads,Portishead,spotify:track:4iV5"],
+    ["csv", "title,artist,id\nRoads,Portishead,4iV5W9uYEdYUVa79Axb7Rh"],
+  ] as const)("searches for a %s entry whose id is not one of Qobuz's: %s", async (format, text) => {
+    const searchTracks = search();
+    const plan = await resolveImport({ searchTracks, searchAlbums: vi.fn(), searchArtists: vi.fn() } as never, parseCollection(text, format, "tracks"));
+    expect(searchTracks).toHaveBeenCalled();
+    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: qid(5), via: "search" }]);
+  });
+
+  it.each(["12", " 12 ", "12.0", "qobuz:12"])("takes the CSV id %j as Qobuz's", (id) => {
+    const parsed = parseCollection(`title,artist,id\nRoads,Portishead,${id}`, "csv", "tracks");
+    expect(parsed.items[0]).toMatchObject({ id: qid(12) });
+  });
+
+  it("restores nothing when a backup names a song of another service", async () => {
+    const writer = { ...fakeWriter(), name: "qobuz" as const };
+    const backup: LibraryBackup = {
+      formatVersion: 1,
+      exportedAt: "",
+      favourites: { tracks: [{ id: qid(1), title: "a" }], albums: [], artists: [] },
+      playlists: [{ name: "Mix", tracks: [{ id: tagId<TrackId>("tidal", 9), title: "c" }] }],
+    };
+    await expect(restoreBackup(writer, backup)).rejects.toMatchObject({ kind: "bad-id" });
+    expect(writer.calls).toEqual({});
+  });
+});

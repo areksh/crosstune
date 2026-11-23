@@ -126,3 +126,17 @@ describe("ids in --json output", () => {
     expect(omitKeys({ id: "qobuz:12", big: [1] }, ["big"])).toEqual({ id: 12 });
   });
 });
+
+describe("what is not an id", () => {
+  it("stays text under a key that holds no id", () => {
+    expect(JSON.parse(toJson({ name: "qobuz:123", title: "qobuz:5", id: "qobuz:7" }))).toEqual({
+      name: "qobuz:123",
+      title: "qobuz:5",
+      id: 7,
+    });
+  });
+
+  it("keeps failed album ids as text, like album ids", () => {
+    expect(JSON.parse(toJson({ failedAlbumIds: ["qobuz:12345678901"] }))).toEqual({ failedAlbumIds: ["12345678901"] });
+  });
+});

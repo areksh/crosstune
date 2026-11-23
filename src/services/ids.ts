@@ -98,7 +98,24 @@ export function compareIds(a: AnyId, b: AnyId): number {
 const BARE_NUMBER = /^[1-9]\d{0,15}$/;
 const BARE_ALBUM = /^[a-z0-9]+$/i;
 
-/** An id from outside: a tagged one, or a bare number, which is Qobuz's. */
+/**
+ * Refuse a list that is not all of the client's service, before anything is
+ * written. A client without a name (a tool's own small interface) is not checked.
+ *
+ * @throws {ServiceError} kind `bad-id`.
+ */
+export function checkAllOn(client: { readonly name?: ServiceName }, ids: readonly AnyId[]): void {
+  if (client.name !== undefined) {
+    for (const id of ids) {
+      nativeOf(client.name, id);
+    }
+  }
+}
+
+/**
+ * An id from outside: a tagged one, or a bare number, which is Qobuz's. Qobuz's
+ * must be written as Qobuz writes it, so that one thing has one id.
+ */
 export function readId<T extends AnyId>(value: unknown): T | undefined {
   if (typeof value === "number") {
     return Number.isSafeInteger(value) && value > 0 ? tagId<T>("qobuz", value) : undefined;
@@ -109,7 +126,10 @@ export function readId<T extends AnyId>(value: unknown): T | undefined {
   if (BARE_NUMBER.test(value)) {
     return Number.isSafeInteger(Number(value)) ? tagId<T>("qobuz", value) : undefined;
   }
-  return parseId(value) === undefined ? undefined : (value as T);
+  const parsed = parseId(value);
+  return parsed === undefined || (parsed.service === "qobuz" && !BARE_NUMBER.test(parsed.native))
+    ? undefined
+    : (value as T);
 }
 
 /** An album id from outside: a tagged one, or a bare one, which is Qobuz's. */
@@ -117,9 +137,11 @@ export function readAlbumId(value: unknown): AlbumId | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-  return BARE_ALBUM.test(value)
-    ? tagId<AlbumId>("qobuz", value)
-    : parseId(value) === undefined
-      ? undefined
-      : (value as AlbumId);
+  if (BARE_ALBUM.test(value)) {
+    return tagId<AlbumId>("qobuz", value);
+  }
+  const parsed = parseId(value);
+  return parsed === undefined || (parsed.service === "qobuz" && !BARE_ALBUM.test(parsed.native))
+    ? undefined
+    : (value as AlbumId);
 }

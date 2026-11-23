@@ -49,7 +49,7 @@ function route(): void {
     closeEditor();
     return;
   }
-  const open = id === undefined ? undefined : readId<PlaylistId>(decodeURIComponent(id));
+  const open = id === undefined ? undefined : idInHash(id);
   el("pl-list-page").hidden = open !== undefined;
   el("pl-editor").hidden = open === undefined;
   if (open !== undefined) {
@@ -386,6 +386,15 @@ function renderHit({ entry, as, names }: ArtistHit, playlistId: PlaylistId): HTM
     row.append(note);
   }
   return row;
+}
+
+/** The playlist a hash names; an address that cannot be read names none. */
+function idInHash(text: string): PlaylistId | undefined {
+  try {
+    return readId<PlaylistId>(decodeURIComponent(text));
+  } catch {
+    return undefined;
+  }
 }
 
 function tickedHits(): Map<PlaylistId, EntryId[]> {
