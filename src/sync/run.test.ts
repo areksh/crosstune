@@ -231,6 +231,15 @@ describe("a repeated song a copy cannot remove one of (Spotify)", () => {
     }
   });
 
+  // Live, the report said "Spotify: 1 song removed" of a repeat it kept.
+  it("does not report a repeat it kept as removed", async () => {
+    const w = await linked([1, 2, 1, 3], ["qobuz", "spotify"]);
+    w.at("spotify").account.readdsRepeats = true;
+    w.edit("qobuz", () => [2, 1, 3]);
+    const outcome = await w.sync();
+    expect(outcome.changes.find((change) => change.service === "spotify")?.removed ?? 0).toBe(0);
+  });
+
   it("answered removed, goes from that copy too", async () => {
     const w = await repeated();
     const [question] = w.state.questions;

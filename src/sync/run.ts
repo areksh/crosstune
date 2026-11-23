@@ -413,7 +413,11 @@ async function carryOut(
     const done: LinkState = { ...rest, base: written.base, questions: [...plan.questions, ...written.questions] };
     next.base = written.base;
     input.save(done);
-    return { status: "synced", state: done, changes: report, gaps: gaps() };
+    // A repeat kept (and asked about) was not removed.
+    const changes = report
+      .map((change) => ({ ...change, removed: change.removed - (written.kept.get(change.service) ?? 0) }))
+      .filter((change) => change.added > 0 || change.removed > 0 || change.moved || change.renamed);
+    return { status: "synced", state: done, changes, gaps: gaps() };
   } catch (error) {
     return {
       status: "failed",
@@ -437,9 +441,10 @@ async function write(
   base: SyncBase,
   answers: LinkState["answers"],
   progress?: (base: SyncBase, left: PendingSync["copies"]) => void,
-): Promise<{ base: SyncBase; questions: Question[] }> {
+): Promise<{ base: SyncBase; questions: Question[]; kept: Map<ServiceName, number> }> {
   const songs = base.songs.map((song) => ({ ...song, ids: { ...song.ids } }));
   const questions: Question[] = [];
+  const kept = new Map<ServiceName, number>();
   const services = copies.map((copy) => copy.service);
   const left = new Map(plans.map((plan) => [plan.service, plan]));
   const now = (): SyncBase => ({ ...base, songs: songs.filter((song) => Object.keys(song.ids).length > 0) });
@@ -458,6 +463,7 @@ async function write(
       }
     }
     // A repeat it could not take out stays, there only, until the user says.
+    kept.set(plan.service, result.kept.length);
     for (const { track, at } of result.kept) {
       let seen = 0;
       const place = songs.findIndex((song) => song.ids[plan.service] !== undefined && seen++ === at);
@@ -473,7 +479,7 @@ async function write(
       );
     }
   }
-  return { base: now(), questions };
+  return { base: now(), questions, kept };
 }
 
 function count(ids: readonly TrackId[]): Map<TrackId, number> {
