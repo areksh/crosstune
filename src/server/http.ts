@@ -20,8 +20,10 @@ import * as http from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { hostAllowed } from "./security.js";
 import {
   handleApi,
+  refusal,
   type ApiDeps,
   type ApiResponse,
   type QobuzApiService,
@@ -41,6 +43,26 @@ const STATIC_FILES: Record<string, string> = {
   "/fonts/archivo-latin-wdth.woff2": "font/woff2",
   "/fonts/archivo-latin-ext-wdth.woff2": "font/woff2",
 };
+
+/**
+ * The most a request body may be. The largest legitimate one is an import or a
+ * restored backup, sent as one JSON string; 32 MiB is far beyond any library.
+ */
+export const MAX_BODY_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Sent with every response. The page loads only its own script, styles and
+ * fonts (no inline script or style) and cover images from the services'
+ * https servers; nothing may frame it, embed objects or change its base URL.
+ */
+export const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Content-Security-Policy":
+    "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; " +
+    "img-src 'self' https: data: blob:; connect-src 'self'; " +
+    "base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'",
+} as const;
 
 /** Never used: with `accounts`, each request names its service. */
 const NO_SERVICE = {} as QobuzApiService;
@@ -62,6 +84,8 @@ export interface StartServerOptions {
   /** For the playlist manager (see ApiDeps). */
   ownerId?: ApiDeps["ownerId"];
   acquireWriteLock?: ApiDeps["acquireWriteLock"];
+  /** The most a request body may be; defaults to {@link MAX_BODY_BYTES}. */
+  maxBodyBytes?: number;
   /** Port to bind; 0 (default) picks an ephemeral free port. */
   port?: number;
   /** Directory holding the built frontend; defaults to the bundled `dist/web`. */
@@ -115,7 +139,7 @@ export function startServer(
   const server = http.createServer((req, res) => {
     handle(req, res, options, nonce, staticDir).catch(() => {
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
+        res.writeHead(500, { ...SECURITY_HEADERS, "Content-Type": "application/json" });
       }
       res.end(JSON.stringify({ error: "internal error" }));
     });
@@ -149,15 +173,27 @@ async function handle(
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const path = url.pathname;
 
+  const address = res.socket?.localPort ?? 0;
+
   if (path.startsWith("/api/")) {
-    const body = await readJsonBody(req);
-    const address = res.socket?.localPort ?? 0;
+    const headers = extractHeaders(req.headers);
+    // Refuse a stranger before reading anything it sends.
+    const refused = refusal(headers, { nonce, port: address });
+    if (refused !== undefined) {
+      sendResponse(res, refused, true);
+      return;
+    }
+    const read = await readJsonBody(req, options.maxBodyBytes ?? MAX_BODY_BYTES);
+    if (read.tooLarge) {
+      sendResponse(res, { status: 413, body: { error: "request body too large" } }, true);
+      return;
+    }
     const response = await handleApi(
       {
         method: req.method ?? "GET",
         path,
-        headers: extractHeaders(req.headers),
-        body,
+        headers,
+        body: read.body,
       },
       {
         service: options.service ?? NO_SERVICE,
@@ -177,6 +213,11 @@ async function handle(
     return;
   }
 
+  if (!hostAllowed(extractHeaders(req.headers).host, address)) {
+    res.writeHead(403, { ...SECURITY_HEADERS, "Content-Type": "text/plain" });
+    res.end("Forbidden");
+    return;
+  }
   serveStatic(res, path, staticDir, nonce);
 }
 
@@ -188,7 +229,7 @@ function serveStatic(
 ): void {
   const contentType = contentTypeFor(path);
   if (contentType === undefined) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain" });
     res.end("Not found");
     return;
   }
@@ -198,14 +239,14 @@ function serveStatic(
   try {
     content = readFileSync(join(staticDir, fileName));
   } catch {
-    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain" });
     res.end("Not found");
     return;
   }
   if (fileName === "index.html") {
     content = injectNonce(content.toString("utf8"), nonce);
   }
-  res.writeHead(200, { "Content-Type": contentType });
+  res.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": contentType });
   res.end(content);
 }
 
@@ -242,23 +283,54 @@ export function encodeResponse(response: ApiResponse): EncodedResponse {
   };
 }
 
-function sendResponse(res: http.ServerResponse, response: ApiResponse): void {
+/** Write a response; `close` also drops the connection after it (an unread body is left behind). */
+function sendResponse(res: http.ServerResponse, response: ApiResponse, close = false): void {
   const { status, headers, payload } = encodeResponse(response);
-  res.writeHead(status, headers);
-  res.end(payload);
+  res.writeHead(status, { ...SECURITY_HEADERS, ...headers, ...(close && { Connection: "close" }) });
+  res.end(payload, () => {
+    if (close) {
+      res.req.destroy();
+    }
+  });
 }
 
-async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+/**
+ * Read a JSON body, buffering at most `limit` bytes: past that it stops
+ * reading and says so. The body is undefined when empty or not JSON.
+ */
+export function readJsonBody(
+  req: http.IncomingMessage,
+  limit: number,
+): Promise<{ tooLarge: true } | { tooLarge: false; body: unknown }> {
+  const declared = Number(single(req.headers["content-length"]));
+  if (declared > limit) {
+    return Promise.resolve({ tooLarge: true });
   }
-  if (chunks.length === 0) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return undefined;
-  }
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const onData = (chunk: Buffer): void => {
+      size += chunk.length;
+      if (size > limit) {
+        req.off("data", onData);
+        req.pause();
+        resolve({ tooLarge: true });
+        return;
+      }
+      chunks.push(chunk);
+    };
+    req.on("data", onData);
+    req.once("end", () => {
+      if (chunks.length === 0) {
+        resolve({ tooLarge: false, body: undefined });
+        return;
+      }
+      try {
+        resolve({ tooLarge: false, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+      } catch {
+        resolve({ tooLarge: false, body: undefined });
+      }
+    });
+    req.once("error", reject);
+  });
 }

@@ -299,17 +299,26 @@ const MIN_TRACKS_PER_ARTIST = 1;
 const MAX_TRACKS_PER_ARTIST = 100;
 const DEFAULT_TRACKS_PER_ARTIST = 10;
 
+/**
+ * The refusal for a request whose headers do not authorise it, or undefined
+ * when it may proceed. The socket glue asks this before it reads a body.
+ */
+export function refusal(
+  headers: ApiRequest["headers"],
+  deps: Pick<ApiDeps, "nonce" | "port">,
+): ApiResponse | undefined {
+  const auth = authorise(headers, { expectedNonce: deps.nonce, port: deps.port });
+  return auth.ok ? undefined : { status: 403, body: { error: `forbidden: ${auth.reason}` } };
+}
+
 /** Authorise, then dispatch an API request, mapping upstream failures to 5xx. */
 export async function handleApi(
   req: ApiRequest,
   deps: ApiDeps,
 ): Promise<ApiResponse> {
-  const auth = authorise(req.headers, {
-    expectedNonce: deps.nonce,
-    port: deps.port,
-  });
-  if (!auth.ok) {
-    return { status: 403, body: { error: `forbidden: ${auth.reason}` } };
+  const forbidden = refusal(req.headers, deps);
+  if (forbidden !== undefined) {
+    return forbidden;
   }
   try {
     if (deps.accounts !== undefined && req.path.startsWith(ACCOUNTS_PREFIX)) {
