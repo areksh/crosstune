@@ -1,7 +1,8 @@
 # Several music services -- design
 
 - Date: 2026-11-23
-- Status: awaiting the user's approval; a builder's questions are settled in the
+- Status: approved 2026-11-23 (the user: proceed without further approvals unless
+  something unexpected comes up); a builder's questions are settled in the
   text (section 11 lists them)
 - Builds on: ADR-0001, 0002 (local server, resolve/commit), 0003 (import),
   0006 (history), 0007-0008 (jobs), 0009 (drafts).
