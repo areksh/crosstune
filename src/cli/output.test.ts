@@ -14,6 +14,13 @@ describe("extractJsonFlag", () => {
     });
   });
 
+  it("leaves a --json after a bare -- alone (it is a value there)", () => {
+    expect(extractJsonFlag(["playlist-from-artists", "--json", "--", "--json"])).toEqual({
+      json: true,
+      rest: ["playlist-from-artists", "--", "--json"],
+    });
+  });
+
   it("is off when absent, and leaves other arguments alone", () => {
     expect(extractJsonFlag(["import", "--json-ish", "f.json"])).toEqual({
       json: false,

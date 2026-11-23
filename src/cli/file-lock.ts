@@ -5,11 +5,29 @@
  *
  * The lock is a file created exclusively (`wx`) holding who took it. A lock is
  * taken over when it is stale: its process is gone (judged only on the same
- * host), it is older than `staleMs`, or it cannot be read and is more than a
- * few seconds old (a fresh one may still be being written).
+ * host), it is older than `staleMs` while its host cannot be asked whether the
+ * process lives (a lock held on this host by a live process is never stale, so
+ * a long job does not get a second runner), or it cannot be read and is more
+ * than a few seconds old (a fresh one may still be being written).
+ *
+ * A takeover is atomic: the stale file is renamed aside (one process wins the
+ * rename), checked to be the holder that was judged stale, and only then
+ * removed. Removing it by path would let a slow second judge delete a lock
+ * that a faster process had just taken over, leaving two holders.
  */
 
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 
@@ -20,7 +38,7 @@ export interface LockInfo {
 }
 
 export interface LockOptions {
-  /** A lock older than this is stale whoever holds it (default 2 hours). */
+  /** A lock from another host older than this is stale (default 2 hours). */
   staleMs?: number;
   now?: () => Date;
   isAlive?: (pid: number) => boolean;
@@ -84,20 +102,69 @@ export function tryAcquireLock(path: string, options: LockOptions = {}): FileLoc
       return {
         path,
         release: () => {
-          const holder = readLock(path);
-          if (holder !== undefined && holder.pid === info.pid && holder.startedAt === info.startedAt) {
-            rmSync(path, { force: true });
+          // Move it aside before looking, so a takeover cannot slip in between
+          // the look and the removal.
+          const aside = takeAside(path);
+          if (aside === undefined) {
+            return;
+          }
+          if (sameHolder(readLock(aside), info)) {
+            rmSync(aside, { force: true });
+          } else {
+            putBack(aside, path);
           }
         },
       };
     }
-    if (attempt === 0 && isStale(path, readLock(path), info.host, now(), options)) {
-      rmSync(path, { force: true });
-      continue;
+    if (attempt === 0) {
+      const judged = readLock(path);
+      if (isStale(path, judged, info.host, now(), options)) {
+        const aside = takeAside(path);
+        if (aside === undefined) {
+          continue; // someone else took it first; try to create once more
+        }
+        if (sameHolder(readLock(aside), judged)) {
+          rmSync(aside, { force: true });
+          continue;
+        }
+        // A fresh lock was swapped in after we judged: give it back.
+        putBack(aside, path);
+      }
     }
     return undefined;
   }
   return undefined;
+}
+
+/** Rename the lock file aside, or undefined if it is already gone. */
+function takeAside(path: string): string | undefined {
+  const aside = `${path}.stale-${process.pid}-${randomBytes(4).toString("hex")}`;
+  try {
+    renameSync(path, aside);
+    return aside;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/** Best effort: restore a file taken aside by mistake, unless the path is taken again. */
+function putBack(aside: string, path: string): void {
+  try {
+    linkSync(aside, path); // fails, rather than overwrites, if the path exists
+  } catch {
+    // Someone took the lock meanwhile; theirs stands.
+  }
+  rmSync(aside, { force: true });
+}
+
+function sameHolder(a: LockInfo | undefined, b: LockInfo | undefined): boolean {
+  if (a === undefined || b === undefined) {
+    return a === b;
+  }
+  return a.pid === b.pid && a.startedAt === b.startedAt && a.host === b.host;
 }
 
 /** Take the lock, trying for up to `waitMs` while someone else holds it. */
@@ -153,10 +220,10 @@ function isStale(
       return true; // gone already
     }
   }
-  const age = now.getTime() - Date.parse(holder.startedAt);
-  if (!Number.isFinite(age) || age > (options.staleMs ?? DEFAULT_STALE_MS)) {
-    return true;
+  if (holder.host === host) {
+    // Liveness can be asked: age alone never makes a live holder stale.
+    return !(options.isAlive ?? processIsAlive)(holder.pid);
   }
-  const isAlive = options.isAlive ?? processIsAlive;
-  return holder.host === host && !isAlive(holder.pid);
+  const age = now.getTime() - Date.parse(holder.startedAt);
+  return !Number.isFinite(age) || age > (options.staleMs ?? DEFAULT_STALE_MS);
 }

@@ -38,7 +38,12 @@ export function fileLinkStore(dir: string = configDir()) {
     } catch (error) {
       throw new Error(`${path} cannot be read (${error instanceof Error ? error.message : String(error)}); fix or remove it`);
     }
-    return { raw: (raw as { links?: unknown[] }).links ?? [], parsed: parseLinksFile(raw) };
+    // Valid JSON of the wrong shape (`null`, `{"links":5}`) is as unreadable as bad JSON.
+    const links = typeof raw === "object" && raw !== null ? (raw as { links?: unknown }).links : undefined;
+    if (typeof raw !== "object" || raw === null || (links !== undefined && !Array.isArray(links))) {
+      throw new Error(`${path} cannot be read (not a links file); fix or remove it`);
+    }
+    return { raw: (links as unknown[] | undefined) ?? [], parsed: parseLinksFile(raw) };
   };
   return {
     load: () => read().parsed,

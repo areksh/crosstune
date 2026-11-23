@@ -78,7 +78,7 @@ export interface ExtractedLogLevel {
  *
  * The option is global -- it may appear anywhere, before or after the command
  * and its own options -- so it is stripped here before per-command parsing.
- * Defaults to `info` when absent.
+ * It is not looked for after a bare `--`. Defaults to `info` when absent.
  *
  * @throws {Error} if the value is missing or not a valid level name.
  */
@@ -88,6 +88,11 @@ export function extractLogLevel(argv: readonly string[]): ExtractedLogLevel {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg === "--") {
+      // The options end here: what follows is values, left untouched.
+      rest.push(...argv.slice(i));
+      break;
+    }
     if (arg === "--loglevel") {
       const raw = argv[i + 1];
       i += 1;
@@ -408,6 +413,33 @@ function isKeepStrategy(value: string | undefined): value is KeepStrategy {
 }
 
 /**
+ * The value of the option at `argv[i]`: the next argument. A missing value, or
+ * one that is itself an option (`--name --public`), is an error rather than
+ * silently swallowing the next flag.
+ */
+function optionValue(argv: readonly string[], i: number): string {
+  const flag = argv[i];
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
+
+/**
+ * A positional argument in a command that takes free-form ones (artist names,
+ * album lines, a file). Anything starting `--` that the command did not
+ * recognise is a mistyped option and an error, not a name; a bare `--` ends the
+ * options so a value that begins `--` can still be given after it.
+ */
+function positionalArg(arg: string): string {
+  if (arg.startsWith("--")) {
+    throw new Error(`Unknown option "${arg}" (put -- before a value that starts with --)`);
+  }
+  return arg;
+}
+
+/**
  * Parse the arguments for the `playlist-from-artists` command.
  *
  * Recognised options: `--name <name>` (required), `--tracks <n>` (positive
@@ -427,20 +459,29 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
   const filter = new FilterFlags(false);
   const plan = new PlanFlags(PLAYLIST_ORDERS);
 
+  let rest = false; // after a bare `--`
   for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (rest) {
+      artists.push(arg!);
+      continue;
+    }
+    if (arg === "--") {
+      rest = true;
+      continue;
+    }
     const used = filter.take(argv, i) || plan.take(argv, i);
     if (used > 0) {
       i += used - 1;
       continue;
     }
-    const arg = argv[i];
     switch (arg) {
       case "--name":
-        playlistName = argv[i + 1];
+        playlistName = optionValue(argv, i);
         i += 1;
         break;
       case "--tracks": {
-        const raw = argv[i + 1];
+        const raw = optionValue(argv, i);
         i += 1;
         const value = Number(raw);
         if (!Number.isInteger(value) || value <= 0) {
@@ -454,7 +495,7 @@ export function parsePlaylistArgs(argv: readonly string[]): PlaylistArgs {
         break;
       default:
         if (arg !== undefined) {
-          artists.push(arg);
+          artists.push(positionalArg(arg));
         }
     }
   }
@@ -505,20 +546,29 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
   const filter = new FilterFlags(true);
   const plan = new PlanFlags(ALBUM_ORDERS);
 
+  let rest = false; // after a bare `--`
   for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (rest) {
+      entries.push(arg!);
+      continue;
+    }
+    if (arg === "--") {
+      rest = true;
+      continue;
+    }
     const used = filter.take(argv, i) || plan.take(argv, i);
     if (used > 0) {
       i += used - 1;
       continue;
     }
-    const arg = argv[i];
     switch (arg) {
       case "--name":
-        playlistName = argv[i + 1];
+        playlistName = optionValue(argv, i);
         i += 1;
         break;
       case "--prefer": {
-        const raw = argv[i + 1];
+        const raw = optionValue(argv, i);
         i += 1;
         if (!isAlbumPreference(raw)) {
           throw new Error(
@@ -534,14 +584,14 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
       case "--discography": {
         const raw = argv[i + 1]?.trim();
         i += 1;
-        if (raw === undefined || raw.length === 0) {
+        if (raw === undefined || raw.length === 0 || raw.startsWith("--")) {
           throw new Error("--discography requires an artist name");
         }
         discographyArtist = raw;
         break;
       }
       case "--include":
-        include = parseIncludeList(argv[i + 1] ?? "");
+        include = parseIncludeList(optionValue(argv, i));
         i += 1;
         break;
       case "--all-versions":
@@ -549,7 +599,7 @@ export function parseAlbumArgs(argv: readonly string[]): AlbumPlaylistArgs {
         break;
       default:
         if (arg !== undefined) {
-          entries.push(arg);
+          entries.push(positionalArg(arg));
         }
     }
   }
@@ -748,8 +798,17 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
   let isPublic = false;
   let apply = false;
 
+  let rest = false; // after a bare `--`
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (rest) {
+      files.push(arg!);
+      continue;
+    }
+    if (arg === "--") {
+      rest = true;
+      continue;
+    }
     switch (arg) {
       case "--favourites":
       case "--favorites":
@@ -764,7 +823,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
         targets.push({ type: "favourite-artists" });
         break;
       case "--playlist": {
-        const raw = argv[i + 1];
+        const raw = optionValue(argv, i);
         i += 1;
         const value = parsePlaylistId(raw);
         if (value === undefined) {
@@ -774,7 +833,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
         break;
       }
       case "--new-playlist": {
-        const name = argv[i + 1];
+        const name = optionValue(argv, i);
         i += 1;
         if (name === undefined || name.length === 0) {
           throw new Error("--new-playlist requires a name");
@@ -786,7 +845,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
         targets.push({ type: "account" });
         break;
       case "--format": {
-        const raw = argv[i + 1];
+        const raw = optionValue(argv, i);
         i += 1;
         if (!isImportFormat(raw)) {
           throw new Error(
@@ -804,7 +863,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
         break;
       default:
         if (arg !== undefined) {
-          files.push(arg);
+          files.push(positionalArg(arg));
         }
     }
   }

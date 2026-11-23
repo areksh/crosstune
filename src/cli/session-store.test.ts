@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,23 @@ describe("session-store", () => {
     saveToken("secret", file);
     const mode = statSync(file).mode & 0o777;
     expect(mode).toBe(0o600);
+  });
+
+  it("replaces the file by rename, never writing it in place", () => {
+    saveToken("first", file);
+    const before = statSync(file).ino;
+    saveToken("second", file);
+    // A write in place keeps the inode (and can leave the file truncated if it
+    // is interrupted); a temporary file renamed over it does not.
+    expect(statSync(file).ino).not.toBe(before);
+    expect(loadToken(file)).toBe("second");
+    expect(readdirSync(join(dir, "nested"))).toEqual(["session.json"]);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates its directory owner-only", () => {
+    saveToken("tok", file);
+    expect(statSync(join(dir, "nested")).mode & 0o777).toBe(0o700);
   });
 
   it("returns undefined when no token is stored", () => {
