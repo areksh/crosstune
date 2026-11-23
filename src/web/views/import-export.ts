@@ -9,6 +9,7 @@
  * matching and writing all live in the tested server modules.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { api, apiDownload, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 
@@ -28,7 +29,7 @@ interface ImportPlan {
 type ImportTarget =
   | { type: "favourites" }
   | { type: "playlist-new"; name: string; isPublic?: boolean }
-  | { type: "playlist-existing"; playlistId: number };
+  | { type: "playlist-existing"; playlistId: PlaylistId };
 
 let exportPlaylistsLoaded = false;
 let importPlaylistsLoaded = false;
@@ -126,7 +127,7 @@ function exportSourceBody():
         | "account"
         | "all-playlists";
     }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | undefined {
   const source = exportSource();
   if (source === "playlist") {

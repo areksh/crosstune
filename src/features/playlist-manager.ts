@@ -11,6 +11,7 @@
  * cannot play without an error.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
 import {
   linkLines,
@@ -26,16 +27,16 @@ import { mergeOrder, planOrder } from "./playlist-order.js";
 
 /** Reads playlists; QobuzClient satisfies it. */
 export interface PlaylistReadClient {
-  getPlaylist(playlistId: number): Promise<Playlist>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylist(playlistId: PlaylistId): Promise<Playlist>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 /** What saving needs; QobuzClient satisfies it. */
 export interface SaveClient extends ConfirmedAddClient {
-  removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+  removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
   movePlaylistTracks?(
-    playlistId: number,
-    playlistTrackIds: readonly number[],
+    playlistId: PlaylistId,
+    playlistTrackIds: readonly EntryId[],
     insertBefore: number,
   ): Promise<void>;
 }
@@ -48,7 +49,7 @@ export function toEntries(tracks: readonly Track[]): Entry[] {
 /** A playlist's details and entries, for the editor. */
 export async function openPlaylist(
   client: PlaylistReadClient,
-  playlistId: number,
+  playlistId: PlaylistId,
 ): Promise<{ playlist: Playlist; entries: Entry[] }> {
   const [playlist, tracks] = await Promise.all([
     client.getPlaylist(playlistId),
@@ -76,7 +77,7 @@ export interface ManagerPlaylist extends Playlist {
 // ---- Saving -----------------------------------------------------------------
 
 export interface SaveRequest extends DraftChanges {
-  playlistId: number;
+  playlistId: PlaylistId;
 }
 
 /** Why a save cannot be what a draft produced, or undefined. */
@@ -101,7 +102,7 @@ export function saveProblem(request: SaveRequest): string | undefined {
 
 /** A track a report names. */
 export interface TrackRef {
-  trackId: number;
+  trackId: TrackId;
   title: string;
   artist?: string;
 }
@@ -115,7 +116,7 @@ export type SaveOutcome =
       reordered: boolean;
       moved: ConfirmedAdd[];
       /** Playlists made for moves, even when a later step failed. */
-      created: Array<{ destination: Destination; playlistId: number }>;
+      created: Array<{ destination: Destination; playlistId: PlaylistId }>;
       /** Songs to be moved that stay, as they did not arrive. */
       kept: TrackRef[];
       /** The step that failed (those after it were not done), and why. */
@@ -214,7 +215,7 @@ async function moveOut(
   client: SaveClient,
   destination: Destination,
   entries: readonly Entry[],
-  created: Array<{ destination: Destination; playlistId: number }>,
+  created: Array<{ destination: Destination; playlistId: PlaylistId }>,
 ): Promise<{ add?: ConfirmedAdd; arrived: Set<number> }> {
   // No playlist is made for songs that will not arrive.
   if (destination.type === "new" && entries.every((entry) => entry.streamable === false)) {
@@ -240,7 +241,7 @@ function messageOf(error: unknown): string {
  */
 export async function duplicatePlaylist(
   client: ConfirmedAddClient,
-  playlistId: number,
+  playlistId: PlaylistId,
   options: { name: string; isPublic?: boolean; description?: string },
 ): Promise<{ playlist: Playlist; added: number; missing: number }> {
   const trackIds = (await client.getPlaylistTracks(playlistId)).map((track) => track.id);
@@ -303,7 +304,7 @@ export interface RemoveArtistsPlan {
 
 /** Find the listed artists' songs in playlists (nothing is written). */
 export async function resolveRemoveArtists(
-  client: ArtistLookupClient & { getPlaylistTracks(playlistId: number): Promise<Track[]> },
+  client: ArtistLookupClient & { getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]> },
   playlists: readonly PlaylistRef[],
   lines: readonly string[],
 ): Promise<RemoveArtistsPlan> {
@@ -354,12 +355,12 @@ function hitsIn(entries: readonly Entry[], terms: ParsedArtistTerms["terms"]): A
 
 /** Entries to take out of one playlist. */
 export interface PlaylistRemoval {
-  playlistId: number;
+  playlistId: PlaylistId;
   entries: readonly number[];
 }
 
 export interface RemovalReport {
-  playlistId: number;
+  playlistId: PlaylistId;
   removed: number;
   error?: string;
 }
@@ -370,8 +371,8 @@ export interface RemovalReport {
  */
 export async function commitRemovals(
   client: {
-    getPlaylistTracks(playlistId: number): Promise<Track[]>;
-    removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+    getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
+    removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
   },
   removals: readonly PlaylistRemoval[],
 ): Promise<RemovalReport[]> {

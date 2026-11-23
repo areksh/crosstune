@@ -4,6 +4,7 @@
  * leave it upstream stay here.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import type { Track } from "../../services/model.js";
 import { capList, CHECKED_CAP, type FollowSource, type SourceState } from "../model.js";
 import type { DesiredTrack } from "../reconcile.js";
@@ -13,7 +14,7 @@ import { message, type SourceResult } from "./common.js";
 export const ARCHIVE_CAP = CHECKED_CAP * 2;
 
 export async function resolveFollow(
-  client: { getPlaylistTracks(playlistId: number): Promise<Track[]> },
+  client: { getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]> },
   def: FollowSource,
   ctx: { state: SourceState },
 ): Promise<SourceResult> {

@@ -22,6 +22,7 @@
  * {@link MAX_ARTISTS}; the plan says when the cap cut the list short.
  */
 
+import type { AlbumId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Album, Artist, Playlist, Release, ReleaseType, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { editionKey, isByArtist, type ArtistReleasesClient } from "./discography.js";
@@ -43,13 +44,13 @@ import {
 export interface NewReleasesClient extends ArtistReleasesClient {
   getFavoriteArtists(): Promise<Artist[]>;
   getFavoriteAlbums(): Promise<Album[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 /** Whose releases to look at. */
 export type ArtistSource =
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "artists"; artists: readonly Artist[] };
 
 /**
@@ -337,7 +338,7 @@ export type NewReleasesTarget =
 
 /** The client surface needed to commit new releases. */
 export interface CommitNewReleasesClient extends AlbumTracksClient, PlaylistWriterClient {
-  addFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
+  addFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
 }
 
 export type CommitNewReleasesResult =
@@ -362,7 +363,7 @@ export type CommitNewReleasesResult =
  */
 export async function commitNewReleases(
   client: CommitNewReleasesClient,
-  options: { albumIds: readonly string[]; target: NewReleasesTarget; filter?: TrackFilter },
+  options: { albumIds: readonly AlbumId[]; target: NewReleasesTarget; filter?: TrackFilter },
 ): Promise<CommitNewReleasesResult> {
   const albumIds = [...new Set(options.albumIds)];
   if (albumIds.length === 0) {
@@ -375,7 +376,7 @@ export async function commitNewReleases(
   }
 
   const { fetched, failedAlbumIds } = await fetchAlbumTracks(client, albumIds, options.filter);
-  const trackIds: number[] = [];
+  const trackIds: TrackId[] = [];
   const seen = new Set<number>();
   let excludedCount = 0;
   for (const album of fetched) {

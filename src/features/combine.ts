@@ -21,6 +21,7 @@
  * pure core.
  */
 
+import type { PlaylistId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { findDuplicateGroups, selectKeeper, toDedupTrack, type DedupTrack } from "./deduplicate.js";
@@ -38,7 +39,7 @@ export type CombineKeep = "highest-quality" | "first";
 export const COMBINE_KEEPS: readonly CombineKeep[] = ["highest-quality", "first"];
 
 /** One input: your favourite tracks or one of your playlists. */
-export type CombineSource = { type: "favourites" } | { type: "playlist"; playlistId: number };
+export type CombineSource = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
 
 /** An input's tracks, with the name it is shown under. */
 export interface CombineInput {
@@ -97,7 +98,7 @@ export interface CombinePlan {
 /** The client surface needed to read the inputs. */
 export interface CombineClient {
   getFavoriteTracks(): Promise<Track[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   getUserPlaylists(): Promise<Playlist[]>;
 }
 

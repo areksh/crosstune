@@ -8,6 +8,7 @@
  * format.ts).
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import {
   describeResult,
   describeSchedule,
@@ -101,7 +102,7 @@ export function initManagedView(): void {
  */
 export function keepUpdated(
   fields: Record<string, string>,
-  options: { include?: readonly string[]; playlistId?: number; inputs?: readonly PlaylistInput[] } = {},
+  options: { include?: readonly string[]; playlistId?: PlaylistId; inputs?: readonly PlaylistInput[] } = {},
 ): void {
   if (saving) {
     return;
@@ -159,7 +160,7 @@ function loadPlaylists(): Promise<void> {
 }
 
 /** Choose a playlist once the list is loaded, adding it when it is not one of yours. */
-async function selectIn(selectId: string, playlistId: number): Promise<void> {
+async function selectIn(selectId: string, playlistId: PlaylistId): Promise<void> {
   await loadPlaylists();
   const select = el<HTMLSelectElement>(selectId);
   const value = String(playlistId);

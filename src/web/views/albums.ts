@@ -13,6 +13,7 @@
  * chosen release.
  */
 
+import type { AlbumId, PlaylistId } from "../../services/ids.js";
 import {
   api,
   type Album,
@@ -48,7 +49,7 @@ interface ResolveResponse {
 }
 
 interface FetchResponse {
-  fetched: { albumId: string; tracks: { track: Track; exclusion?: Exclusion }[] }[];
+  fetched: { albumId: AlbumId; tracks: { track: Track; exclusion?: Exclusion }[] }[];
   failedAlbumIds?: string[];
   /** The run's favourites and songs so far, to send with the next fetch. */
   picker?: unknown;
@@ -56,7 +57,7 @@ interface FetchResponse {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 let resolvedAlbums: ResolvedAlbum[] = [];
 let playlistsLoaded = false;

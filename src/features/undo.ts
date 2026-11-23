@@ -21,6 +21,7 @@
  * or removed, and changed playlist details put back.
  */
 
+import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import {
   laterConflicts,
@@ -35,7 +36,7 @@ import { mergeOrder, planOrder } from "./playlist-order.js";
 
 /** The read planning needs. */
 export interface UndoPlanClient {
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 /** Everything undoing can call; QobuzClient (recorded) satisfies it. */
@@ -44,47 +45,47 @@ export interface UndoClient extends UndoPlanClient {
     name: string,
     options?: { description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
-  deletePlaylist(playlistId: number): Promise<void>;
-  updatePlaylist?(playlistId: number, changes: PlaylistDetails): Promise<Playlist>;
-  addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
-  removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+  deletePlaylist(playlistId: PlaylistId): Promise<void>;
+  updatePlaylist?(playlistId: PlaylistId, changes: PlaylistDetails): Promise<Playlist>;
+  addTracksToPlaylist(playlistId: PlaylistId, trackIds: readonly TrackId[]): Promise<void>;
+  removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
   movePlaylistTracks?(
-    playlistId: number,
-    playlistTrackIds: readonly number[],
+    playlistId: PlaylistId,
+    playlistTrackIds: readonly EntryId[],
     insertBefore: number,
   ): Promise<void>;
-  addFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  addFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
-  addFavoriteArtists(artistIds: readonly number[]): Promise<void>;
-  removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  removeFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
-  removeFavoriteArtists(artistIds: readonly number[]): Promise<void>;
+  addFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  addFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
+  addFavoriteArtists(artistIds: readonly ArtistId[]): Promise<void>;
+  removeFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  removeFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
+  removeFavoriteArtists(artistIds: readonly ArtistId[]): Promise<void>;
 }
 
 /** One reversing step. */
 export type UndoStep =
-  | { kind: "delete-playlist"; playlistId: number; name: string; trackCount: number; trackIds: number[] }
+  | { kind: "delete-playlist"; playlistId: PlaylistId; name: string; trackCount: number; trackIds: TrackId[] }
   | {
       kind: "remove-tracks";
-      playlistId: number;
+      playlistId: PlaylistId;
       name: string;
-      entries: Array<{ playlistTrackId: number; trackId: number }>;
+      entries: Array<{ playlistTrackId: EntryId; trackId: TrackId }>;
     }
   | {
       kind: "restore-tracks";
-      playlistId: number;
+      playlistId: PlaylistId;
       name: string;
       /** The removed entries to put back, in the order they were. */
-      entries: Array<{ playlistTrackId: number; trackId: number }>;
+      entries: Array<{ playlistTrackId: EntryId; trackId: TrackId }>;
       /** The entries in the order to return to, by (old) playlist-track id. */
       order: number[];
     }
-  | { kind: "reorder-playlist"; playlistId: number; name: string; order: number[] }
-  | { kind: "update-playlist"; playlistId: number; name: string; changes: PlaylistDetails }
+  | { kind: "reorder-playlist"; playlistId: PlaylistId; name: string; order: number[] }
+  | { kind: "update-playlist"; playlistId: PlaylistId; name: string; changes: PlaylistDetails }
   | {
       kind: "recreate-playlist";
       name: string;
-      trackIds: number[];
+      trackIds: TrackId[];
       isPublic?: boolean;
       description?: string;
     }
@@ -255,7 +256,7 @@ export async function planUndo(
 /** Plan the reversal of everything `ops` did to one playlist. */
 function planPlaylist(
   plan: UndoPlan,
-  playlistId: number,
+  playlistId: PlaylistId,
   name: string,
   ops: readonly Operation[],
   tracks: Track[] | undefined,
@@ -498,7 +499,7 @@ function entryIds(tracks: readonly Track[]): number[] {
 
 async function moveInto(
   client: UndoClient,
-  playlistId: number,
+  playlistId: PlaylistId,
   current: readonly number[],
   wanted: readonly number[],
 ): Promise<void> {

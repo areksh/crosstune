@@ -27,6 +27,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { toDedupTrack, trackSignature } from "./deduplicate.js";
@@ -34,7 +35,7 @@ import { toDedupTrack, trackSignature } from "./deduplicate.js";
 /** Where the upgrade tool looks for tracks. */
 export type UpgradeSource =
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "all-playlists" };
 
 /** Where a track sits: in the favourites, or as an entry of a playlist. */
@@ -42,11 +43,11 @@ export type TrackLocation =
   | { type: "favourites" }
   | {
       type: "playlist";
-      playlistId: number;
+      playlistId: PlaylistId;
       /** The playlist's name, when known (all-playlists scans). */
       playlistName?: string;
       /** The entry's id within the playlist, needed to remove it. */
-      playlistTrackId: number;
+      playlistTrackId: EntryId;
     };
 
 /**
@@ -117,7 +118,7 @@ export interface UpgradeOptions {
 /** The client surface resolving needs; QobuzClient satisfies it. */
 export interface UpgradeResolverClient {
   getFavoriteTracks(): Promise<Track[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   getUserPlaylists(): Promise<Playlist[]>;
   searchTracks(query: string, limit?: number): Promise<Track[]>;
 }
@@ -435,8 +436,8 @@ export async function resolveUpgradesOf(
 
 /** A change to write: replace a track with another, or remove it. */
 export type UpgradeChange =
-  | { action: "replace"; location: TrackLocation; trackId: number; newTrackId: number }
-  | { action: "remove"; location: TrackLocation; trackId: number };
+  | { action: "replace"; location: TrackLocation; trackId: TrackId; newTrackId: TrackId }
+  | { action: "remove"; location: TrackLocation; trackId: TrackId };
 
 /**
  * The changes a (possibly edited) plan asks for: left items are dropped, and a
@@ -464,19 +465,19 @@ export function planChanges(items: readonly UpgradeItem[]): UpgradeChange[] {
 
 /** The client surface committing needs; QobuzClient satisfies it. */
 export interface UpgradeCommitClient {
-  addFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
-  addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
-  removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+  addFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  removeFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
+  addTracksToPlaylist(playlistId: PlaylistId, trackIds: readonly TrackId[]): Promise<void>;
+  removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
   /**
    * Move entries in front of the entry at the 1-based position `insertBefore`
    * (see QobuzClient.movePlaylistTracks). Optional and best-effort: without
    * it, or when it fails, replacements stay at the end of the playlist.
    */
   movePlaylistTracks?(
-    playlistId: number,
-    playlistTrackIds: readonly number[],
+    playlistId: PlaylistId,
+    playlistTrackIds: readonly EntryId[],
     insertBefore: number,
   ): Promise<void>;
 }
@@ -609,7 +610,7 @@ async function commitFavourites(
 
 async function commitPlaylist(
   client: UpgradeCommitClient,
-  playlistId: number,
+  playlistId: PlaylistId,
   changes: readonly UpgradeChange[],
   result: UpgradeCommitResult,
 ): Promise<void> {
@@ -731,7 +732,7 @@ async function commitPlaylist(
  */
 async function moveIntoPlace(
   client: UpgradeCommitClient,
-  playlistId: number,
+  playlistId: PlaylistId,
   before: readonly Track[],
   deleted: ReadonlySet<UpgradeChange>,
   replaced: readonly UpgradeChange[],

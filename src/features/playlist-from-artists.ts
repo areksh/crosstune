@@ -22,6 +22,7 @@
  * unit-testable against stubs; QobuzClient satisfies them structurally.
  */
 
+import type { ArtistId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
@@ -42,13 +43,13 @@ import {
 
 /** The client surface needed to resolve artists to their top tracks. */
 export interface ArtistResolverClient extends ArtistLookupClient {
-  getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
+  getArtistTopTracks(artistId: ArtistId, limit?: number): Promise<Track[]>;
 }
 
 /** The client surface needed to find an artist by name or by link. */
 export interface ArtistLookupClient {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
-  getArtist(artistId: number): Promise<Artist>;
+  getArtist(artistId: ArtistId): Promise<Artist>;
 }
 
 /** The client surface needed to create a playlist and add tracks to it. */
@@ -58,17 +59,17 @@ export interface PlaylistWriterClient {
     options?: { description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
   addTracksToPlaylist(
-    playlistId: number,
-    trackIds: readonly number[],
+    playlistId: PlaylistId,
+    trackIds: readonly TrackId[],
   ): Promise<void>;
 }
 
 /** The client surface needed to add tracks to an existing playlist. */
 export interface ExistingPlaylistClient {
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   addTracksToPlaylist(
-    playlistId: number,
-    trackIds: readonly number[],
+    playlistId: PlaylistId,
+    trackIds: readonly TrackId[],
   ): Promise<void>;
 }
 
@@ -301,7 +302,7 @@ export async function resolveArtistTracks(
  */
 export async function fetchTopTracks(
   client: Pick<ArtistResolverClient, "getArtistTopTracks">,
-  artistId: number,
+  artistId: ArtistId,
   count: number,
   filter: TrackFilter = NO_FILTER,
   picker?: SongPicker,
@@ -317,7 +318,7 @@ export async function fetchTopTracks(
  */
 export async function fetchTopTrackPool(
   client: Pick<ArtistResolverClient, "getArtistTopTracks">,
-  artistId: number,
+  artistId: ArtistId,
   count: number,
   deep: boolean,
 ): Promise<Track[]> {
@@ -381,7 +382,7 @@ export async function createPlaylistWithTracks(
   client: PlaylistWriterClient,
   options: {
     name: string;
-    trackIds: readonly number[];
+    trackIds: readonly TrackId[];
     description?: string;
     isPublic?: boolean;
   },
@@ -407,7 +408,7 @@ export interface AddToExistingResult {
  */
 export async function addTracksToExistingPlaylist(
   client: ExistingPlaylistClient,
-  options: { playlistId: number; trackIds: readonly number[] },
+  options: { playlistId: PlaylistId; trackIds: readonly TrackId[] },
 ): Promise<AddToExistingResult> {
   const existing = await client.getPlaylistTracks(options.playlistId);
   const present = new Set(existing.map((track) => track.id));

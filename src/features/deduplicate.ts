@@ -16,6 +16,7 @@
  * an injected client or callback.
  */
 
+import type { AlbumId, EntryId, PlaylistId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
@@ -28,8 +29,8 @@ export interface DedupTrack {
   artist: string;
   isrc?: string;
   album?: string;
-  albumId?: string;
-  playlistTrackId?: number;
+  albumId?: AlbumId;
+  playlistTrackId?: EntryId;
   bitDepth?: number;
   samplingRate?: number;
   hires?: boolean;
@@ -430,7 +431,7 @@ function compareByDate(a: DedupTrack, b: DedupTrack, wantOldest: boolean): numbe
  */
 export async function enrichReleaseDates(
   groups: readonly DedupTrack[][],
-  fetchDate: (albumId: string) => Promise<string | undefined>,
+  fetchDate: (albumId: AlbumId) => Promise<string | undefined>,
 ): Promise<DedupTrack[][]> {
   const cache = new Map<string, string | undefined>();
   const result: DedupTrack[][] = [];
@@ -597,8 +598,8 @@ export function findSongsAcrossPlaylists(
 /** The client surface the all-playlists scan needs; QobuzClient satisfies it. */
 export interface AllPlaylistsClient {
   getUserPlaylists(): Promise<Playlist[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
-  getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
+  getAlbumReleaseDate(albumId: AlbumId): Promise<string | undefined>;
 }
 
 /** The result of scanning every playlist. */
@@ -658,8 +659,8 @@ export async function scanAllPlaylists(
 
 /** An entry to remove from a playlist. */
 export interface PlaylistEntry {
-  playlistId: number;
-  playlistTrackId: number;
+  playlistId: PlaylistId;
+  playlistTrackId: EntryId;
 }
 
 /**
@@ -684,7 +685,7 @@ export function entriesByPlaylist(entries: readonly PlaylistEntry[]): Map<number
  */
 export async function removePlaylistEntries(
   client: {
-    removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+    removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
   },
   entries: readonly PlaylistEntry[],
 ): Promise<number> {

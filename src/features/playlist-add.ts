@@ -7,12 +7,13 @@
  * depends on are confirmed by reading the playlist back.
  */
 
+import type { PlaylistId, TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import type { Destination } from "./playlist-draft.js";
 
 /** Adds tracks; QobuzClient satisfies it. */
 export interface AddClient {
-  addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
+  addTracksToPlaylist(playlistId: PlaylistId, trackIds: readonly TrackId[]): Promise<void>;
 }
 
 /** Adds tracks, new playlists included, and reads them back. */
@@ -21,7 +22,7 @@ export interface ConfirmedAddClient extends AddClient {
     name: string,
     options?: { description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 /**
@@ -30,8 +31,8 @@ export interface ConfirmedAddClient extends AddClient {
  */
 export async function addInOrder(
   client: AddClient,
-  playlistId: number,
-  trackIds: readonly number[],
+  playlistId: PlaylistId,
+  trackIds: readonly TrackId[],
 ): Promise<void> {
   let request: number[] = [];
   let sent = new Set<number>();
@@ -60,7 +61,7 @@ export function missingFrom(wanted: readonly number[], got: readonly number[]): 
 
 /** What became of tracks added to a destination. */
 export interface ConfirmedAdd {
-  playlistId: number;
+  playlistId: PlaylistId;
   name: string;
   /** Whether the playlist was made for this. */
   created: boolean;
@@ -80,11 +81,11 @@ export interface ConfirmedAdd {
 export async function addConfirmed(
   client: ConfirmedAddClient,
   destination: Destination,
-  trackIds: readonly number[],
-  onCreated: (playlistId: number) => void = () => {},
+  trackIds: readonly TrackId[],
+  onCreated: (playlistId: PlaylistId) => void = () => {},
 ): Promise<ConfirmedAdd> {
   const wanted = [...new Set(trackIds)];
-  let playlistId: number;
+  let playlistId: PlaylistId;
   let before = new Set<number>();
   if (destination.type === "new") {
     playlistId = (await client.createPlaylist(destination.name, { isPublic: destination.isPublic })).id;

@@ -14,6 +14,7 @@
  * filtering live in the tested server modules.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { playlistIdOf } from "../../features/qobuz-links.js";
@@ -118,7 +119,7 @@ interface PlanResponse {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 let playlistsLoaded = false;
 let controls: PlanControls;
@@ -544,7 +545,7 @@ function onTargetChange(): void {
  * Switch the destination to "existing" with the given playlist selected, if
  * it is one of yours (a pasted link may be someone else's).
  */
-async function preselectExisting(playlistId: number): Promise<void> {
+async function preselectExisting(playlistId: PlaylistId): Promise<void> {
   await loadPlaylists();
   const select = el<HTMLSelectElement>("similar-playlist-select");
   if (![...select.options].some((option) => option.value === String(playlistId))) {

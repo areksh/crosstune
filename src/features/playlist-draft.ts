@@ -11,6 +11,7 @@
  * of Node dependencies: the web UI runs it in the page.
  */
 
+import type { EntryId, PlaylistId } from "../services/ids.js";
 import type { Track } from "../services/model.js";
 import { shuffle } from "./combine.js";
 import {
@@ -30,11 +31,11 @@ import { songKeys } from "./song-picker.js";
 import { normaliseArtistName } from "./track-filter.js";
 
 /** A playlist's entry: its track, with the entry's id. */
-export type Entry = Track & { playlistTrackId: number };
+export type Entry = Track & { playlistTrackId: EntryId };
 
 /** Where entries are moved to. */
 export type Destination =
-  | { type: "existing"; playlistId: number; name: string }
+  | { type: "existing"; playlistId: PlaylistId; name: string }
   | { type: "new"; name: string; isPublic: boolean };
 
 export interface Draft {

@@ -8,6 +8,7 @@
  * fails the pass, which is then retried with backoff.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import type { Track } from "../../services/model.js";
 import { combineTracks, type CombineInput } from "../../features/combine.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
@@ -18,7 +19,7 @@ import { message, stableShuffle, type SourceResult } from "./common.js";
 
 export interface PlaylistInputsClient {
   getFavoriteTracks(): Promise<Track[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 export function inputLabel(input: PlaylistInput): string {

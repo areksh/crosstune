@@ -11,6 +11,7 @@
  * server modules.
  */
 
+import type { EntryId, PlaylistId } from "../../services/ids.js";
 import { api, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { coverSlot } from "../artwork.js";
@@ -22,7 +23,7 @@ interface DedupTrack {
   version?: string;
   artist: string;
   album?: string;
-  playlistTrackId?: number;
+  playlistTrackId?: EntryId;
   bitDepth?: number;
   samplingRate?: number;
   releaseDate?: string;
@@ -57,18 +58,18 @@ interface ScanResponse {
 }
 
 type Source =
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "favourites" }
   | { type: "all-playlists" };
 
 interface Removal {
   id: number;
-  playlistTrackId?: number;
-  playlistId?: number;
+  playlistTrackId?: EntryId;
+  playlistId?: PlaylistId;
 }
 
 /** Scanned groups, each with its playlist when scanning all playlists. */
-let scannedGroups: Array<{ group: ResolvedGroup; playlistId?: number }> = [];
+let scannedGroups: Array<{ group: ResolvedGroup; playlistId?: PlaylistId }> = [];
 let scannedSongs: AcrossSong[] = [];
 let scannedSource: Source | undefined;
 let playlistsLoaded = false;
@@ -398,7 +399,7 @@ function syncEntry(box: HTMLInputElement): void {
   }
 }
 
-function renderGroupTrack(track: DedupTrack, position: number, keep: boolean, playlistId?: number): HTMLElement {
+function renderGroupTrack(track: DedupTrack, position: number, keep: boolean, playlistId?: PlaylistId): HTMLElement {
   const row = document.createElement("label");
   row.className = "track dedup-track";
   row.dataset["entry"] = `${playlistId ?? ""}:${track.playlistTrackId ?? `t${track.id}`}`;

@@ -12,6 +12,7 @@
  * browser); upstream Qobuz failures map to 502 so the UI can surface them.
  */
 
+import type { AlbumId, ArtistId, EntryId, PlaylistId, TrackId, UserId } from "../services/ids.js";
 import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes } from "./playlist-routes.js";
 import {
   RELEASE_TYPES,
@@ -151,43 +152,43 @@ import { authorise, type RequestHeaders } from "./security.js";
 /** The Qobuz client capabilities the API needs; QobuzClient satisfies it. */
 export interface QobuzApiService {
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
-  getArtist(artistId: number): Promise<Artist>;
-  getAlbum(albumId: string): Promise<Album>;
-  getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
-  getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
-  getArtistReleases(artistId: number, maxReleases?: number): Promise<ArtistReleases>;
+  getArtist(artistId: ArtistId): Promise<Artist>;
+  getAlbum(albumId: AlbumId): Promise<Album>;
+  getArtistTopTracks(artistId: ArtistId, limit?: number): Promise<Track[]>;
+  getSimilarArtists(artistId: ArtistId, limit: number): Promise<Artist[]>;
+  getArtistReleases(artistId: ArtistId, maxReleases?: number): Promise<ArtistReleases>;
   getUserPlaylists(): Promise<Playlist[]>;
-  getPlaylist(playlistId: number): Promise<Playlist>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylist(playlistId: PlaylistId): Promise<Playlist>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   getFavoriteTracks(): Promise<Track[]>;
-  getAlbumReleaseDate(albumId: string): Promise<string | undefined>;
+  getAlbumReleaseDate(albumId: AlbumId): Promise<string | undefined>;
   searchAlbums(query: string, limit?: number): Promise<Album[]>;
   searchTracks(query: string, limit?: number, offset?: number): Promise<Track[]>;
-  getAlbumTracks(albumId: string): Promise<Track[]>;
+  getAlbumTracks(albumId: AlbumId): Promise<Track[]>;
   getFavoriteAlbums(): Promise<Album[]>;
   getFavoriteArtists(): Promise<Artist[]>;
-  addFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  addFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
-  addFavoriteArtists(artistIds: readonly number[]): Promise<void>;
+  addFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  addFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
+  addFavoriteArtists(artistIds: readonly ArtistId[]): Promise<void>;
   createPlaylist(
     name: string,
     options?: { description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
   addTracksToPlaylist(
-    playlistId: number,
-    trackIds: readonly number[],
+    playlistId: PlaylistId,
+    trackIds: readonly TrackId[],
   ): Promise<void>;
   removeTracksFromPlaylist(
-    playlistId: number,
-    playlistTrackIds: readonly number[],
+    playlistId: PlaylistId,
+    playlistTrackIds: readonly EntryId[],
   ): Promise<void>;
-  removeFavoriteTracks(trackIds: readonly number[]): Promise<void>;
+  removeFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
   /** Used by undo. */
-  removeFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
-  removeFavoriteArtists(artistIds: readonly number[]): Promise<void>;
-  deletePlaylist(playlistId: number): Promise<void>;
+  removeFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
+  removeFavoriteArtists(artistIds: readonly ArtistId[]): Promise<void>;
+  deletePlaylist(playlistId: PlaylistId): Promise<void>;
   updatePlaylist(
-    playlistId: number,
+    playlistId: PlaylistId,
     changes: { name?: string; description?: string; isPublic?: boolean },
   ): Promise<Playlist>;
   /**
@@ -195,8 +196,8 @@ export interface QobuzApiService {
    * at the end of a playlist, and the playlist manager cannot reorder.
    */
   movePlaylistTracks?(
-    playlistId: number,
-    playlistTrackIds: readonly number[],
+    playlistId: PlaylistId,
+    playlistTrackIds: readonly EntryId[],
     insertBefore: number,
   ): Promise<void>;
 }
@@ -218,7 +219,7 @@ export interface ApiDeps {
   /** The change history; without it the history routes answer 404. */
   history?: { journal: Journal };
   /** The signed-in user's id: playlists of others are read-only to the manager. */
-  ownerId?: number;
+  ownerId?: UserId;
   /**
    * Take the lock that keeps the playlist manager's writes and the managed
    * playlists' refreshes apart (waiting a little); undefined when it stays busy.
@@ -725,7 +726,7 @@ function estimateSimilarRun(body: unknown): ApiResponse {
 async function writeTracksToTarget(
   service: QobuzApiService,
   target: CommitTarget,
-  trackIds: readonly number[],
+  trackIds: readonly TrackId[],
 ): Promise<ApiResponse> {
   if (target.type === "new") {
     const playlist = await createPlaylistWithTracks(service, {
@@ -1016,7 +1017,7 @@ function intField(
 
 type SimilarSource =
   | { type: "artists"; artists: string[]; tracksPerSeed: number }
-  | { type: "playlist"; playlistId: number; maxSeeds: number };
+  | { type: "playlist"; playlistId: PlaylistId; maxSeeds: number };
 
 interface SimilarInput {
   source: SimilarSource;
@@ -1172,11 +1173,11 @@ function parseResolveInput(body: unknown): Parsed<ResolveInput> {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic?: boolean; description?: string }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 interface CommitInput {
   target: CommitTarget;
-  trackIds: number[];
+  trackIds: TrackId[];
 }
 
 function parseCommitInput(body: unknown): Parsed<CommitInput> {
@@ -1272,7 +1273,7 @@ function parseResolveAlbumsInput(body: unknown): Parsed<ResolveAlbumsInput> {
 }
 
 interface AlbumTracksInput {
-  albumIds: string[];
+  albumIds: AlbumId[];
   filter: TrackFilter;
 }
 
@@ -1296,7 +1297,7 @@ function parseAlbumTracksInput(body: unknown): Parsed<AlbumTracksInput> {
 }
 
 type DedupeSource =
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "favourites" }
   | { type: "all-playlists" };
 
@@ -1356,9 +1357,9 @@ function parseScanInput(body: unknown): Parsed<ScanInput> {
 
 interface Removal {
   id: number;
-  playlistTrackId?: number;
+  playlistTrackId?: EntryId;
   /** The playlist an entry is in (all-playlists removals). */
-  playlistId?: number;
+  playlistId?: PlaylistId;
 }
 
 interface ApplyInput {
@@ -2087,7 +2088,7 @@ async function newReleases(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
 
 /**
  * Put chosen releases in a new playlist or the favourite albums.
- * Body: `{ albumIds: string[], target: { type: "playlist", name, isPublic? } |
+ * Body: `{ albumIds: AlbumId[], target: { type: "playlist", name, isPublic? } |
  * { type: "favourite-albums" }, filter? }`.
  */
 async function commitNewReleasesRoute(body: unknown, deps: ApiDeps): Promise<ApiResponse> {

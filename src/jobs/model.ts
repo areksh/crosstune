@@ -14,6 +14,7 @@
  * releases feed) are read into the version 2 shape; reading never rewrites.
  */
 
+import type { ArtistId, EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import { randomUUID } from "node:crypto";
 
 import { RELEASE_TYPES, type ReleaseType } from "../services/model.js";
@@ -49,7 +50,7 @@ export interface ArtistRef {
 export type FeedArtists =
   | { type: "list"; artists: ArtistRef[] }
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number };
+  | { type: "playlist"; playlistId: PlaylistId };
 
 /** Similar artists, snapshotted every `refreshDays`. */
 export interface SimilarSpec {
@@ -90,7 +91,7 @@ export interface CombinedSource {
 
 export interface FollowSource {
   type: "follow";
-  playlistId: number;
+  playlistId: PlaylistId;
   /** Archive: keep every track the playlist ever had (default false). */
   keepRemoved: boolean;
 }
@@ -194,7 +195,7 @@ export const DEFAULT_TIDY = {
 
 export type Target =
   | { type: "created"; isPublic: boolean }
-  | { type: "adopted"; playlistId: number }
+  | { type: "adopted"; playlistId: PlaylistId }
   | { type: "favourites" };
 
 export interface Shape {
@@ -238,8 +239,8 @@ export interface InvalidJob {
 // --- state -------------------------------------------------------------------
 
 export interface OwnedEntry {
-  playlistTrackId: number;
-  trackId: number;
+  playlistTrackId: EntryId;
+  trackId: TrackId;
 }
 
 export interface RunResultSummary {
@@ -268,12 +269,12 @@ export interface Substitution {
 
 /** A change a tidy-up wants to write (now, or once a suggestion is accepted). */
 export type TidyChange =
-  | { type: "replace"; trackId: number; newTrackId: number; playlistTrackId?: number }
-  | { type: "remove"; trackId: number; playlistTrackId?: number }
+  | { type: "replace"; trackId: TrackId; newTrackId: TrackId; playlistTrackId?: EntryId }
+  | { type: "remove"; trackId: TrackId; playlistTrackId?: EntryId }
   | {
       type: "dedupe";
       keepTrackId: number;
-      remove: { trackId: number; playlistTrackId?: number }[];
+      remove: { trackId: TrackId; playlistTrackId?: EntryId }[];
     };
 
 export interface Finding {
@@ -290,14 +291,14 @@ export interface Suggestion extends Finding {
 
 export interface TidyState {
   dedupe?: { lastRunAt: string };
-  upgrade?: { lastRunAt: string; checked: { trackId: number; at: string }[] };
+  upgrade?: { lastRunAt: string; checked: { trackId: TrackId; at: string }[] };
   repair?: { lastRunAt: string };
 }
 
 export interface RotationState {
   number: number;
-  artistIds: number[];
-  tracks: { trackId: number; source: string; durationSeconds?: number }[];
+  artistIds: ArtistId[];
+  tracks: { trackId: TrackId; source: string; durationSeconds?: number }[];
 }
 
 export interface SourceState {
@@ -307,13 +308,13 @@ export interface SourceState {
   /** Discovery: the current rotation's picks. */
   rotation?: RotationState;
   /** Discovery: what earlier rotations served, newest last. */
-  served?: { rotation: number; trackIds: number[] }[];
+  served?: { rotation: number; trackIds: TrackId[] }[];
 }
 
 export interface JobState {
   version: 2;
   /** The playlist a `created` target made on its first pass. */
-  playlistId?: number;
+  playlistId?: PlaylistId;
   lastRunAt?: string;
   nextRunAt?: string;
   consecutiveFailures: number;
@@ -342,7 +343,7 @@ export interface JobState {
    * place of others (Qobuz dates the new copy today). Sources reading the
    * favourites and dedupe's first/last-added use these.
    */
-  favouriteDates?: { trackId: number; at: string }[];
+  favouriteDates?: { trackId: TrackId; at: string }[];
   lastResult?: RunResultSummary;
 }
 

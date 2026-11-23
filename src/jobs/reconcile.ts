@@ -10,18 +10,19 @@
  * hiccup cannot empty a playlist.
  */
 
+import type { EntryId, TrackId } from "../services/ids.js";
 import type { EditMode, OwnedEntry } from "./model.js";
 
 export interface DesiredTrack {
-  trackId: number;
+  trackId: TrackId;
   /** Where the track came from, for reports (e.g. "album:123"). */
   source: string;
   durationSeconds?: number;
 }
 
 export interface PresentEntry {
-  playlistTrackId: number;
-  trackId: number;
+  playlistTrackId: EntryId;
+  trackId: TrackId;
 }
 
 export interface ReconcileInput {
@@ -147,12 +148,12 @@ function unique(ids: readonly number[]): number[] {
 
 /** One `movePlaylistTracks` call: in front of the 1-based position, counted before the move. */
 export interface Move {
-  playlistTrackIds: number[];
+  playlistTrackIds: EntryId[];
   insertBefore: number;
 }
 
 interface Ranked {
-  playlistTrackId: number;
+  playlistTrackId: EntryId;
   rank?: number;
 }
 

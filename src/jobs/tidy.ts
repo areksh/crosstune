@@ -10,6 +10,7 @@
  * user's edit (see ./substitutions.ts).
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Track } from "../services/model.js";
 import {
   findDuplicateGroups,
@@ -44,7 +45,7 @@ import {
 } from "./model.js";
 import { addSubstitutions } from "./substitutions.js";
 
-export type TidyTarget = { type: "favourites" } | { type: "playlist"; playlistId: number };
+export type TidyTarget = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
 
 export type TidyClient = Pick<UpgradeResolverClient, "searchTracks"> & UpgradeCommitClient;
 
@@ -77,7 +78,7 @@ function quality(track: Pick<Track, "bitDepth" | "samplingRate">): string {
     : `${track.bitDepth}-bit/${track.samplingRate} kHz`;
 }
 
-export function dedupeKey(trackIds: readonly number[]): string {
+export function dedupeKey(trackIds: readonly TrackId[]): string {
   return `dedupe:${[...trackIds].sort((a, b) => a - b).join(",")}`;
 }
 
@@ -161,7 +162,7 @@ function upgradeFinding(item: UpgradeItem): Finding | undefined {
 export interface FindResult {
   findings: Finding[];
   /** The upgrade tidy-up's checked list after this run. */
-  checked?: { trackId: number; at: string }[];
+  checked?: { trackId: TrackId; at: string }[];
   /** Tracks whose upgrade or repair search ran this time. */
   searched: number[];
   notes: string[];
@@ -276,7 +277,7 @@ export interface ApplyResult {
 }
 
 export type TidyWriteClient = UpgradeCommitClient & {
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 };
 
 function messageOf(error: unknown): string {
@@ -297,7 +298,7 @@ export async function applyFindings(
 ): Promise<ApplyResult> {
   const notes: string[] = [];
   const succeeded: Finding[] = [];
-  const location = (playlistTrackId: number | undefined): UpgradeChange["location"] | undefined =>
+  const location = (playlistTrackId: EntryId | undefined): UpgradeChange["location"] | undefined =>
     target.type === "favourites"
       ? { type: "favourites" }
       : playlistTrackId === undefined
@@ -453,7 +454,7 @@ export function carryOwnership(
 
 /** Is a finding's change still possible on these tracks (for accepting a suggestion later)? */
 export function stillApplies(finding: Finding, target: TidyTarget, tracks: readonly Track[]): boolean {
-  const has = (trackId: number, playlistTrackId: number | undefined) =>
+  const has = (trackId: TrackId, playlistTrackId: EntryId | undefined) =>
     tracks.some(
       (track) =>
         track.id === trackId && (target.type === "favourites" || track.playlistTrackId === playlistTrackId),

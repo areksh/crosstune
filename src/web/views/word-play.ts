@@ -9,6 +9,7 @@
  * src/features/word-play.ts.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { formatDuration, totalSeconds } from "../../features/playlist-shape.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
@@ -52,7 +53,7 @@ interface Plan {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 const TEXT_LABELS: Record<Mode, { label: string; placeholder: string }> = {
   contains: { label: "Word or phrase", placeholder: "night" },

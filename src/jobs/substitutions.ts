@@ -12,11 +12,12 @@
  * dropped and its finding ignored from then on.
  */
 
+import type { TrackId } from "../services/ids.js";
 import { STATE_LIST_CAP, type Substitution } from "./model.js";
 import type { DesiredTrack } from "./reconcile.js";
 
 /** Follow a track's substitutions; undefined when it is left out. */
-function resolve(trackId: number, byFrom: ReadonlyMap<number, Substitution>): number | undefined {
+function resolve(trackId: TrackId, byFrom: ReadonlyMap<number, Substitution>): number | undefined {
   let current = trackId;
   const visited = new Set<number>();
   for (;;) {

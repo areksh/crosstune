@@ -6,6 +6,8 @@
  * one place that knows the transport; views deal in typed requests/responses.
  */
 
+import type { AlbumId, EntryId } from "../services/ids.js";
+
 export interface Artist {
   id: number;
   name: string;
@@ -18,9 +20,9 @@ export interface Track {
   discNumber?: number;
   artist?: string;
   album?: string;
-  albumId?: string;
+  albumId?: AlbumId;
   isrc?: string;
-  playlistTrackId?: number;
+  playlistTrackId?: EntryId;
   bitDepth?: number;
   samplingRate?: number;
   releaseDate?: string;

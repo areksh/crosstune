@@ -179,6 +179,7 @@
  * stderr instead (see src/cli/output.ts).
  */
 
+import type { PlaylistId, UserId } from "./services/ids.js";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -922,7 +923,7 @@ async function runJobsOnline(client: QobuzClient, journal: Journal, args: JobsAr
   }
   if (definition["name"] === undefined) {
     // A job on an existing playlist is named after it.
-    const target = definition["target"] as { type: string; playlistId?: number };
+    const target = definition["target"] as { type: string; playlistId?: PlaylistId };
     definition["name"] =
       target.type === "favourites"
         ? "Favourites"
@@ -1530,7 +1531,7 @@ async function runRemoveArtists(
 ): Promise<void> {
   const { artists } = args;
   const mine = await client.getUserPlaylists();
-  const isMine = (ownerId: number | undefined): boolean => ownerId === undefined || ownerId === session.userId;
+  const isMine = (ownerId: UserId | undefined): boolean => ownerId === undefined || ownerId === session.userId;
   let playlists: Array<{ id: number; name: string }>;
   if (args.playlists.type === "all") {
     playlists = mine.filter((p) => isMine(p.ownerId));

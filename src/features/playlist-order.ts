@@ -10,9 +10,11 @@
  * Pure and free of Node dependencies, so the web UI can use it too.
  */
 
+import type { EntryId } from "../services/ids.js";
+
 /** One `playlist/updateTracksPosition` request. */
 export interface OrderMove {
-  playlistTrackIds: number[];
+  playlistTrackIds: EntryId[];
   /** 1-based position in the list before the move; its length + 1 is the end. */
   insertBefore: number;
 }

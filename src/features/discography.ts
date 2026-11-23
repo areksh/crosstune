@@ -18,6 +18,7 @@
  * {@link parseIncludeList}) are shared with the new-releases tool.
  */
 
+import type { ArtistId } from "../services/ids.js";
 import type { Artist, ArtistReleases, Release, ReleaseType } from "../services/model.js";
 import { normalise } from "./deduplicate.js";
 import {
@@ -38,7 +39,7 @@ import { albumExclusion, NO_FILTER, type TrackFilter } from "./track-filter.js";
 
 /** The client surface needed to list an artist's releases. */
 export interface ArtistReleasesClient {
-  getArtistReleases(artistId: number, maxReleases?: number): Promise<ArtistReleases>;
+  getArtistReleases(artistId: ArtistId, maxReleases?: number): Promise<ArtistReleases>;
 }
 
 /** The client surface needed to resolve an artist's discography. */
@@ -107,7 +108,7 @@ export function editionKey(title: string): string {
 }
 
 /** True when the release is by the artist (or does not say who it is by). */
-export function isByArtist(release: Release, artistId: number): boolean {
+export function isByArtist(release: Release, artistId: ArtistId): boolean {
   return release.artistId === undefined || release.artistId === artistId;
 }
 

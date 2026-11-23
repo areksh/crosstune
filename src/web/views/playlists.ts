@@ -6,6 +6,7 @@
  * the server.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import type { ArtistHit, ManagerPlaylist, RemovalReport, RemoveArtistsPlan } from "../../features/playlist-manager.js";
 import { formatDuration } from "../../features/playlist-shape.js";
 import { api } from "../api.js";
@@ -367,7 +368,7 @@ function renderPlan(found: RemoveArtistsPlan): void {
   updateRemoveButton();
 }
 
-function renderHit({ entry, as, names }: ArtistHit, playlistId: number): HTMLElement {
+function renderHit({ entry, as, names }: ArtistHit, playlistId: PlaylistId): HTMLElement {
   const row = document.createElement("label");
   row.className = "track no-cover";
   const box = document.createElement("input");

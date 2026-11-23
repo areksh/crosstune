@@ -9,6 +9,7 @@
  * in the tested server modules.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { PlanControls } from "../plan.js";
@@ -52,7 +53,7 @@ interface ResolveResponse {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 let playlistsLoaded = false;
 let controls: PlanControls;

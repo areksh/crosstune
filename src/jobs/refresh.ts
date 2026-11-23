@@ -15,6 +15,7 @@
  * one like the user's edits, and is respected.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import { isNotFound } from "../services/errors.js";
 import { ServiceError, type Playlist, type Track } from "../services/model.js";
 import type { UpgradeResolverClient } from "../features/upgrade.js";
@@ -49,18 +50,18 @@ import {
 export type RefreshClient = SourceClient &
   TidyWriteClient &
   Pick<UpgradeResolverClient, "searchTracks"> & {
-    getPlaylist(playlistId: number): Promise<Playlist>;
-    getPlaylistTracks(playlistId: number): Promise<Track[]>;
+    getPlaylist(playlistId: PlaylistId): Promise<Playlist>;
+    getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
     getFavoriteTracks(): Promise<Track[]>;
     createPlaylist(
       name: string,
       options?: { description?: string; isPublic?: boolean },
     ): Promise<Playlist>;
-    addTracksToPlaylist(playlistId: number, trackIds: readonly number[]): Promise<void>;
-    removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]): Promise<void>;
+    addTracksToPlaylist(playlistId: PlaylistId, trackIds: readonly TrackId[]): Promise<void>;
+    removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]): Promise<void>;
     movePlaylistTracks(
-      playlistId: number,
-      playlistTrackIds: readonly number[],
+      playlistId: PlaylistId,
+      playlistTrackIds: readonly EntryId[],
       insertBefore: number,
     ): Promise<void>;
   };
@@ -74,7 +75,7 @@ export interface PreviewFinding {
 
 export interface RefreshPreview {
   createsPlaylist: boolean;
-  add: { trackId: number; source: string }[];
+  add: { trackId: TrackId; source: string }[];
   remove: PresentEntry[];
   newlyDismissed: number[];
   withheldRemovals: number;
@@ -285,7 +286,7 @@ function nothingDue(state: JobState, now: Date): RefreshOutcome {
 
 interface SourceStepResult {
   state: JobState;
-  playlistId: number | undefined;
+  playlistId: PlaylistId | undefined;
   /** The playlist's tracks after the step. */
   tracks: Track[];
   preview: RefreshPreview;
@@ -402,9 +403,9 @@ async function sourceStep(
 /** Move the job's entries into the desired order; false if a move failed. */
 async function reorder(
   client: RefreshClient,
-  playlistId: number,
+  playlistId: PlaylistId,
   entries: readonly PresentEntry[],
-  owned: readonly { playlistTrackId: number }[],
+  owned: readonly { playlistTrackId: EntryId }[],
   desiredOrder: readonly number[],
 ): Promise<boolean> {
   const rank = new Map<number, number>();

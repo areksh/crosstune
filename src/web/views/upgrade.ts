@@ -8,6 +8,7 @@
  * matching, planning and writing live in src/features/upgrade.ts.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { coverSlot } from "../artwork.js";
 import { el, setStep, showError } from "../dom.js";
@@ -15,12 +16,12 @@ import { qualityPill, titleOf, trackText } from "../tracks.js";
 
 type Source =
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "all-playlists" };
 
 type Location =
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number; playlistName?: string; playlistTrackId: number };
+  | { type: "playlist"; playlistId: PlaylistId; playlistName?: string; playlistTrackId: EntryId };
 
 interface Candidate {
   track: Track;
@@ -46,8 +47,8 @@ interface Plan {
 }
 
 type Change =
-  | { action: "replace"; location: Location; trackId: number; newTrackId: number }
-  | { action: "remove"; location: Location; trackId: number };
+  | { action: "replace"; location: Location; trackId: TrackId; newTrackId: TrackId }
+  | { action: "remove"; location: Location; trackId: TrackId };
 
 interface CommitResult {
   replaced: number;

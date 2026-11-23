@@ -9,12 +9,13 @@
  * ordering live in src/features/combine.ts.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import { api, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { trackRow } from "../tracks.js";
 import { keepUpdated } from "./managed.js";
 
-type Source = { type: "favourites" } | { type: "playlist"; playlistId: number };
+type Source = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
 
 interface CombinePlan {
   labels: string[];
@@ -32,7 +33,7 @@ interface CombinePlan {
 
 type CommitTarget =
   | { type: "new"; name: string; isPublic: boolean }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 const FAVOURITES = "favourites";
 

@@ -17,6 +17,7 @@
  * happen before the error is rethrown.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
@@ -208,9 +209,9 @@ export const MUTATING_METHODS = MUSIC_WRITES;
 
 /** The reads the recorder needs from the client it wraps. */
 export interface RecordableClient {
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   /** Used to name playlists in labels; optional. */
-  getPlaylist?(playlistId: number): Promise<Playlist>;
+  getPlaylist?(playlistId: PlaylistId): Promise<Playlist>;
 }
 
 /** Ids per request when the recorder splits a bulk change (as the client does). */
@@ -235,7 +236,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
   const call = <R>(name: string, ...args: unknown[]): Promise<R> =>
     (raw[name] as unknown as (...a: unknown[]) => Promise<R>).apply(client, args);
 
-  const tryRead = async (playlistId: number): Promise<Track[] | undefined> => {
+  const tryRead = async (playlistId: PlaylistId): Promise<Track[] | undefined> => {
     try {
       return await client.getPlaylistTracks(playlistId);
     } catch {
@@ -243,7 +244,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
     }
   };
 
-  const nameOf = async (scope: RecordingScope, playlistId: number): Promise<string | undefined> => {
+  const nameOf = async (scope: RecordingScope, playlistId: PlaylistId): Promise<string | undefined> => {
     const known = scope.names.get(playlistId);
     if (known !== undefined || client.getPlaylist === undefined) {
       return known;
@@ -257,7 +258,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
     }
   };
 
-  const named = async (scope: RecordingScope, playlistId: number): Promise<{ playlistName?: string }> => {
+  const named = async (scope: RecordingScope, playlistId: PlaylistId): Promise<{ playlistName?: string }> => {
     const name = await nameOf(scope, playlistId);
     return name === undefined ? {} : { playlistName: name };
   };
@@ -288,7 +289,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       return playlist;
     },
 
-    async deletePlaylist(playlistId: number) {
+    async deletePlaylist(playlistId: PlaylistId) {
       const scope = journal.scope();
       // Read first: a deletion that cannot be recorded is not made.
       const tracks = await client.getPlaylistTracks(playlistId);
@@ -311,7 +312,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       });
     },
 
-    async updatePlaylist(playlistId: number, changes: PlaylistDetails) {
+    async updatePlaylist(playlistId: PlaylistId, changes: PlaylistDetails) {
       const scope = journal.scope();
       // Read first: a change that cannot be recorded is not made.
       const was = await client.getPlaylist?.call(client, playlistId);
@@ -341,7 +342,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       return updated;
     },
 
-    async addTracksToPlaylist(playlistId: number, trackIds: readonly number[]) {
+    async addTracksToPlaylist(playlistId: PlaylistId, trackIds: readonly TrackId[]) {
       if (trackIds.length === 0) {
         return call("addTracksToPlaylist", playlistId, trackIds);
       }
@@ -389,7 +390,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       }
     },
 
-    async removeTracksFromPlaylist(playlistId: number, playlistTrackIds: readonly number[]) {
+    async removeTracksFromPlaylist(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[]) {
       if (playlistTrackIds.length === 0) {
         return call("removeTracksFromPlaylist", playlistId, playlistTrackIds);
       }
@@ -431,7 +432,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       }
     },
 
-    async movePlaylistTracks(playlistId: number, playlistTrackIds: readonly number[], insertBefore: number) {
+    async movePlaylistTracks(playlistId: PlaylistId, playlistTrackIds: readonly EntryId[], insertBefore: number) {
       if (playlistTrackIds.length === 0) {
         return call("movePlaylistTracks", playlistId, playlistTrackIds, insertBefore);
       }

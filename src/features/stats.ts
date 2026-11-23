@@ -13,19 +13,20 @@
  * the stats is the *resolve* step and writes nothing.
  */
 
+import type { PlaylistId, TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
 /** Where the tracks come from. */
 export type StatsSource =
   | { type: "favourites" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "everything" };
 
 /** The client surface needed to gather a source's tracks. */
 export interface StatsClient {
   getFavoriteTracks(): Promise<Track[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   getUserPlaylists(): Promise<Playlist[]>;
 }
 
@@ -47,7 +48,7 @@ export interface Bucket {
   /** What to show: "1990s", "Unknown", or the artist's name. */
   label: string;
   count: number;
-  trackIds: number[];
+  trackIds: TrackId[];
   /** E.g. "Favourites: 1990s". */
   suggestedName: string;
 }
@@ -168,7 +169,7 @@ export function computeStats(library: Library): LibraryStats {
   const decades = decadeBuckets(tracks, name);
 
   // Artists, keyed by their name ignoring case and surrounding space.
-  const byArtist = new Map<string, { label: string; trackIds: number[] }>();
+  const byArtist = new Map<string, { label: string; trackIds: TrackId[] }>();
   for (const track of tracks) {
     const artist = track.artist?.trim();
     if (artist === undefined || artist.length === 0) {

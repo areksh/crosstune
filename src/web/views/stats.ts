@@ -9,6 +9,7 @@
  * src/features/stats.ts.
  */
 
+import type { PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
 
@@ -16,7 +17,7 @@ interface Bucket {
   key: string;
   label: string;
   count: number;
-  trackIds: number[];
+  trackIds: TrackId[];
   suggestedName: string;
 }
 
@@ -32,7 +33,7 @@ interface LibraryStats {
   headline: string;
 }
 
-type Source = { type: "favourites" | "everything" } | { type: "playlist"; playlistId: number };
+type Source = { type: "favourites" | "everything" } | { type: "playlist"; playlistId: PlaylistId };
 
 let loadedFor: string | undefined;
 let chosen: Bucket | undefined;

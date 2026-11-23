@@ -6,6 +6,7 @@
  * reconciler that gets a different answer each pass churns the playlist.
  */
 
+import type { PlaylistId } from "../../services/ids.js";
 import type { Artist } from "../../services/model.js";
 import { fitToLength } from "../../features/playlist-shape.js";
 import {
@@ -49,7 +50,7 @@ export function message(error: unknown): string {
 
 export interface SeedArtistsClient {
   getFavoriteArtists(): Promise<Artist[]>;
-  getPlaylistTracks(playlistId: number): Promise<import("../../services/model.js").Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<import("../../services/model.js").Track[]>;
 }
 
 /** A source's own artists: as listed, or read live (favourites, a playlist's). */

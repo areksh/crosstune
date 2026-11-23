@@ -22,6 +22,7 @@
  * for hand-editing or moving lists between services.
  */
 
+import type { AlbumId, ArtistId, PlaylistId, TrackId } from "../services/ids.js";
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
@@ -858,16 +859,16 @@ function albumLabel(item: ParsedAlbum): string {
 export interface ImportWriterClient
   extends PlaylistWriterClient,
     ExistingPlaylistClient {
-  addFavoriteTracks(trackIds: readonly number[]): Promise<void>;
-  addFavoriteAlbums(albumIds: readonly string[]): Promise<void>;
-  addFavoriteArtists(artistIds: readonly number[]): Promise<void>;
+  addFavoriteTracks(trackIds: readonly TrackId[]): Promise<void>;
+  addFavoriteAlbums(albumIds: readonly AlbumId[]): Promise<void>;
+  addFavoriteArtists(artistIds: readonly ArtistId[]): Promise<void>;
 }
 
 /** Where a matched set of ids is written. */
 export type ImportTarget =
   | { type: "favourites" }
   | { type: "playlist-new"; name: string; isPublic?: boolean; description?: string }
-  | { type: "playlist-existing"; playlistId: number };
+  | { type: "playlist-existing"; playlistId: PlaylistId };
 
 /** The result of committing an import. */
 export interface CommitResult {
@@ -940,7 +941,7 @@ export interface ExportClient {
   getFavoriteAlbums(): Promise<Album[]>;
   getFavoriteArtists(): Promise<Artist[]>;
   getUserPlaylists(): Promise<Playlist[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 /** What to export. `account` is the full backup; the rest are single collections. */
@@ -948,7 +949,7 @@ export type ExportSource =
   | { type: "favourite-tracks" }
   | { type: "favourite-albums" }
   | { type: "favourite-artists" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "account" };
 
 /** Read a single collection (not a full backup) from Qobuz. */

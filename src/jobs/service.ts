@@ -8,6 +8,7 @@
  * definition.
  */
 
+import type { PlaylistId } from "../services/ids.js";
 import { conflictWith, type JobWithState } from "./dependencies.js";
 import {
   emptyJobState,
@@ -54,7 +55,7 @@ export interface JobsService {
    * Forget a job. Says which playlist it created, for the caller to delete if
    * asked -- never one the user's own playlist adopted.
    */
-  remove(id: string): { job: Job; playlistId?: number };
+  remove(id: string): { job: Job; playlistId?: PlaylistId };
 }
 
 export interface JobsServiceDeps {
@@ -250,7 +251,7 @@ export function jobsService(deps: JobsServiceDeps): JobsService {
     },
     remove: (id) => {
       const job = find(id);
-      let playlistId: number | undefined;
+      let playlistId: PlaylistId | undefined;
       if (job.target.type === "created") {
         try {
           playlistId = deps.state.load(id).playlistId;

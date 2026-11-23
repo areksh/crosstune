@@ -15,13 +15,15 @@
  * recording itself is in ./journal.ts and the file in src/cli/history-store.ts.
  */
 
+import type { EntryId, PlaylistId, TrackId } from "../services/ids.js";
+
 /** The favourite collections an operation can touch. */
 export type FavouriteType = "tracks" | "albums" | "artists";
 
 /** One playlist entry: the track, its entry id, and its 0-based position. */
 export interface PlaylistEntryRecord {
-  trackId: number;
-  playlistTrackId: number;
+  trackId: TrackId;
+  playlistTrackId: EntryId;
   /**
    * 0-based index in the playlist: for an added entry, where it landed; for a
    * removed one, where it was just before the removal.
@@ -40,23 +42,23 @@ export interface PlaylistDetails {
 export type Operation =
   | {
       kind: "create-playlist";
-      playlistId: number;
+      playlistId: PlaylistId;
       name: string;
       isPublic?: boolean;
       description?: string;
     }
   | {
       kind: "delete-playlist";
-      playlistId: number;
+      playlistId: PlaylistId;
       name: string;
       /** The playlist's tracks, in order, when it was deleted. */
-      trackIds: number[];
+      trackIds: TrackId[];
       isPublic?: boolean;
       description?: string;
     }
   | {
       kind: "update-playlist";
-      playlistId: number;
+      playlistId: PlaylistId;
       playlistName?: string;
       /** The details changed, as they were and as they were made. */
       before: PlaylistDetails;
@@ -64,7 +66,7 @@ export type Operation =
     }
   | {
       kind: "add-tracks";
-      playlistId: number;
+      playlistId: PlaylistId;
       playlistName?: string;
       entries: PlaylistEntryRecord[];
       /**
@@ -75,15 +77,15 @@ export type Operation =
     }
   | {
       kind: "remove-tracks";
-      playlistId: number;
+      playlistId: PlaylistId;
       playlistName?: string;
       entries: PlaylistEntryRecord[];
     }
   | {
       kind: "move-tracks";
-      playlistId: number;
+      playlistId: PlaylistId;
       playlistName?: string;
-      playlistTrackIds: number[];
+      playlistTrackIds: EntryId[];
       insertBefore: number;
       /**
        * Where each entry was (0-based) just before the move, for undo. Absent
@@ -489,7 +491,7 @@ function countByPlaylist(ops: readonly Operation[], kind: "add-tracks" | "remove
 }
 
 /** Where a set of changes happened: "Favourites", a playlist's name, "2 playlists". */
-function placeOf(playlistIds: readonly number[], favourites: boolean, name: (id: number) => string): string {
+function placeOf(playlistIds: readonly PlaylistId[], favourites: boolean, name: (id: number) => string): string {
   const playlists =
     playlistIds.length === 1 ? name(playlistIds[0]!) : plural(playlistIds.length, "playlist");
   if (!favourites) {

@@ -27,6 +27,7 @@
  * stubs; QobuzClient satisfies them structurally.
  */
 
+import type { AlbumId } from "../services/ids.js";
 import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
@@ -86,7 +87,7 @@ export function parseAlbumEntry(line: string): AlbumEntry | undefined {
 export interface AlbumLinkEntry {
   /** The line as typed, for reporting. */
   link: string;
-  albumId: string;
+  albumId: AlbumId;
 }
 
 /**
@@ -133,12 +134,12 @@ export interface AlbumSearchClient {
 
 /** The client surface needed to resolve entries and album links to their versions. */
 export interface AlbumResolverClient extends AlbumSearchClient {
-  getAlbum(albumId: string): Promise<Album>;
+  getAlbum(albumId: AlbumId): Promise<Album>;
 }
 
 /** The client surface needed to fetch an album's tracks. */
 export interface AlbumTracksClient {
-  getAlbumTracks(albumId: string): Promise<Track[]>;
+  getAlbumTracks(albumId: AlbumId): Promise<Track[]>;
 }
 
 /** A resolved album entry together with the versions found for it. */
@@ -387,7 +388,7 @@ function compareByDate(a: Album, b: Album, wantOldest: boolean): number {
 
 /** The tracks of a single album, in album order, each marked if the filter excludes it. */
 export interface AlbumTracks {
-  albumId: string;
+  albumId: AlbumId;
   tracks: FilteredTrack[];
 }
 
@@ -416,7 +417,7 @@ export interface FetchAlbumTracksResult {
  */
 export async function fetchAlbumTracks(
   client: AlbumTracksClient,
-  albumIds: readonly string[],
+  albumIds: readonly AlbumId[],
   filter: TrackFilter = NO_FILTER,
   picker?: SongPicker,
 ): Promise<FetchAlbumTracksResult> {
@@ -433,7 +434,7 @@ export async function fetchAlbumTracks(
     }
   }
 
-  type Outcome = AlbumTracks | { albumId: string; failed: true };
+  type Outcome = AlbumTracks | { albumId: AlbumId; failed: true };
   const outcomes = await mapWithConcurrency<string, Outcome>(
     uniqueAlbumIds,
     DEFAULT_CONCURRENCY,

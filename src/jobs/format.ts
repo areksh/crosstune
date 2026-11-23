@@ -1,5 +1,6 @@
 /** Plain-text wording of jobs, runs and previews, for the CLI (and parts of the web UI). */
 
+import type { PlaylistId } from "../services/ids.js";
 import type {
   Job,
   InvalidJob,
@@ -144,7 +145,7 @@ export function describeTidy(tidy: TidySet): string {
 }
 
 /** What a job manages: "playlist 77", "your playlist 12", "the favourites". */
-export function describeTarget(job: Job, playlistId: number | undefined, name?: string): string {
+export function describeTarget(job: Job, playlistId: PlaylistId | undefined, name?: string): string {
   if (job.target.type === "favourites") {
     return "the favourites";
   }

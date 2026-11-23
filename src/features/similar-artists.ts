@@ -34,6 +34,7 @@
  * {@link addTracksToExistingPlaylist} with {@link similarTrackIds}.
  */
 
+import type { ArtistId, PlaylistId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import {
@@ -51,8 +52,8 @@ import { artistExclusion, isFilterActive, NO_FILTER, type TrackFilter } from "./
 
 /** The client surface needed to walk similar artists and fetch their tracks. */
 export interface SimilarArtistsClient {
-  getSimilarArtists(artistId: number, limit: number): Promise<Artist[]>;
-  getArtistTopTracks(artistId: number, limit?: number): Promise<Track[]>;
+  getSimilarArtists(artistId: ArtistId, limit: number): Promise<Artist[]>;
+  getArtistTopTracks(artistId: ArtistId, limit?: number): Promise<Track[]>;
 }
 
 /** An accepted range (no `max` means unbounded) and the default of a setting. */
@@ -604,9 +605,9 @@ export async function walkFromArtists(
  */
 export async function walkFromPlaylist(
   client: Pick<SimilarArtistsClient, "getSimilarArtists"> & {
-    getPlaylistTracks(playlistId: number): Promise<Track[]>;
+    getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   },
-  options: Omit<WalkOptions, "tracksPerSimilar"> & { playlistId: number; maxSeeds: number },
+  options: Omit<WalkOptions, "tracksPerSimilar"> & { playlistId: PlaylistId; maxSeeds: number },
 ): Promise<SimilarWalk> {
   const tracks = await client.getPlaylistTracks(options.playlistId);
   const { seeds, presentIds } = seedsFromPlaylist(tracks, options.maxSeeds);
@@ -637,8 +638,8 @@ export async function planFromArtists(
 
 /** {@link walkFromPlaylist}, then the found artists' tracks: a complete plan. */
 export async function planFromPlaylist(
-  client: SimilarArtistsClient & { getPlaylistTracks(playlistId: number): Promise<Track[]> },
-  options: WalkOptions & { playlistId: number; maxSeeds: number },
+  client: SimilarArtistsClient & { getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]> },
+  options: WalkOptions & { playlistId: PlaylistId; maxSeeds: number },
 ): Promise<SimilarPlan> {
   return completePlan(client, await walkFromPlaylist(client, options), options);
 }

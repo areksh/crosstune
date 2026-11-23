@@ -2,6 +2,7 @@
  * Argument parsing for CLI commands.
  */
 
+import type { PlaylistId } from "../services/ids.js";
 import {
   COMBINE_KEEPS,
   COMBINE_MODES,
@@ -284,7 +285,7 @@ export interface SimilarArgs {
         tracksPerSeed: number;
         isPublic: boolean;
       }
-    | { type: "playlist"; playlistId: number; maxSeeds: number; apply: boolean };
+    | { type: "playlist"; playlistId: PlaylistId; maxSeeds: number; apply: boolean };
   similarPerArtist: number;
   depth: number;
   tracksPerSimilar: number;
@@ -303,7 +304,7 @@ export interface SimilarArgs {
 
 /** Where the deduplicator should look for tracks. */
 export type DedupeSource =
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "favourites" }
   | { type: "all-playlists" };
 
@@ -353,7 +354,7 @@ export function parseKeepChain(raw: string | undefined): KeepStrategy[] {
  * @throws {Error} if the source or the keep strategy is missing/invalid.
  */
 export function parseDedupeArgs(argv: readonly string[]): DedupeOptions {
-  let playlistId: number | undefined;
+  let playlistId: PlaylistId | undefined;
   let favourites = false;
   let allPlaylists = false;
   let keep: KeepStrategy[] = [DEFAULT_KEEP];
@@ -590,7 +591,7 @@ export type ExportSourceArg =
   | { type: "favourite-tracks" }
   | { type: "favourite-albums" }
   | { type: "favourite-artists" }
-  | { type: "playlist"; playlistId: number }
+  | { type: "playlist"; playlistId: PlaylistId }
   | { type: "account" }
   | { type: "all-playlists" };
 
@@ -711,7 +712,7 @@ export type ImportTargetArg =
   | { type: "favourites" }
   | { type: "favourite-albums" }
   | { type: "favourite-artists" }
-  | { type: "playlist-existing"; playlistId: number }
+  | { type: "playlist-existing"; playlistId: PlaylistId }
   | { type: "playlist-new"; name: string }
   | { type: "account" };
 
@@ -884,7 +885,7 @@ const PLAYLIST_ONLY_FLAGS = ["--seeds", "--apply"] as const;
  */
 export function parseSimilarArgs(argv: readonly string[]): SimilarArgs {
   let playlistName: string | undefined;
-  let playlistId: number | undefined;
+  let playlistId: PlaylistId | undefined;
   const settings = {
     similarPerArtist: SIMILAR_SETTINGS.similarPerArtist.fallback as number,
     depth: SIMILAR_SETTINGS.depth.fallback as number,
@@ -1483,7 +1484,7 @@ export interface NewReleasesArgs {
 export function parseNewReleasesArgs(argv: readonly string[]): NewReleasesArgs {
   let since: string | undefined;
   let days: number | undefined;
-  let playlistId: number | undefined;
+  let playlistId: PlaylistId | undefined;
   let include: ReleaseType[] | undefined;
   let playlistName: string | undefined;
   let favouriteAlbums = false;
@@ -1931,7 +1932,7 @@ export function parseJobsArgs(argv: readonly string[]): JobsArgs {
 }
 
 /** A playlist id or link, or "favourites", as an input. */
-function playlistInput(raw: string, flag: string): { type: "favourites" } | { type: "playlist"; playlistId: number } {
+function playlistInput(raw: string, flag: string): { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId } {
   if (raw === "favourites" || raw === "favorites") {
     return { type: "favourites" };
   }
@@ -2008,7 +2009,7 @@ export function parseJobCreate(argv: readonly string[]): JobCreateArgs {
   const kind = rawKind as JobKind;
   const own = new Set(KIND_FLAGS[kind]);
   const positionals: string[] = [];
-  const inputs: ({ type: "favourites" } | { type: "playlist"; playlistId: number })[] = [];
+  const inputs: ({ type: "favourites" } | { type: "playlist"; playlistId: PlaylistId })[] = [];
   let favourites = false;
   let seedPlaylist: number | undefined;
   let name: string | undefined;

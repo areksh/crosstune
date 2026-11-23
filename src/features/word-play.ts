@@ -29,6 +29,7 @@
  * alternatives. Words no title covers become unmatched gaps.
  */
 
+import type { PlaylistId, TrackId } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import {
@@ -122,7 +123,7 @@ export const DEFAULT_MATCH_OPTIONS: Readonly<MatchOptions> = {
 };
 
 /** Where `acrostic` and `a-to-z` pick their songs from. */
-export type WordPlaySource = { type: "favourites" } | { type: "playlist"; playlistId: number };
+export type WordPlaySource = { type: "favourites" } | { type: "playlist"; playlistId: PlaylistId };
 
 export type WordPlayRequest =
   | { mode: "contains" | "exact"; text: string; count?: number }
@@ -198,7 +199,7 @@ export interface WordPlaySearchClient {
 /** The client surface needed to read favourites and playlists. */
 export interface WordPlaySourceClient {
   getFavoriteTracks(): Promise<Track[]>;
-  getPlaylistTracks(playlistId: number): Promise<Track[]>;
+  getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
 }
 
 export type WordPlayClient = WordPlaySearchClient & WordPlaySourceClient;
@@ -1208,12 +1209,12 @@ function checkBounds(name: string, value: number | undefined, bounds: IntBounds)
 /** Where to write a word-play playlist. */
 export type WordPlayTarget =
   | { type: "new"; name: string; isPublic?: boolean; description?: string }
-  | { type: "existing"; playlistId: number };
+  | { type: "existing"; playlistId: PlaylistId };
 
 export interface WordPlayCommitResult {
   /** The created playlist (new target only). */
   playlist?: Playlist;
-  playlistId: number;
+  playlistId: PlaylistId;
   /** Track ids written, in order. */
   added: number[];
   /** Track ids skipped: repeated, or already in an existing playlist. */
@@ -1227,7 +1228,7 @@ export interface WordPlayCommitResult {
  */
 export async function commitWordPlay(
   client: PlaylistWriterClient & ExistingPlaylistClient,
-  options: { target: WordPlayTarget; trackIds: readonly number[] },
+  options: { target: WordPlayTarget; trackIds: readonly TrackId[] },
 ): Promise<WordPlayCommitResult> {
   const { target } = options;
   if (target.type === "existing") {
