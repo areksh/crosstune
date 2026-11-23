@@ -56,9 +56,24 @@ describe("tryAcquireLock", () => {
         host: "box",
         isAlive: () => true,
         staleMs: 60_000,
+        bootedAt: at("2026-11-01T00:00:00Z"),
         now: at("2026-11-03T10:00:00Z"),
       }),
     ).toBeUndefined();
+  });
+
+  it("takes over a lock from before this machine started, even if its pid is reused", () => {
+    // Taken, then the machine restarted: another process now has pid 1.
+    tryAcquireLock(path, { pid: 1, host: "box", now: at("2026-11-02T10:00:00Z") });
+    const lock = tryAcquireLock(path, {
+      pid: 2,
+      host: "box",
+      isAlive: () => true,
+      bootedAt: at("2026-11-02T12:00:00Z"),
+      now: at("2026-11-02T12:05:00Z"),
+    });
+    expect(lock).toBeDefined();
+    expect(readLock(path)?.pid).toBe(2);
   });
 
   it("does not delete a lock taken over while it was judging the old one stale", () => {

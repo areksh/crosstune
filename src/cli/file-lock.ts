@@ -5,10 +5,12 @@
  *
  * The lock is a file created exclusively (`wx`) holding who took it. A lock is
  * taken over when it is stale: its process is gone (judged only on the same
- * host), it is older than `staleMs` while its host cannot be asked whether the
- * process lives (a lock held on this host by a live process is never stale, so
- * a long job does not get a second runner), or it cannot be read and is more
- * than a few seconds old (a fresh one may still be being written).
+ * host, where a lock taken before the machine last started is gone too, since
+ * its pid may since belong to another process), it is older than `staleMs`
+ * while its host cannot be asked whether the process lives (a lock held on
+ * this host by a live process is never stale, so a long job does not get a
+ * second runner), or it cannot be read and is more than a few seconds old (a
+ * fresh one may still be being written).
  *
  * A takeover is atomic: the stale file is renamed aside (one process wins the
  * rename), checked to be the holder that was judged stale, and only then
@@ -28,7 +30,7 @@ import {
   writeSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { hostname } from "node:os";
+import { hostname, uptime } from "node:os";
 import { dirname } from "node:path";
 
 export interface LockInfo {
@@ -42,6 +44,8 @@ export interface LockOptions {
   staleMs?: number;
   now?: () => Date;
   isAlive?: (pid: number) => boolean;
+  /** When this machine started (default from `os.uptime()`). */
+  bootedAt?: () => Date;
   host?: string;
   pid?: number;
 }
@@ -203,6 +207,9 @@ function create(path: string, info: LockInfo): boolean {
   return true;
 }
 
+/** Allowance for the boot time, which `os.uptime()` gives only roughly. */
+const BOOT_SLACK_MS = 60_000;
+
 /** An unreadable lock younger than this may still be being written. */
 const UNREADABLE_GRACE_MS = 10_000;
 
@@ -221,6 +228,12 @@ function isStale(
     }
   }
   if (holder.host === host) {
+    // Taken before this machine last started: its process is gone, whatever
+    // now has that pid (pids are handed out afresh after a restart).
+    const bootedAt = options.bootedAt?.() ?? new Date(Date.now() - uptime() * 1000);
+    if (Date.parse(holder.startedAt) < bootedAt.getTime() - BOOT_SLACK_MS) {
+      return true;
+    }
     // Liveness can be asked: age alone never makes a live holder stale.
     return !(options.isAlive ?? processIsAlive)(holder.pid);
   }
