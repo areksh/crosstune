@@ -2295,6 +2295,11 @@ function planRestore(
         `${result.favouriteAlbums} albums, ${count(result.favouriteArtists, "artist")}, ` +
         `and recreated ${result.playlists.length} playlists.`,
     );
+    for (const playlist of result.playlists) {
+      if (playlist.missing.length > 0) {
+        logger.info(`  ${playlist.name}: ${count(playlist.missing.length, "song")} did not arrive.`);
+      }
+    }
   };
 }
 
