@@ -15,7 +15,7 @@ import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art
 import { parseRoute, routeHash, viewOf, type Route } from "../ui/routes.js";
 import { hostingDecision } from "../ui/hosting-decision.js";
 import { sourceToolFill, toolLabel, type Fill, type Source } from "../ui/tools.js";
-import { artworkInto } from "./artwork.js";
+import { artworkInto, tintFromCover } from "./artwork.js";
 import { openDialog } from "./dialog.js";
 import { el } from "./dom.js";
 import { knownPlaylist, LIBRARY_LOADED } from "./library.js";
@@ -217,6 +217,7 @@ function paintContext(name: string, image?: string): void {
   el("context-bar").style.background = glowBackground(cover);
   el("context-name").textContent = name;
   artworkInto(el("context-cover"), image);
+  tintFromCover(el("context-bar"), image);
 }
 
 /** Show the context bar and hide the tool's own title and source picker, for a hosted route. */

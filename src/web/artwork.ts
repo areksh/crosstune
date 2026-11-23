@@ -8,7 +8,7 @@
  * this browser only.
  */
 
-import { coverBackground, generatedCover } from "../ui/cover-art.js";
+import { coverBackground, coverFromColour, generatedCover, glowBackground } from "../ui/cover-art.js";
 import { el } from "./dom.js";
 
 const STORAGE_KEY = "crosstune:show-artwork";
@@ -86,6 +86,73 @@ export function artworkInto(slot: HTMLElement, url: string | undefined): void {
   img.addEventListener("error", () => img.remove());
   load(img);
   slot.appendChild(img);
+}
+
+/** Whether album covers are shown (and so may be requested). */
+export function artworkOn(): boolean {
+  return enabled;
+}
+
+/**
+ * A cover's average colour, read in the page (ADR-0015): the image servers
+ * answer CORS, so a CORS-mode image can be drawn to a canvas and read. Only
+ * while artwork is on; undefined on any failure (the caller keeps its tint).
+ */
+export function readCoverColour(url: string): Promise<{ r: number; g: number; b: number } | undefined> {
+  if (!enabled || !url.startsWith("https://")) {
+    return Promise.resolve(undefined);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.referrerPolicy = "no-referrer";
+    img.decoding = "async";
+    img.addEventListener("error", () => resolve(undefined));
+    img.addEventListener("load", () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 8;
+        canvas.height = 8;
+        const context = canvas.getContext("2d");
+        if (context === null) {
+          resolve(undefined);
+          return;
+        }
+        context.drawImage(img, 0, 0, 8, 8);
+        const { data } = context.getImageData(0, 0, 8, 8);
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]!;
+          g += data[i + 1]!;
+          b += data[i + 2]!;
+        }
+        const n = data.length / 4;
+        resolve({ r: r / n, g: g / n, b: b / n });
+      } catch {
+        // A canvas that cannot be read (no CORS after all).
+        resolve(undefined);
+      }
+    });
+    img.src = url;
+  });
+}
+
+/**
+ * Tint `target` from the real cover at `url` once its colour is read, if it
+ * still shows that cover then (the page may have moved on).
+ */
+export function tintFromCover(target: HTMLElement, url: string | undefined): void {
+  target.dataset["tintFor"] = url ?? "";
+  if (url === undefined) {
+    return;
+  }
+  void readCoverColour(url).then((rgb) => {
+    if (rgb !== undefined && target.dataset["tintFor"] === url) {
+      target.style.background = glowBackground(coverFromColour(rgb));
+    }
+  });
 }
 
 /** Point an existing cover slot at another cover (e.g. a different version). */

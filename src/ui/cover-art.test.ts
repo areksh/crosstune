@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coverBackground, generatedCover, glowBackground } from "./cover-art.js";
+import { coverBackground, coverFromColour, generatedCover, glowBackground } from "./cover-art.js";
 
 function hueGap(a: number, b: number): number {
   const d = Math.abs(a - b);
@@ -37,5 +37,32 @@ describe("generatedCover", () => {
 
   it("gives an empty name a cover too", () => {
     expect(generatedCover("").colours).toHaveLength(3);
+  });
+});
+
+describe("coverFromColour", () => {
+  const parts = (colour: string): number[] => /^hsl\((\d+) (\d+)% (\d+)%\)$/.exec(colour)!.slice(1).map(Number);
+
+  it("takes the hue of a cover's colour", () => {
+    expect(coverFromColour({ r: 200, g: 40, b: 40 }).hue).toBe(0);
+    expect(coverFromColour({ r: 40, g: 40, b: 200 }).hue).toBe(240);
+    expect(coverFromColour({ r: 40, g: 200, b: 40 }).hue).toBe(120);
+  });
+
+  it("keeps a dark or washed-out cover's glow visible", () => {
+    const [, s, l] = parts(coverFromColour({ r: 10, g: 12, b: 30 }).colours[0]);
+    expect(s).toBeGreaterThanOrEqual(45);
+    expect(l).toBeGreaterThanOrEqual(50);
+  });
+
+  it("gives a grey cover a neutral, low-saturation glow", () => {
+    const [, s] = parts(coverFromColour({ r: 128, g: 128, b: 128 }).colours[0]);
+    expect(s).toBeLessThanOrEqual(20);
+  });
+
+  it("yields colours the glow and cover functions take", () => {
+    const cover = coverFromColour({ r: 90, g: 30, b: 160 });
+    expect(cover.colours).toHaveLength(3);
+    expect(glowBackground(cover)).toMatch(/^radial-gradient\(/);
   });
 });

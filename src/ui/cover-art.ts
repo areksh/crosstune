@@ -8,6 +8,8 @@
 export interface GeneratedCover {
   /** The base hue, 0-359. */
   hue: number;
+  /** How colourful the glow is (percent); a drawn cover's is 78. */
+  saturation?: number;
   /** Three CSS `hsl()` colours of one family: the light main one, a neighbour, a dark one. */
   colours: [string, string, string];
 }
@@ -49,5 +51,41 @@ export function coverBackground(cover: GeneratedCover): string {
 /** The playlist header's tint, fading into the page. */
 export function glowBackground(cover: GeneratedCover): string {
   const { hue } = cover;
-  return `radial-gradient(120% 80% at 20% 0%, ${hsl(hue, 78, 50, 0.5)}, ${hsl(hue + 35, 70, 40, 0.22)} 45%, transparent 75%)`;
+  const saturation = cover.saturation ?? 78;
+  return `radial-gradient(120% 80% at 20% 0%, ${hsl(hue, saturation, 50, 0.5)}, ${hsl(hue + 35, Math.round(saturation * 0.9), 40, 0.22)} 45%, transparent 75%)`;
+}
+
+const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
+
+/**
+ * The colours of a real cover, from its average colour (read in the page;
+ * ADR-0015): its hue, kept bright and colourful enough to glow on near-black
+ * under white text, and a grey cover kept grey.
+ */
+export function coverFromColour(rgb: { r: number; g: number; b: number }): GeneratedCover {
+  const r = rgb.r / 255;
+  const g = rgb.g / 255;
+  const b = rgb.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  const lightness = (max + min) / 2;
+  let hue = 0;
+  if (chroma > 0) {
+    hue = max === r ? ((g - b) / chroma) % 6 : max === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
+    hue = Math.round(hue * 60 + 360) % 360;
+  }
+  const raw = chroma === 0 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1));
+  // Under an eighth of full colour reads as grey: keep it so, rather than invent a hue.
+  const saturation = raw < 0.12 ? 12 : Math.round(clamp(raw * 100, 45, 85));
+  const light = Math.round(clamp(lightness * 100, 50, 66));
+  return {
+    hue,
+    saturation,
+    colours: [
+      hsl(hue, saturation, light),
+      hsl(hue + 20, saturation, light - 6),
+      hsl(hue + 40, Math.round(saturation * 0.8), 34),
+    ],
+  };
 }

@@ -11,7 +11,7 @@ import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art
 import { parseRoute } from "../ui/routes.js";
 import { formatDuration } from "../features/playlist-shape.js";
 import { api, type Track } from "./api.js";
-import { artworkInto, coverSlot } from "./artwork.js";
+import { artworkInto, coverSlot, tintFromCover } from "./artwork.js";
 import { el } from "./dom.js";
 import { clockTime, qualityPill, titleOf, trackText } from "./tracks.js";
 import { songCount } from "./views/playlist-actions.js";
@@ -44,6 +44,7 @@ function paintHero(prefix: string, name: string, eyebrow: string, image?: string
   el(`${prefix}-hero`).style.background = glowBackground(cover);
   el(`${prefix}-eyebrow`).textContent = eyebrow;
   artworkInto(el(`${prefix}-cover`), image);
+  tintFromCover(el(`${prefix}-hero`), image);
 }
 
 /** The playlist page's header; `linkedWith` names the services of its other copies. */
