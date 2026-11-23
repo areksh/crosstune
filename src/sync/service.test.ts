@@ -104,7 +104,8 @@ describe("linksService", () => {
     states.set("abcdef01", { ...states.get("abcdef01")!, paused: { since: "x", reason: "undone" } });
     service.setEnabled("abcdef01", true);
     // Resuming after an undo looks at the copies afresh, as a first link.
-    expect(states.get("abcdef01")).toMatchObject({ paused: undefined, base: undefined });
+    expect(states.get("abcdef01")).not.toHaveProperty("paused");
+    expect(states.get("abcdef01")).not.toHaveProperty("base");
     service.remove("abcdef01");
     expect([file(), states.size, q.songs(a)]).toEqual([[], 0, [1]]);
   });

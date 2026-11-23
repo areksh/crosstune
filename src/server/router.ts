@@ -29,6 +29,8 @@ import {
 } from "../services/ids.js";
 import type { MatchMemory } from "../features/match.js";
 import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes, withWriteLock } from "./playlist-routes.js";
+import type { LinksService } from "../sync/service.js";
+import { LINKS_PREFIX, linkRoutes } from "./link-routes.js";
 import { TRANSFER_COMMIT, TRANSFER_PREFIX, transferRoutes } from "./transfer-routes.js";
 import {
   RELEASE_TYPES,
@@ -238,6 +240,8 @@ export interface ApiDeps {
    * the page chose, and `service`, `session` and `ownerId` are set from that.
    */
   accounts?: AccountDeps;
+  /** Linked playlists; without it the link routes answer 404. */
+  links?: LinksService;
   /** Remembered matches; with `accounts`, songs can be copied between services. */
   matches?: MatchMemory;
   /** The signed-in user's id on each service (with `accounts`). */
@@ -355,6 +359,7 @@ const FOR_ALL = [
   "/api/export",
   "/api/history",
   "/api/jobs",
+  "/api/links",
   MANAGER_PREFIX,
   TRANSFER_PREFIX,
 ];
@@ -424,6 +429,9 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
 async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.path === "/api/jobs" || req.path.startsWith("/api/jobs/")) {
     return jobsRoute(req, deps);
+  }
+  if (req.path.startsWith(LINKS_PREFIX) && deps.links !== undefined) {
+    return linkRoutes(req, deps.links);
   }
   if (req.path.startsWith(TRANSFER_PREFIX) && deps.accounts !== undefined && deps.matches !== undefined) {
     const transfer = { hub: deps.accounts.hub, matches: deps.matches };
