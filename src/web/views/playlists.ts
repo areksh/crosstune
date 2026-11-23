@@ -249,6 +249,7 @@ async function change(text: string, act: () => Promise<string>): Promise<void> {
     const done = await act();
     await load();
     say(done);
+    void refreshLibrary();
   } finally {
     list.inert = false;
     el("pl-status").hidden = playlists.length > 0;
@@ -279,6 +280,7 @@ async function duplicate(playlist: ManagerPlaylist): Promise<void> {
         "POST",
         "/api/manager/duplicate",
         { playlistId: playlist.id, name: name.value.trim() },
+        serviceOf(playlist.id),
       );
       const lost = result.missing > 0 ? `; the service no longer offers ${result.missing}` : "";
       return `Made ${result.playlist.name} with ${songCount(result.added)}${lost}.`;

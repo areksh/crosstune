@@ -3198,7 +3198,7 @@ button.menu-item:hover:not(:disabled) {
 
 .pl-toolbar {
   position: sticky;
-  top: 0;
+  top: var(--topbar-h);
   z-index: 6;
   display: flex;
   flex-wrap: wrap;

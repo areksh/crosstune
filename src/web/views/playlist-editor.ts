@@ -942,6 +942,7 @@ async function sendAcross(
     } else {
       say(text);
     }
+    void refreshLibrary();
   });
 }
 
@@ -986,6 +987,7 @@ async function copyNow(ids: readonly EntryId[], destination: Destination): Promi
   await working("Copying...", async () => {
     const result = await api<ConfirmedAdd>("POST", "/api/manager/copy", { trackIds: trackIdsOf(ids), destination }, serviceOf(current().playlist.id));
     say(describeAdd(result, "Copied"));
+    void refreshLibrary();
   });
 }
 

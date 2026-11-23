@@ -15,6 +15,7 @@ import { openDialog } from "../dialog.js";
 import { el, showError } from "../dom.js";
 import { chosenService, rememberService } from "../service.js";
 import { SETUP } from "./account-setup.js";
+import { parseRoute } from "../../ui/routes.js";
 
 const POLL_MS = 1500;
 
@@ -24,13 +25,18 @@ const waiting = new Map<ServiceName, { listening: boolean; problem?: string; url
 let polling = false;
 
 /** Wire up the accounts view. Call once on load. */
+/** Whether the page shows Settings, where the accounts are. */
+function onSettings(): boolean {
+  return parseRoute(location.hash).kind === "settings";
+}
+
 export function initAccountsView(): void {
   window.addEventListener("hashchange", () => {
-    if (location.hash === "#/accounts") {
+    if (onSettings()) {
       void load();
     }
   });
-  if (location.hash === "#/accounts") {
+  if (onSettings()) {
     void load();
   }
 }
@@ -240,7 +246,7 @@ async function poll(): Promise<void> {
   }
   polling = true;
   try {
-    while (waiting.size > 0 && location.hash === "#/accounts") {
+    while (waiting.size > 0 && onSettings()) {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       await load();
       for (const account of accounts) {

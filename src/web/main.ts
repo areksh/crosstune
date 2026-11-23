@@ -9,18 +9,19 @@
  */
 
 import type { AccountView } from "../accounts/accounts.js";
-import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
+import { SERVICE_LABELS } from "../services/names.js";
 import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
 import { parseRoute, redirectFor, type Route } from "../ui/routes.js";
-import { initLibrary, markActive } from "./library.js";
+import { initLibrary, markActive, refreshLibrary } from "./library.js";
 import { initShell } from "./shell.js";
 import { initFavouritesView } from "./playlist-page.js";
 import { attentionBadge, linkAttention } from "../sync/wording.js";
 import { accountNotices, linkNotices, showNotices, type Notice } from "./notices.js";
-import { chosenService, rememberService, setConnectedServices } from "./service.js";
+import { chosenService, connectedServices, rememberService, setConnectedServices } from "./service.js";
+import { workingNotice } from "../ui/working-service.js";
 import { initAccountsView } from "./views/accounts.js";
 import { initAlbumsView } from "./views/albums.js";
 import { initCombineView } from "./views/combine.js";
@@ -63,6 +64,10 @@ function isView(value: string): value is View {
   return (VIEWS as readonly string[]).includes(value);
 }
 
+/** The views that only read the library, so leaving them changes nothing in it. */
+const LIBRARY_VIEWS: readonly View[] = ["home", "playlists", "favourites", "accounts"];
+let shown: View | undefined;
+
 /** The section that shows a route. */
 function viewOf(route: Route): View {
   switch (route.kind) {
@@ -94,6 +99,11 @@ function route(): void {
   }
   const where = parseRoute(location.hash);
   const active = viewOf(where);
+  // A tool (or History's undo) may have written: read the library again on leaving it.
+  if (shown !== undefined && shown !== active && !LIBRARY_VIEWS.includes(shown)) {
+    void refreshLibrary();
+  }
+  shown = active;
   for (const view of VIEWS) {
     el(`view-${view}`).hidden = view !== active;
   }
@@ -123,7 +133,6 @@ async function loadAccounts(): Promise<void> {
     rememberService(chosen?.service);
   }
   notices = accountNotices(accounts);
-  oneService = all ? connected.map((account) => account.service) : [];
   renderNotices();
   if (connected.length === 0 && parseRoute(location.hash).kind === "home") {
     location.hash = "#/settings";
@@ -133,18 +142,18 @@ async function loadAccounts(): Promise<void> {
 /** The views that can show every service at once; the others work on one. */
 const ALL_VIEWS: readonly View[] = ["home", "playlists", "favourites", "stats", "combine", "history", "accounts", "managed", "import-export"];
 let notices: Notice[] = [];
-/** The connected services, when the page is on all of them (for the banner's choices). */
-let oneService: ServiceName[] = [];
 /** What the linked playlists need, on every page until it is settled. */
 let linksNeed: Notice[] = [];
 
 function renderNotices(): void {
+  const working = workingNotice(chosenService(), connectedServices(), ALL_VIEWS.includes(currentView()));
   const one: Notice[] =
-    chosenService() === "all" && !ALL_VIEWS.includes(currentView())
-      ? [
+    working === undefined
+      ? []
+      : [
           {
-            text: "This works on one music service at a time.",
-            links: oneService.map((service) => ({
+            text: working.text,
+            links: working.switchTo.map((service) => ({
               href: location.hash,
               text: `Use ${SERVICE_LABELS[service]}`,
               onClick: () => {
@@ -153,8 +162,7 @@ function renderNotices(): void {
               },
             })),
           },
-        ]
-      : [];
+        ];
   showNotices([...one, ...linksNeed, ...notices]);
 }
 
