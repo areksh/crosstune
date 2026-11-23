@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
 import { qid } from "../services/ids.test-support.js";
 import { tagId, type AlbumId, type ArtistId, type TrackId } from "../services/ids.js";
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
@@ -205,6 +206,95 @@ describe("resolveImport", () => {
       items: [{ name: "Portishead" }],
     });
     expect(plan.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
+  });
+
+  it("does not guess whose song a title-only line is", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> =>
+      query === "GBAYE6300001"
+        ? [{ id: qid(81), title: "Yesterday", artist: "The Beatles", isrc: "GBAYE6300001" }]
+        : [{ id: qid(80), title: "Yesterday", artist: "A Cover Band" }],
+    );
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Yesterday" }, { title: "Yesterday", isrc: "GBAYE6300001" }],
+    });
+    // By its ISRC a title-only line is still the same recording.
+    expect(plan.matched).toEqual([{ label: "Yesterday", id: qid(81), via: "isrc" }]);
+    expect(plan.unmatched).toEqual(["Yesterday (no artist given)"]);
+    expect(searchTracks.mock.calls.map((call) => call[0])).toEqual(["GBAYE6300001"]);
+  });
+
+  it("takes an artist only by name, never the first search hit", async () => {
+    const searchArtists = vi.fn(async (query: string): Promise<Artist[]> =>
+      query === "Bjork"
+        ? [
+            { id: qid(70), name: "Björk Tribute Band" },
+            { id: qid(71), name: "Björk" },
+          ]
+        : query === "Guns N Roses"
+          ? [{ id: qid(72), name: "Guns N' Roses" }]
+          : [{ id: qid(73), name: "Someone Qobuz Does Have" }],
+    );
+    const plan = await resolveImport(fakeResolver({ searchArtists }), {
+      kind: "artists",
+      items: [{ name: "Bjork" }, { name: "Guns N Roses" }, { name: "An Artist Qobuz Lacks" }],
+    });
+    expect(plan.matched).toEqual([
+      { label: "Bjork", id: qid(71), via: "search" },
+      { label: "Guns N Roses", id: qid(72), via: "search" },
+    ]);
+    expect(plan.unmatched).toEqual(["An Artist Qobuz Lacks"]);
+  });
+
+  it("reports an item whose search failed as unmatched and carries on with the rest", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> => {
+      if (query.includes("Broken")) {
+        throw new Error("HTTP 500");
+      }
+      return query.includes("Roads") ? [{ id: qid(1), title: "Roads", artist: "Portishead" }] : [];
+    });
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [
+        { title: "Broken", artist: "Somebody" },
+        { title: "Roads", artist: "Portishead" },
+      ],
+    });
+    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: qid(1), via: "search" }]);
+    expect(plan.unmatched).toEqual(["Somebody - Broken (could not be looked up)"]);
+
+    const albums = await resolveImport(
+      fakeResolver({
+        searchAlbums: async () => {
+          throw new Error("HTTP 502");
+        },
+      }),
+      { kind: "albums", items: [{ title: "Dummy", artist: "Portishead" }] },
+    );
+    expect(albums.unmatched).toEqual(["Portishead - Dummy (could not be looked up)"]);
+
+    const artists = await resolveImport(
+      fakeResolver({
+        searchArtists: async (query) => {
+          if (query === "Tricky") throw new Error("timeout");
+          return [{ id: qid(55), name: "Portishead" }];
+        },
+      }),
+      { kind: "artists", items: [{ name: "Tricky" }, { name: "Portishead" }] },
+    );
+    expect(artists.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
+    expect(artists.unmatched).toEqual(["Tricky (could not be looked up)"]);
+  });
+
+  it("stops on an error every item would hit, without searching for the rest", async () => {
+    const searchTracks = vi.fn(async (): Promise<Track[]> => {
+      throw new ServiceError("qobuz", "authentication", "signed out");
+    });
+    const items = Array.from({ length: 100 }, (_, index) => ({ title: `Song ${index}`, artist: "A" }));
+    await expect(resolveImport(fakeResolver({ searchTracks }), { kind: "tracks", items })).rejects.toThrow(
+      "signed out",
+    );
+    expect(searchTracks.mock.calls.length).toBeLessThan(20);
   });
 });
 
@@ -481,6 +571,26 @@ describe("Spotify (Exportify) parsing", () => {
     expect(parseCollection(older, "spotify", "tracks").items).toEqual([
       { title: "Roads", artist: "Portishead", artists: ["Portishead"], album: "Dummy" },
     ]);
+  });
+
+  it("splits the artists on semicolons when a newer export uses them, keeping commas in names", () => {
+    const newer = [
+      EXPORTIFY_HEADER,
+      exportifyRow({
+        name: "EARFQUAKE",
+        artists: "Tyler, The Creator;Playboi Carti",
+        album: "IGOR",
+        isrc: "USQX91900537",
+      }),
+      exportifyRow({ name: "Yonkers", artists: "Tyler, The Creator", album: "Goblin", isrc: "USQX91100001" }),
+    ].join("\n");
+    const items = parseCollection(newer, "spotify", "tracks").items;
+    expect(items[0]).toMatchObject({
+      artist: "Tyler, The Creator, Playboi Carti",
+      artists: ["Tyler, The Creator", "Playboi Carti"],
+    });
+    // Without a semicolon there is no telling a comma in a name from a separator.
+    expect(items[1]).toMatchObject({ artists: ["Tyler", "The Creator"] });
   });
 
   it("refuses to read a Spotify export as albums or artists", () => {

@@ -48,6 +48,8 @@ import {
   type ExistingPlaylistClient,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
+import { stopsEverySong } from "./match.js";
+import { normaliseArtistName } from "./track-filter.js";
 import { compareQuality } from "./upgrade.js";
 
 /** The interchange formats a collection can be written to and read from. */
@@ -424,8 +426,12 @@ function parseSpotifyCsv(content: string): ParsedTrack[] {
       const item: ParsedTrack = {};
       const title = at(row, titleAt);
       if (title !== undefined) item.title = title;
-      const artists = (at(row, artistsAt) ?? "")
-        .split(",")
+      // Newer Exportify exports join the artists with ";" (a name can hold a
+      // comma: "Tyler, The Creator"); older ones with ",". A field with a
+      // semicolon is split on semicolons only.
+      const credit = at(row, artistsAt) ?? "";
+      const artists = credit
+        .split(credit.includes(";") ? ";" : ",")
         .map((name) => name.trim())
         .filter((name) => name.length > 0);
       if (artists.length > 0) {
@@ -621,7 +627,10 @@ export interface ImportPlan {
   kind: CollectionKind;
   /** Items resolved to a Qobuz id, in input order (duplicates removed). */
   matched: MatchedItem[];
-  /** Display labels of items that could not be resolved. */
+  /**
+   * Display labels of items that could not be resolved; one whose search
+   * failed ends in "(could not be looked up)".
+   */
   unmatched: string[];
 }
 
@@ -664,8 +673,9 @@ const ISRC_SEARCH_LIMIT = 20;
  * Resolve a parsed collection to Qobuz ids (phase one).
  *
  * An item that already carries an id is taken as-is; otherwise it is searched
- * for and best-matched. Items that resolve to no id are reported in `unmatched`
- * rather than being fatal, and ids repeated across items are kept once.
+ * for and best-matched. Items that resolve to no id, or whose search failed,
+ * are reported in `unmatched` rather than being fatal, and ids repeated across
+ * items are kept once.
  */
 export async function resolveImport(
   client: ImportResolverClient,
@@ -692,37 +702,52 @@ export async function resolveImport(
   // fetch, while the first-occurrence de-duplication and reporting order are
   // unchanged.
   if (parsed.kind === "tracks") {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: trackLabel(item),
-        match: await resolveTrack(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(trackLabel(item), () => resolveTrack(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   } else if (parsed.kind === "albums") {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: albumLabel(item),
-        match: await resolveAlbum(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(albumLabel(item), () => resolveAlbum(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   } else {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: item.name ?? "(unknown)",
-        match: await resolveArtist(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(item.name ?? "(unknown)", () => resolveArtist(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   }
   return { kind: parsed.kind, matched, unmatched };
+}
+
+/**
+ * Resolve one item, so that its failure is its own: a search that fails (an
+ * HTTP 500, a timeout) leaves that item unmatched, labelled as not looked up,
+ * rather than losing the whole plan -- one bad line in a long import would
+ * otherwise throw away every match made. An error every item would run into
+ * (signed out, out of quota, rate-limited; see {@link stopsEverySong}) still
+ * ends the resolve, since going on would only fail every item left.
+ */
+async function attempt(
+  label: string,
+  resolve: () => Promise<Match | NoMatch | undefined>,
+): Promise<{ label: string; match: Match | undefined }> {
+  try {
+    const result = await resolve();
+    return result !== undefined && "note" in result
+      ? { label: `${label} (${result.note})`, match: undefined }
+      : { label, match: result };
+  } catch (error) {
+    if (stopsEverySong(error)) {
+      throw error;
+    }
+    return { label: `${label} (could not be looked up)`, match: undefined };
+  }
+}
+
+/** An item that matched nothing, with why, when that is more than "not found". */
+interface NoMatch {
+  note: string;
 }
 
 /** A resolved Qobuz id and how it was found. */
@@ -738,7 +763,7 @@ interface Match {
 async function resolveTrack(
   client: ImportResolverClient,
   item: ParsedTrack,
-): Promise<Match | undefined> {
+): Promise<Match | NoMatch | undefined> {
   if (item.id !== undefined) {
     return { id: item.id, via: "id" };
   }
@@ -752,12 +777,17 @@ async function resolveTrack(
   if (item.title === undefined) {
     return undefined;
   }
+  // A title alone ("Yesterday") names a song by anybody: whichever cover the
+  // search ranks first would be taken, unseen. Without an artist to check a
+  // result by (or an ISRC, above), the line is reported rather than guessed.
+  const artist = item.artists?.[0] ?? item.artist;
+  if (artist === undefined) {
+    return { note: "no artist given" };
+  }
   // Search by the first credited artist and the title without its "feat." part:
   // Qobuz keeps featured artists in the version or artist, not the title.
-  const artist = item.artists?.[0] ?? item.artist;
   const title = withoutFeaturing(item.title);
-  const query = artist !== undefined ? `${artist} ${title}` : title;
-  const candidates = await client.searchTracks(query, IMPORT_SEARCH_LIMIT);
+  const candidates = await client.searchTracks(`${artist} ${title}`, IMPORT_SEARCH_LIMIT);
   const picked = pickTrack(candidates, item);
   return picked === undefined ? undefined : { id: picked.id, via: "search" };
 }
@@ -784,7 +814,14 @@ async function resolveAlbum(
   return id === undefined ? undefined : { id, via: "search" };
 }
 
-/** Resolve one parsed artist to a Qobuz artist id (exact name, else first hit). */
+/**
+ * Resolve one parsed artist to a Qobuz artist id: a search result with the
+ * same name, ignoring case, accents and spacing (see
+ * {@link normaliseArtistName}), else one that differs only in punctuation
+ * ("Guns N Roses" for "Guns N' Roses"). Nothing else counts: the first search
+ * hit for an artist Qobuz lacks is somebody else, and favouriting them unseen
+ * is worse than reporting the name unmatched.
+ */
 async function resolveArtist(
   client: ImportResolverClient,
   item: ParsedArtist,
@@ -796,10 +833,12 @@ async function resolveArtist(
     return undefined;
   }
   const candidates = await client.searchArtists(item.name, IMPORT_SEARCH_LIMIT);
-  const wanted = item.name.trim().toLowerCase();
-  const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
-  const id = (exact ?? candidates[0])?.id;
-  return id === undefined ? undefined : { id, via: "search" };
+  const wanted = normaliseArtistName(item.name);
+  const loose = normalise(item.name);
+  const found =
+    candidates.find((artist) => normaliseArtistName(artist.name) === wanted) ??
+    (loose.length === 0 ? undefined : candidates.find((artist) => normalise(artist.name) === loose));
+  return found === undefined ? undefined : { id: found.id, via: "search" };
 }
 
 /**
@@ -837,8 +876,8 @@ function pickByIsrc(
  * outright; otherwise the title must match (with or without a "feat." credit,
  * and against Qobuz's title alone or title plus version, so Spotify's
  * "Song - Live" finds "Song" [Live]) and the artist tokens must overlap with
- * the credit or any one credited artist. A streamable match beats one that is
- * not.
+ * the credit or any one credited artist -- so a wanted track with no artist
+ * matches nothing by name. A streamable match beats one that is not.
  */
 function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | undefined {
   if (want.isrc !== undefined) {
@@ -849,10 +888,9 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
     if (byIsrc !== undefined) return byIsrc;
   }
   const wantTitles = titleKeys(want.title ?? "");
-  const wantArtists =
-    want.artist === undefined
-      ? undefined
-      : [want.artist, ...(want.artists ?? [])].map(tokens);
+  const wantArtists = [want.artist, ...(want.artists ?? [])]
+    .filter((artist) => artist !== undefined)
+    .map(tokens);
   const matches = candidates.filter((candidate) => {
     const candidateTitles = [
       ...titleKeys(candidate.title),
@@ -861,9 +899,9 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
         : titleKeys(`${candidate.title} ${candidate.version}`)),
     ];
     if (!candidateTitles.some((key) => wantTitles.includes(key))) return false;
-    if (wantArtists === undefined) return true;
     if (candidate.artist === undefined) return false;
     const candidateArtist = tokens(candidate.artist);
+    // With no artist wanted nothing matches: a title alone is anybody's song.
     return wantArtists.some((artist) => tokensOverlap(artist, candidateArtist));
   });
   return matches.find((track) => track.streamable !== false) ?? matches[0];

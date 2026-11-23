@@ -32,6 +32,7 @@ import { shortId, type EntryId, type PlaylistId, type TrackId } from "../service
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { toDedupTrack, trackSignature } from "./deduplicate.js";
+import { stopsEverySong } from "./match.js";
 
 /** Where the upgrade tool looks for tracks. */
 export type UpgradeSource =
@@ -371,7 +372,12 @@ export async function resolveUpgradesOf(
           }
         }
       }
-    } catch {
+    } catch (error) {
+      // One failed search is that track's alone; signed out, out of quota or
+      // rate-limited would fail every search left, so it ends the run.
+      if (stopsEverySong(error)) {
+        throw error;
+      }
       return { status: "failed" };
     }
     return blocked && !searched
