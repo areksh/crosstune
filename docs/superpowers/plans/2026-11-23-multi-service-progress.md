@@ -24,13 +24,14 @@ lines; the CLI's Qobuz sign-in ignoring the one-account rule. Also: forget
 order, token request timeout, 403 stops matching, `copy --json` ids, exit 3
 only while a conflict stands, `accounts` showing a not-yet-recorded sign-in.
 
-Deferred (minor): a mistyped pasted sign-in code answers 502 and shows
-"expired" for a service that was not connected; the loopback listener's
-lifetime (closes on the first success, two at once clash on the port);
-`login tidal|spotify` reports a generic failure where the browser tab had the
-reason; no conflict mark on the playlist page or Home, and no side-by-side of
-a conflict's changes (counts only); Combine has no compare-across-services
-view; pasted Spotify/TIDAL links are not parsed (ids and names only).
+Deferred minors, all since fixed: a failed sign-in is a SignInError (no
+longer "expired", nor disconnecting the account); the listener serves sign-ins
+started together and binds once; `login` reports the listener's reason; a
+conflict shows each copy's changes side by side, and linked playlists are
+marked in Playlists and on their page (Home has the notices above every view);
+Combine's "only in the first" copies to the second playlist across services;
+Spotify and TIDAL links are read everywhere, another service's artist or album
+found again here (never a guess between namesakes).
 
 
 Needs the user: TIDAL client id, Spotify client id (Premium owner), one real
