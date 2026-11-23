@@ -206,7 +206,8 @@ button.tab[aria-pressed="true"] {
   text-decoration: none;
 }
 
-.top-link:hover {
+.top-link:hover,
+.top-link[aria-current="page"] {
   background: var(--surface-2);
   color: var(--text);
 }
@@ -2047,21 +2048,30 @@ button.small {
     flex-direction: column;
   }
 
+  /* The top bar wraps: the brand and links, then the tabs on a row of their own. */
+  .topbar {
+    position: static;
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 16px;
+    row-gap: 8px;
+  }
+
+  .tabs {
+    order: 10;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  /* The library stacks above the page, short enough to scroll past. */
   .sidebar {
     position: static;
     width: auto;
     height: auto;
-    overflow: visible;
-    gap: 18px;
-    padding: 20px 16px 16px;
+    max-height: 45vh;
+    padding: 12px 16px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-  }
-
-  .nav {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 14px 12px;
   }
 
   .view-header h1 {

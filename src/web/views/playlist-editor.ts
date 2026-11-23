@@ -68,9 +68,8 @@ import { coverSlot } from "../artwork.js";
 import { dialogChoice, dialogField, openDialog, textInput } from "../dialog.js";
 import { el, showError } from "../dom.js";
 import { enableDrag } from "../drag-list.js";
-import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
-import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
+import { confirmDelete, editDetails, managedNotice, playlistHash, songCount } from "./playlist-actions.js";
 import { refreshLibrary } from "../library.js";
 import { actionButton, actionLink, renderPlaylistHeader } from "../playlist-page.js";
 import { routeHash } from "../../ui/routes.js";
@@ -957,7 +956,7 @@ async function copyToService(): Promise<void> {
   if (others.length === 0) {
     await openDialog({
       title: "Copy to another service",
-      body: ["Connect another music service in Accounts first."],
+      body: ["Connect another music service in Settings first."],
       confirm: "Close",
       cancel: null,
     });
@@ -1464,7 +1463,8 @@ async function deleteHere(): Promise<void> {
     closeEditor();
     sessionDeleted(playlist.name);
     void refreshLibrary();
-    location.hash = "#/";
+    // Where "Deleted ... You can undo this in History." is shown.
+    location.hash = routeHash({ kind: "all", service: serviceOf(playlist.id) });
   }
 }
 

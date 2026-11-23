@@ -128,7 +128,7 @@ async function loadAccounts(): Promise<void> {
   }
   notices = accountNotices(accounts);
   renderNotices();
-  if (connected.length === 0 && parseRoute(location.hash).kind === "home") {
+  if (connected.length === 0 && parseRoute(redirectFor(location.hash) ?? location.hash).kind === "home") {
     location.hash = "#/settings";
   }
 }

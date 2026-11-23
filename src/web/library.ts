@@ -27,6 +27,10 @@ export const LIBRARY_LOADED = "crosstune:library-loaded";
 let connected: readonly ServiceName[] = [];
 let playlists: ManagerPlaylist[] = [];
 let loaded = false;
+/** Why the playlists could not be read, kept until they are. */
+let failure: string | undefined;
+/** Services that could not be read on the last reading. */
+let unavailable: { service: ServiceName; error: string }[] = [];
 let active: Route = { kind: "home" };
 let request = 0;
 
@@ -48,17 +52,24 @@ export async function refreshLibrary(): Promise<void> {
   const mine = ++request;
   try {
     const on = connected.length > 1 ? "all" : connected[0];
-    const result = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists", undefined, on);
+    const result = await api<{ playlists: ManagerPlaylist[]; unavailable?: { service: ServiceName; error: string }[] }>(
+      "GET",
+      "/api/manager/playlists",
+      undefined,
+      on,
+    );
     if (mine === request) {
       playlists = result.playlists;
+      unavailable = result.unavailable ?? [];
       loaded = true;
+      failure = undefined;
       render();
       window.dispatchEvent(new Event(LIBRARY_LOADED));
     }
   } catch (error) {
     if (mine === request) {
-      el("lib-status").hidden = false;
-      el("lib-status").textContent = `Could not read your playlists: ${(error as Error).message}`;
+      failure = `Could not read your playlists: ${(error as Error).message}`;
+      render();
     }
   }
 }
@@ -72,8 +83,10 @@ export function knownPlaylist(id: PlaylistId): ManagerPlaylist | undefined {
 export function markActive(route: Route): void {
   active = route;
   const here = routeHash(route);
-  for (const link of document.querySelectorAll<HTMLAnchorElement>(".sidebar .lib-row")) {
-    const on = link.getAttribute("href") === here;
+  for (const link of document.querySelectorAll<HTMLAnchorElement>(".sidebar .lib-row, .topbar .top-link")) {
+    // A playlist's row stays lit while one of its tools is open ("#/p/<id>/repeats").
+    const href = link.getAttribute("href") ?? "";
+    const on = here === href || here.startsWith(`${href}/`);
     link.classList.toggle("active", on);
     if (on) {
       link.setAttribute("aria-current", "page");
@@ -99,12 +112,17 @@ function render(): void {
   if (connected.length === 0) {
     status.hidden = false;
     status.replaceChildren("No music service is connected yet. ", settingsLink());
+  } else if (failure !== undefined) {
+    status.hidden = false;
+    status.textContent = failure;
   } else if (!loaded) {
     status.hidden = false;
     status.textContent = "Loading...";
   } else {
-    status.hidden = rows.length > 0;
-    status.textContent = playlists.length === 0 ? "You have no playlists yet." : "No playlist matches.";
+    const missing = unavailable.map(({ service }) => `${SERVICE_LABELS[service]} could not be read just now.`).join(" ");
+    const empty = rows.length > 0 ? "" : playlists.length === 0 ? "You have no playlists yet." : "No playlist matches.";
+    status.textContent = [missing, empty].filter((part) => part !== "").join(" ");
+    status.hidden = status.textContent === "";
   }
   markActive(active);
 }

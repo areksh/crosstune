@@ -24,7 +24,8 @@ export function initShell(connected: readonly ServiceName[]): void {
   current = validTab(chosenTab(), connected);
   const box = el("tabs");
   const tabs = tabsFor(connected);
-  box.hidden = tabs.length < 2;
+  // One service connected: its tab alone, so the page still names it.
+  box.hidden = tabs.length === 0;
   box.replaceChildren(
     ...tabs.map((tab) => {
       const button = document.createElement("button");
@@ -43,9 +44,15 @@ export function initShell(connected: readonly ServiceName[]): void {
     }),
   );
   mark();
-  // "+ New" closes once one of its tools is open.
+  // "+ New" closes once one of its tools is chosen (also the one already open).
+  const menu = el<HTMLDetailsElement>("new-menu");
   window.addEventListener("hashchange", () => {
-    el<HTMLDetailsElement>("new-menu").open = false;
+    menu.open = false;
+  });
+  menu.addEventListener("click", (event) => {
+    if ((event.target as Element).closest("a") !== null) {
+      menu.open = false;
+    }
   });
 }
 

@@ -6,7 +6,7 @@
  * the server.
  */
 
-import { readId, serviceOf, shortId, type EntryId, type PlaylistId } from "../../services/ids.js";
+import { serviceOf, shortId, type EntryId, type PlaylistId } from "../../services/ids.js";
 import type { ArtistHit, ManagerPlaylist, RemovalReport, RemoveArtistsPlan } from "../../features/playlist-manager.js";
 import { formatDuration } from "../../features/playlist-shape.js";
 import { labelOf } from "../../services/errors.js";

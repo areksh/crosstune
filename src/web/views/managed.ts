@@ -204,7 +204,7 @@ async function load(): Promise<void> {
 function renderFlags(list: JobsList): void {
   const lines = [
     ...signInFlags(list.flags).map(
-      ({ service }) => `Managed playlists that use ${labelOf(service)} are stopped: its sign-in expired. Sign in again in Accounts.`,
+      ({ service }) => `Managed playlists that use ${labelOf(service)} are stopped: its sign-in expired. Sign in again in Settings.`,
     ),
     ...(list.flags.bundleBroken !== undefined
       ? [`Managed playlists are stopped: Qobuz changed its web player (${list.flags.bundleBroken.message}). Update crosstune.`]
