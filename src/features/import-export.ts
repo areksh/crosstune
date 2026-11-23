@@ -48,6 +48,7 @@ import {
   type ExistingPlaylistClient,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
+import { stopsEverySong } from "./match.js";
 import { compareQuality } from "./upgrade.js";
 
 /** The interchange formats a collection can be written to and read from. */
@@ -603,7 +604,10 @@ export interface ImportPlan {
   kind: CollectionKind;
   /** Items resolved to a Qobuz id, in input order (duplicates removed). */
   matched: MatchedItem[];
-  /** Display labels of items that could not be resolved. */
+  /**
+   * Display labels of items that could not be resolved; one whose search
+   * failed ends in "(could not be looked up)".
+   */
   unmatched: string[];
 }
 
@@ -646,8 +650,9 @@ const ISRC_SEARCH_LIMIT = 20;
  * Resolve a parsed collection to Qobuz ids (phase one).
  *
  * An item that already carries an id is taken as-is; otherwise it is searched
- * for and best-matched. Items that resolve to no id are reported in `unmatched`
- * rather than being fatal, and ids repeated across items are kept once.
+ * for and best-matched. Items that resolve to no id, or whose search failed,
+ * are reported in `unmatched` rather than being fatal, and ids repeated across
+ * items are kept once.
  */
 export async function resolveImport(
   client: ImportResolverClient,
@@ -674,37 +679,44 @@ export async function resolveImport(
   // fetch, while the first-occurrence de-duplication and reporting order are
   // unchanged.
   if (parsed.kind === "tracks") {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: trackLabel(item),
-        match: await resolveTrack(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(trackLabel(item), () => resolveTrack(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   } else if (parsed.kind === "albums") {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: albumLabel(item),
-        match: await resolveAlbum(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(albumLabel(item), () => resolveAlbum(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   } else {
-    const resolved = await mapWithConcurrency(
-      parsed.items,
-      DEFAULT_CONCURRENCY,
-      async (item) => ({
-        label: item.name ?? "(unknown)",
-        match: await resolveArtist(client, item),
-      }),
+    const resolved = await mapWithConcurrency(parsed.items, DEFAULT_CONCURRENCY, (item) =>
+      attempt(item.name ?? "(unknown)", () => resolveArtist(client, item)),
     );
     for (const { label, match } of resolved) add(label, match);
   }
   return { kind: parsed.kind, matched, unmatched };
+}
+
+/**
+ * Resolve one item, so that its failure is its own: a search that fails (an
+ * HTTP 500, a timeout) leaves that item unmatched, labelled as not looked up,
+ * rather than losing the whole plan -- one bad line in a long import would
+ * otherwise throw away every match made. An error every item would run into
+ * (signed out, out of quota, rate-limited; see {@link stopsEverySong}) still
+ * ends the resolve, since going on would only fail every item left.
+ */
+async function attempt(
+  label: string,
+  resolve: () => Promise<Match | undefined>,
+): Promise<{ label: string; match: Match | undefined }> {
+  try {
+    return { label, match: await resolve() };
+  } catch (error) {
+    if (stopsEverySong(error)) {
+      throw error;
+    }
+    return { label: `${label} (could not be looked up)`, match: undefined };
+  }
 }
 
 /** A resolved Qobuz id and how it was found. */

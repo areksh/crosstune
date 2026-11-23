@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
 import { qid } from "../services/ids.test-support.js";
 import { tagId, type AlbumId, type ArtistId, type TrackId } from "../services/ids.js";
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
@@ -205,6 +206,57 @@ describe("resolveImport", () => {
       items: [{ name: "Portishead" }],
     });
     expect(plan.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
+  });
+
+  it("reports an item whose search failed as unmatched and carries on with the rest", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> => {
+      if (query.includes("Broken")) {
+        throw new Error("HTTP 500");
+      }
+      return query.includes("Roads") ? [{ id: qid(1), title: "Roads", artist: "Portishead" }] : [];
+    });
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [
+        { title: "Broken", artist: "Somebody" },
+        { title: "Roads", artist: "Portishead" },
+      ],
+    });
+    expect(plan.matched).toEqual([{ label: "Portishead - Roads", id: qid(1), via: "search" }]);
+    expect(plan.unmatched).toEqual(["Somebody - Broken (could not be looked up)"]);
+
+    const albums = await resolveImport(
+      fakeResolver({
+        searchAlbums: async () => {
+          throw new Error("HTTP 502");
+        },
+      }),
+      { kind: "albums", items: [{ title: "Dummy", artist: "Portishead" }] },
+    );
+    expect(albums.unmatched).toEqual(["Portishead - Dummy (could not be looked up)"]);
+
+    const artists = await resolveImport(
+      fakeResolver({
+        searchArtists: async (query) => {
+          if (query === "Tricky") throw new Error("timeout");
+          return [{ id: qid(55), name: "Portishead" }];
+        },
+      }),
+      { kind: "artists", items: [{ name: "Tricky" }, { name: "Portishead" }] },
+    );
+    expect(artists.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
+    expect(artists.unmatched).toEqual(["Tricky (could not be looked up)"]);
+  });
+
+  it("stops on an error every item would hit, without searching for the rest", async () => {
+    const searchTracks = vi.fn(async (): Promise<Track[]> => {
+      throw new ServiceError("qobuz", "authentication", "signed out");
+    });
+    const items = Array.from({ length: 100 }, (_, index) => ({ title: `Song ${index}`, artist: "A" }));
+    await expect(resolveImport(fakeResolver({ searchTracks }), { kind: "tracks", items })).rejects.toThrow(
+      "signed out",
+    );
+    expect(searchTracks.mock.calls.length).toBeLessThan(20);
   });
 });
 
