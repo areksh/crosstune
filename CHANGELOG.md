@@ -120,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each service; tabs at the top (All, Qobuz, TIDAL, Spotify) filter it without
   reloading the page. A playlist's page has its tools as buttons (Find repeats,
   Upgrade, Copy to..., Link, Stats, Export), and each opens on that playlist's
-  own service, so the "choose a service at the bottom left" notice is gone.
+  own service. Tools that work on one service say which ("This works on
+  Qobuz"), with a link to switch; the service list at the bottom left is gone.
   Favourites and All playlists have pages of their own per service; tools that
   start from scratch are under **+ New**, managed playlists and links under
   **Jobs**, and Accounts and the artwork setting under **Settings**. The look
