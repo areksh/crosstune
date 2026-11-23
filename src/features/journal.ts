@@ -21,6 +21,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 import type { Playlist, Track } from "../services/model.js";
+import { MUSIC_WRITES } from "../services/service.js";
 import { applyMove } from "./playlist-order.js";
 import {
   describeEntry,
@@ -203,20 +204,7 @@ export class Journal {
  * each of them. Every QobuzClient method is classified in the tests, so a new
  * one cannot slip past the history.
  */
-export const MUTATING_METHODS = [
-  "createPlaylist",
-  "deletePlaylist",
-  "updatePlaylist",
-  "addTracksToPlaylist",
-  "removeTracksFromPlaylist",
-  "movePlaylistTracks",
-  "addFavoriteTracks",
-  "addFavoriteAlbums",
-  "addFavoriteArtists",
-  "removeFavoriteTracks",
-  "removeFavoriteAlbums",
-  "removeFavoriteArtists",
-] as const;
+export const MUTATING_METHODS = MUSIC_WRITES;
 
 /** The reads the recorder needs from the client it wraps. */
 export interface RecordableClient {

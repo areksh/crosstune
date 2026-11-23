@@ -137,6 +137,11 @@ export class QobuzClient {
     return this.#requireTokens().appId;
   }
 
+  /** The signed-in session, if any. */
+  get session(): UserSession | undefined {
+    return this.#session;
+  }
+
   /** Whether a user session is currently held. */
   get isLoggedIn(): boolean {
     return this.#session !== undefined;

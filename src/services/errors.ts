@@ -15,6 +15,7 @@ export type ServiceErrorKind =
   | "unsupported"
   | "rate-limited"
   | "quota"
+  | "not-connected"
   | "bad-id";
 
 export class ServiceError extends Error {
@@ -43,4 +44,12 @@ export class ServiceError extends Error {
 /** The service's name as shown to the user. */
 export function labelOf(service: ServiceName): string {
   return SERVICE_LABELS[service];
+}
+
+/** True for a service's "no such thing" (Qobuz's is an HTTP 404). */
+export function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof ServiceError &&
+    (error.kind === "not-found" || (error.kind === "api-response" && /HTTP 404/.test(error.message)))
+  );
 }

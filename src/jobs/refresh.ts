@@ -15,6 +15,7 @@
  * one like the user's edits, and is respected.
  */
 
+import { isNotFound } from "../services/errors.js";
 import { ServiceError, type Playlist, type Track } from "../services/model.js";
 import type { UpgradeResolverClient } from "../features/upgrade.js";
 import {
@@ -113,14 +114,6 @@ export class RefreshWriteError extends Error {
     this.name = "RefreshWriteError";
     this.state = state;
   }
-}
-
-/** True for a service's "no such thing" (Qobuz's is an HTTP 404). */
-export function isNotFound(error: unknown): boolean {
-  return (
-    error instanceof ServiceError &&
-    (error.kind === "not-found" || (error.kind === "api-response" && /HTTP 404/.test(error.message)))
-  );
 }
 
 function isAuthentication(error: unknown): boolean {

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { QobuzClient } from "../services/qobuz/index.js";
+import { ServiceHub } from "../services/hub.js";
+import { QobuzService } from "../services/qobuz/service.js";
+import { MUSIC_READS, MUSIC_WRITES } from "../services/service.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
 import { parseHistory, type HistoryEntry, type Operation } from "./history.js";
 import { Journal, MUTATING_METHODS, recordingClient } from "./journal.js";
@@ -223,43 +225,25 @@ describe("Journal", () => {
 });
 
 describe("recordingClient", () => {
-  it("classifies every QobuzClient method as recorded or not", () => {
-    // A new client method must be added to one list or the other, so a write
-    // can never bypass the history by accident.
-    const notWrites = [
+  it("records every write of a music service, and nothing it does not know", () => {
+    // Every method must be classed as a read or a write (services/service.ts),
+    // so a write can never bypass the history by accident.
+    expect([...MUTATING_METHODS].sort()).toEqual([...MUSIC_WRITES].sort());
+    const classified = new Set<string>([
+      ...MUSIC_READS,
+      ...MUSIC_WRITES,
       "constructor",
-      "init",
-      "initFromCache",
-      "loginWithOAuthCode",
-      "loginWithToken",
-      "getUserFavorites",
-      "searchArtists",
-      "searchAlbums",
-      "searchTracks",
-      "getSimilarArtists",
-      "getArtistTopTracks",
-      "getArtistReleases",
-      "getFavoriteTracks",
-      "getFavoriteAlbums",
-      "getFavoriteArtists",
-      "getUserPlaylists",
-      "getPlaylistTracks",
-      "getPlaylist",
-      "getArtist",
-      "getAlbum",
-      "getAlbumReleaseDate",
-      "getAlbumTracks",
-      "appId",
-      "isLoggedIn",
-      "credentials",
-    ];
-    const methods = Object.getOwnPropertyNames(QobuzClient.prototype);
-    const unclassified = methods.filter(
-      (name) => !notWrites.includes(name) && !(MUTATING_METHODS as readonly string[]).includes(name),
-    );
-    expect(unclassified).toEqual([]);
-    for (const name of MUTATING_METHODS) {
-      expect(methods).toContain(name);
+      "account",
+      "capabilities",
+      "connect",
+      "disconnect",
+      "connected",
+      "service",
+      "scoped",
+    ]);
+    const view = new ServiceHub().scoped("qobuz");
+    for (const prototype of [QobuzService.prototype, ServiceHub.prototype, Object.getPrototypeOf(view)]) {
+      expect(Object.getOwnPropertyNames(prototype).filter((name) => !classified.has(name))).toEqual([]);
     }
   });
 
