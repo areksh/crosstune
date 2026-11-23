@@ -1029,13 +1029,18 @@
         <!-- Playlists -->
         <section id="view-playlists" class="view" hidden>
           <div id="pl-list-page">
-            <header class="view-header">
-              <div class="view-title">
-                <h1>Playlists</h1>
-                <p class="lede">
-                  Open a playlist to edit its songs, or tick several to remove
-                  artists from all of them.
-                </p>
+            <header id="all-hero" class="pl-hero">
+              <div class="hero-row">
+                <span id="all-cover" class="hero-cover gen-cover" aria-hidden="true"></span>
+                <div class="hero-text">
+                  <p id="all-eyebrow" class="eyebrow"></p>
+                  <h1>All playlists</h1>
+                  <p class="hint">
+                    Open a playlist to edit its songs, or tick several to remove
+                    artists from all of them.
+                  </p>
+                  <div id="all-actions" class="pl-actions"></div>
+                </div>
               </div>
             </header>
             <div class="pl-controls">
@@ -1083,22 +1088,23 @@
           </div>
 
           <div id="pl-editor" hidden>
-            <header class="pl-editor-head">
+            <header id="pl-hero" class="pl-editor-head pl-hero">
               <a href="#/" class="pl-back">&larr; Library</a>
-              <div class="pl-title-row">
-                <h1 id="pl-name"></h1>
-                <div class="pl-head-actions">
-                  <details class="menu" id="pl-open-in">
-                    <summary>Open in</summary>
-                    <div class="menu-items" id="pl-open-in-items"></div>
-                  </details>
-                  <details class="menu" id="pl-more">
-                    <summary>Playlist</summary>
-                    <div class="menu-items" id="pl-more-items"></div>
-                  </details>
+              <div class="hero-row">
+                <span id="pl-cover" class="hero-cover gen-cover" aria-hidden="true"></span>
+                <div class="hero-text">
+                  <p id="pl-eyebrow" class="eyebrow"></p>
+                  <h1 id="pl-name"></h1>
+                  <p id="pl-meta" class="hint"></p>
+                  <div class="pl-actions">
+                    <div id="pl-actions" class="pl-actions"></div>
+                    <details class="menu" id="pl-more">
+                      <summary>More</summary>
+                      <div class="menu-items" id="pl-more-items"></div>
+                    </details>
+                  </div>
                 </div>
               </div>
-              <p id="pl-meta" class="hint"></p>
               <p id="pl-notice" class="info" hidden></p>
             </header>
             <p id="pl-editor-status" class="hint" aria-live="polite"></p>
@@ -1178,11 +1184,13 @@
         <!-- Favourites of one service ("#/favourites/<service>", src/web/playlist-page.ts) -->
         <section id="view-favourites" class="view" hidden>
           <header id="fav-hero" class="pl-hero">
-            <span id="fav-cover" class="hero-cover gen-cover" aria-hidden="true"></span>
-            <div class="hero-text">
-              <p id="fav-eyebrow" class="eyebrow"></p>
-              <h1>Favourites</h1>
-              <div id="fav-actions" class="pl-actions"></div>
+            <div class="hero-row">
+              <span id="fav-cover" class="hero-cover gen-cover" aria-hidden="true"></span>
+              <div class="hero-text">
+                <p id="fav-eyebrow" class="eyebrow"></p>
+                <h1>Favourites</h1>
+                <div id="fav-actions" class="pl-actions"></div>
+              </div>
             </div>
           </header>
           <p class="hint">Your favourite songs will be listed here.</p>

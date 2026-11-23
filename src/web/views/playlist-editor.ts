@@ -60,7 +60,7 @@ import { formatDuration } from "../../features/playlist-shape.js";
 import { normaliseArtistName } from "../../features/track-filter.js";
 import type { Pick, TransferDestination } from "../../features/transfer.js";
 import { labelOf } from "../../services/errors.js";
-import type { ServiceName } from "../../services/names.js";
+import { SERVICE_LABELS, type ServiceName } from "../../services/names.js";
 import { connectedServices } from "../service.js";
 import { describeTransfer, reviewTransfer, sendPicks, serviceSelect } from "../transfer.js";
 import { api, type Artist, type Track } from "../api.js";
@@ -72,6 +72,7 @@ import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
 import { refreshLibrary } from "../library.js";
+import { actionButton, openTool, renderPlaylistHeader } from "../playlist-page.js";
 import { knownLinks, LINKS_CHANGED } from "./links.js";
 import { linkMark } from "../../sync/wording.js";
 
@@ -186,7 +187,8 @@ export async function openEditor(id: PlaylistId, known?: ManagerPlaylist): Promi
   el("pl-meta").textContent = "";
   el("pl-notice").hidden = true;
   el("pl-editor-body").hidden = true;
-  el("pl-open-in").hidden = true;
+  renderPlaylistHeader({ id, name: known?.name ?? "Playlist" });
+  el("pl-actions").hidden = true;
   el("pl-more").hidden = true;
   showError(el("pl-editor-error"), undefined);
   showError(el("pl-editor-result"), undefined);
@@ -220,7 +222,7 @@ function show(opened: Opened, draft?: Draft): void {
   };
   el<HTMLInputElement>("pl-search").value = "";
   el("pl-editor-body").hidden = false;
-  el("pl-open-in").hidden = false;
+  el("pl-actions").hidden = false;
   el("pl-more").hidden = false;
   el("pl-songs").textContent = "";
   renderHead();
@@ -321,6 +323,15 @@ function draftParts(summary: DraftSummary): string[] {
 function renderHead(): void {
   const { playlist } = current();
   el("pl-name").textContent = playlist.name;
+  const link = (knownLinks()?.links ?? []).find((view) => Object.values(view.link.copies).includes(playlist.id as never));
+  const others =
+    link === undefined
+      ? undefined
+      : (Object.keys(link.link.copies) as ServiceName[])
+          .filter((service) => link.link.copies[service] !== playlist.id)
+          .map((service) => SERVICE_LABELS[service])
+          .join(", ");
+  renderPlaylistHeader(playlist, others);
   const notice = managedNotice(playlist);
   const mark = linkMark(playlist.id, knownLinks()?.links ?? []);
   const node = el("pl-notice");
@@ -749,7 +760,7 @@ function renderMenus(): void {
   renderSelectMenu();
   renderSortMenu();
   el("pl-sort-menu").hidden = !playlist.owned;
-  renderOpenIn();
+  renderActions();
   renderMore();
 }
 
@@ -1327,44 +1338,43 @@ function togglePanel(buttonId: string, panelId: string): void {
 
 // ---- Other tools, and the playlist itself --------------------------------------
 
-function renderOpenIn(): void {
-  const { playlist } = current();
-  const id = String(playlist.id);
-  const tools: Array<{ label: string; prefill: Prefill }> = [
-    {
-      label: "Deduplicator",
-      prefill: { view: "deduplicate", radios: { "dedup-source": "playlist" }, fields: { "dedup-playlist-select": id } },
-    },
-    { label: "Upgrade & repair", prefill: { view: "upgrade", fields: { "upgrade-source": `playlist:${id}` } } },
-    {
-      label: "Similar artists",
-      prefill: {
-        view: "similar",
-        radios: { "similar-source": "playlist" },
-        fields: { "similar-source-link": playlistLink(id as PlaylistId) },
-      },
-    },
-    { label: "Combine playlists", prefill: { view: "combine", fields: { "combine-source-first": id } } },
-    { label: "Library stats", prefill: { view: "stats", fields: { "stats-source": id } } },
-    {
-      label: "Export",
-      prefill: { view: "import-export", radios: { "ie-source": "playlist" }, fields: { "ie-export-playlist-select": id } },
-    },
-  ];
-  el("pl-open-in-items").replaceChildren(
-    ...tools.map(({ label, prefill }) =>
-      menuItem(label, () => {
-        void (async () => {
-          const mine = current();
-          if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
-            return;
-          }
-          closeEditor();
-          storePrefill(prefill);
-          location.hash = `#/${prefill.view}`;
-        })();
-      }),
-    ),
+/** Leave for a tool filled in for this playlist, asking first about a draft. */
+function leaveFor(prefill: Prefill): void {
+  void (async () => {
+    const mine = current();
+    if ((isDirty() && !(await confirmLeaving())) || !isStill(mine)) {
+      return;
+    }
+    closeEditor();
+    openTool(prefill, serviceOf(mine.playlist.id));
+  })();
+}
+
+/** The prefills of the tools this playlist opens in. */
+function toolsFor(id: PlaylistId): Record<"repeats" | "upgrade" | "stats" | "export" | "similar" | "combine", Prefill> {
+  const text = String(id);
+  return {
+    repeats: { view: "deduplicate", radios: { "dedup-source": "playlist" }, fields: { "dedup-playlist-select": text } },
+    upgrade: { view: "upgrade", fields: { "upgrade-source": `playlist:${text}` } },
+    stats: { view: "stats", fields: { "stats-source": text } },
+    export: { view: "import-export", radios: { "ie-source": "playlist" }, fields: { "ie-export-playlist-select": text } },
+    similar: { view: "similar", radios: { "similar-source": "playlist" }, fields: { "similar-source-link": playlistLink(id) } },
+    combine: { view: "combine", fields: { "combine-source-first": text } },
+  };
+}
+
+/** The action row: the tools for this playlist (the songs below are edited in place). */
+function renderActions(): void {
+  const tools = toolsFor(current().playlist.id);
+  el("pl-actions").replaceChildren(
+    actionButton("Find repeats", () => leaveFor(tools.repeats)),
+    actionButton("Upgrade", () => leaveFor(tools.upgrade)),
+    actionButton("Copy to...", () => void copyToService()),
+    actionButton("Link", () => {
+      location.hash = "#/managed";
+    }),
+    actionButton("Stats", () => leaveFor(tools.stats)),
+    actionButton("Export", () => leaveFor(tools.export)),
   );
 }
 
@@ -1387,7 +1397,11 @@ function renderMore(): void {
       say(text);
       void refreshLibrary();
     });
-  const items: HTMLElement[] = [];
+  const tools = toolsFor(playlist.id);
+  const items: HTMLElement[] = [
+    menuItem("Similar artists", () => leaveFor(tools.similar)),
+    menuItem("Combine with other playlists", () => leaveFor(tools.combine)),
+  ];
   if (playlist.owned) {
     items.push(
       menuItem("Rename and describe...", () => {
@@ -1404,7 +1418,6 @@ function renderMore(): void {
     );
   }
   items.push(menuItem("Duplicate...", () => void duplicateHere()));
-  items.push(menuItem("Copy to another service...", () => void copyToService()));
   if (playlist.owned) {
     items.push(menuItem("Delete...", () => void deleteHere()));
   }

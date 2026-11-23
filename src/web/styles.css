@@ -3108,18 +3108,84 @@ button.menu-item:hover:not(:disabled) {
   text-decoration: none;
 }
 
-.pl-title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px 20px;
-  margin: 10px 0 8px;
+/* A page's header (a playlist, Favourites, All playlists): the cover, tinted
+   by its colours (set inline from src/ui/cover-art.ts), and its action row. */
+.pl-hero {
+  margin-bottom: 22px;
+  padding: 20px 24px 22px;
+  border-radius: 18px;
+  background: var(--surface-1);
 }
 
-.pl-title-row h1 {
+.hero-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  margin-top: 8px;
+}
+
+.hero-cover {
+  width: 132px;
+  height: 132px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+.hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.hero-text h1 {
   font-size: 40px;
   overflow-wrap: anywhere;
+}
+
+.hero-text .hint {
+  margin: 6px 0 0;
+}
+
+.pl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.pl-actions .pl-actions {
+  margin-top: 0;
+}
+
+.pl-actions .menu > summary {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .hero-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-cover {
+    width: 96px;
+    height: 96px;
+  }
 }
 
 .pl-head-actions,
