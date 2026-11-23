@@ -386,6 +386,7 @@ import type { LinkConnect } from "./sync/runner.js";
 import { linksService, type LinksService } from "./sync/service.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
+import { SIGN_IN_MINUTES } from "./accounts/sign-in.js";
 import { forgetInHistoryText } from "./features/forget.js";
 import { commitTransfer, resolveTransfer } from "./features/transfer.js";
 import { homeService, jobServices } from "./jobs/model.js";
@@ -806,6 +807,8 @@ function openConnections(journal: Journal): Connections {
         return { ok: false, message: errorMessage(error) };
       }
     },
+    // Two sign-ins started together both come back here.
+    stillNeeded: () => SERVICES.some((service) => accounts.waiting(service)),
   });
   return { hub, accounts, listener };
 }
@@ -873,14 +876,11 @@ async function signIn(login: LoginArgs, journal: Journal): Promise<void> {
     logger.info(`Opening your browser to sign in to ${labelOf(service)}...`);
     logger.info(`If it does not open, visit this URL manually:\n  ${url}`);
     openInBrowser(url);
-    while (accounts.waiting(service)) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+    try {
+      await signInComesBack(listener, () => accounts.waiting(service));
+    } finally {
+      listener.close();
     }
-    // The redirect has been taken; the token and account are read after it.
-    for (let waited = 0; waited < 60 && !hub.connected().includes(service); waited += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    listener.close();
   } else {
     if (listening !== undefined) {
       logger.warn(listening.problem);
@@ -894,6 +894,31 @@ async function signIn(login: LoginArgs, journal: Journal): Promise<void> {
     throw new Error(`${labelOf(service)} was not connected; run qobuz-helper login ${service} again.`);
   }
   logConnected(accounts);
+}
+
+/**
+ * Wait for the browser to come back to the listener. A result that did not
+ * work but left the sign-in waiting (a stray address) is not the end of it;
+ * one that ended the sign-in is, and its reason is the error.
+ */
+async function signInComesBack(listener: SignInListener, waiting: () => boolean): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("The sign-in took too long.")), SIGN_IN_MINUTES * 60_000);
+  });
+  try {
+    for (;;) {
+      const result = await Promise.race([listener.nextResult(), expired]);
+      if (result.ok) {
+        return;
+      }
+      if (!waiting()) {
+        throw new Error(result.message);
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Start the web server over the connected services. */

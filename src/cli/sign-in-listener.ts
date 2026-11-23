@@ -15,19 +15,36 @@ import { SIGN_IN_MINUTES } from "../accounts/sign-in.js";
 
 export const DEFAULT_SIGN_IN_PORT = 53683;
 
+export type Listening = { ok: true } | { ok: false; problem: string };
+
 export interface SignInListener {
-  listen(): Promise<{ ok: true } | { ok: false; problem: string }>;
+  listen(): Promise<Listening>;
   close(): void;
+  /** The next sign-in to come back, whether it worked or not. */
+  nextResult(): Promise<SignInResult>;
 }
 
 export function signInListener(options: {
   port?: number;
   /** End the sign-in this request target carries; undefined when it carries none. */
   complete(target: string): Promise<SignInResult>;
+  /** Whether another sign-in still waits, so a success does not close it. */
+  stillNeeded?(): boolean;
 }): SignInListener {
   const port = options.port ?? DEFAULT_SIGN_IN_PORT;
+  const stillNeeded = options.stillNeeded ?? ((): boolean => false);
   let server: http.Server | undefined;
+  // Two listens at once share the first one's binding.
+  let binding: Promise<Listening> | undefined;
   let timer: NodeJS.Timeout | undefined;
+  let waiters: ((result: SignInResult) => void)[] = [];
+  const tell = (result: SignInResult): void => {
+    const told = waiters;
+    waiters = [];
+    for (const waiter of told) {
+      waiter(result);
+    }
+  };
 
   const close = (): void => {
     clearTimeout(timer);
@@ -41,6 +58,50 @@ export function signInListener(options: {
     timer.unref();
   };
 
+  const bind = (): Promise<Listening> => {
+    const candidate = http.createServer((req, res) => {
+      const target = req.url ?? "/";
+      // Only a top-level GET to this address, carrying a query, can be a sign-in.
+      if (req.method !== "GET" || !target.includes("?") || !isOurs(req.headers.host, port)) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+      void options.complete(target).then(
+        (result) => {
+          res.writeHead(result.ok ? 200 : 400, SIGN_IN_HEADERS);
+          res.end(signInPage(result), () => {
+            if (result.ok && !stillNeeded()) {
+              close();
+            }
+          });
+          tell(result);
+        },
+        () => {
+          const result = { ok: false, message: "Something went wrong." };
+          res.writeHead(500, SIGN_IN_HEADERS);
+          res.end(signInPage(result));
+          tell(result);
+        },
+      );
+    });
+    return new Promise((resolve) => {
+      candidate.once("error", (error: NodeJS.ErrnoException) => {
+        resolve({
+          ok: false,
+          problem:
+            error.code === "EADDRINUSE"
+              ? `Port ${port} is in use, so the sign-in cannot come back by itself. Paste the address it ends on instead.`
+              : `The sign-in cannot come back by itself (${error.message}). Paste the address it ends on instead.`,
+        });
+      });
+      candidate.listen(port, "127.0.0.1", () => {
+        server = candidate;
+        resolve({ ok: true });
+      });
+    });
+  };
+
   return {
     close,
     listen: async () => {
@@ -48,45 +109,12 @@ export function signInListener(options: {
       if (server !== undefined) {
         return { ok: true };
       }
-      const candidate = http.createServer((req, res) => {
-        const target = req.url ?? "/";
-        // Only a top-level GET to this address, carrying a query, can be a sign-in.
-        if (req.method !== "GET" || !target.includes("?") || !isOurs(req.headers.host, port)) {
-          res.writeHead(404, { "Content-Type": "text/plain" });
-          res.end("Not found");
-          return;
-        }
-        void options.complete(target).then(
-          (result) => {
-            res.writeHead(result.ok ? 200 : 400, SIGN_IN_HEADERS);
-            res.end(signInPage(result), () => {
-              if (result.ok) {
-                close();
-              }
-            });
-          },
-          () => {
-            res.writeHead(500, SIGN_IN_HEADERS);
-            res.end(signInPage({ ok: false, message: "Something went wrong." }));
-          },
-        );
+      binding ??= bind().finally(() => {
+        binding = undefined;
       });
-      return new Promise((resolve) => {
-        candidate.once("error", (error: NodeJS.ErrnoException) => {
-          resolve({
-            ok: false,
-            problem:
-              error.code === "EADDRINUSE"
-                ? `Port ${port} is in use, so the sign-in cannot come back by itself. Paste the address it ends on instead.`
-                : `The sign-in cannot come back by itself (${error.message}). Paste the address it ends on instead.`,
-          });
-        });
-        candidate.listen(port, "127.0.0.1", () => {
-          server = candidate;
-          resolve({ ok: true });
-        });
-      });
+      return binding;
     },
+    nextResult: () => new Promise((resolve) => waiters.push(resolve)),
   };
 }
 
