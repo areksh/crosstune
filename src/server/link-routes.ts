@@ -56,11 +56,11 @@ export async function linkRoutes(req: ApiRequest, service: LinksService): Promis
           : bad("choose a song, or none");
       }
       case "pause":
-        return ok(service.setEnabled(id, false));
+        return ok(await service.setEnabled(id, false));
       case "resume":
-        return ok(service.setEnabled(id, true));
+        return ok(await service.setEnabled(id, true));
       case "remove":
-        service.remove(id);
+        await service.remove(id);
         return ok({ removed: id });
       default:
         return { status: 404, body: { error: "not found" } };

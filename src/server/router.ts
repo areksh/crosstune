@@ -590,9 +590,10 @@ async function historyUndo(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   if (plan.blocked !== undefined) {
     return { status: 409, body: { error: plan.blocked } };
   }
+  // A linked playlist whose sync this was is paused first: no sync may read
+  // the undo half-done as the user's edits, or redo it at its next run.
+  await deps.links?.undone(found.item.id);
   const outcome = await applyUndo(journal, deps.service, found.item, plan);
-  // A linked playlist whose sync was undone must not redo it at its next run.
-  deps.links?.undone(found.item.id);
   return {
     status: 200,
     body: {

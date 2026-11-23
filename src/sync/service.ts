@@ -12,7 +12,7 @@ import type { RunRecord } from "../jobs/stores.js";
 import { emptyLinkState, type LinkState } from "./model.js";
 import { linkAsSame, resolveConflict, type SyncOutcome } from "./run.js";
 import type { Choice } from "./plan.js";
-import { pausedByUndo, runLinks, validateLink, type InvalidLink, type Link, type LinkConnect, type LinksSummary } from "./runner.js";
+import { isLinkEntry, pausedByUndo, runLinks, savingEntries, validateLink, type InvalidLink, type Link, type LinkConnect, type LinksSummary } from "./runner.js";
 
 export interface LinksServiceDeps {
   links: { load(): { links: Link[]; invalid: InvalidLink[] }; save(links: Link[]): void };
@@ -42,10 +42,13 @@ export interface LinksService {
   startFromCommon(id: string, from: ServiceName): Promise<LinksSummary>;
   answer(id: string, key: string, answer: "removed" | "withdrawn" | "keep"): Promise<LinksSummary>;
   chooseMatch(id: string, key: string, track: TrackId | null): Promise<LinksSummary>;
-  setEnabled(id: string, enabled: boolean): Link;
-  remove(id: string): void;
-  /** A history entry was undone: pause the links it was a sync of. */
-  undone(entryId: string): string[];
+  setEnabled(id: string, enabled: boolean): Promise<Link>;
+  remove(id: string): Promise<void>;
+  /**
+   * A history entry is about to be undone: pause the links it was a sync of,
+   * first, so that no sync reads the undo half-done as the user's edits.
+   */
+  undone(entryId: string): Promise<string[]>;
 }
 
 export function linksService(deps: LinksServiceDeps): LinksService {
@@ -103,35 +106,34 @@ export function linksService(deps: LinksServiceDeps): LinksService {
     resolve: async (id, choice, dryRun) => {
       const link = find(id);
       const clients = await clientsFor(link);
-      return deps.lock(() =>
-        dryRun
-          ? resolveConflict({ clients, copies: link.copies, state: deps.state.load(id), matches: deps.matches, now: now(), choice, dryRun, save: () => {} })
-          : deps.journalRun(`Settled ${link.name}`, () =>
-              resolveConflict({
-                clients,
-                copies: link.copies,
-                state: deps.state.load(id),
-                matches: deps.matches,
-                now: now(),
-                choice,
-                save: (state) => deps.state.save(id, state),
-              }),
-            ),
-      );
+      return deps.lock(() => {
+        const state = deps.state.load(id);
+        return dryRun
+          ? resolveConflict({ clients, copies: link.copies, state, matches: deps.matches, now: now(), choice, dryRun, save: () => {} })
+          : deps.journalRun(`Settled ${link.name}`, (entry) => {
+              // Undoing the settling pauses the link, as undoing a sync does.
+              const save = savingEntries((next) => deps.state.save(id, next), state, entry.id);
+              return resolveConflict({ clients, copies: link.copies, state, matches: deps.matches, now: now(), choice, save });
+            });
+      });
     },
 
     startFromCommon: async (id, from) => {
       const link = find(id);
       const clients = await clientsFor(link);
-      const state = await linkAsSame({ clients, copies: link.copies, state: deps.state.load(id), matches: deps.matches, from, now: now() });
-      deps.state.save(id, state);
+      await deps.lock(async () => {
+        const state = await linkAsSame({ clients, copies: link.copies, state: deps.state.load(id), matches: deps.matches, from, now: now() });
+        deps.state.save(id, state);
+      });
       return run(id);
     },
 
     answer: async (id, key, answer) => {
       find(id);
-      const state = deps.state.load(id);
-      deps.state.save(id, { ...state, answers: { ...state.answers, [key]: answer } });
+      await deps.lock(async () => {
+        const state = deps.state.load(id);
+        deps.state.save(id, { ...state, answers: { ...state.answers, [key]: answer } });
+      });
       return run(id);
     },
 
@@ -148,25 +150,30 @@ export function linksService(deps: LinksServiceDeps): LinksService {
       return run(id);
     },
 
-    setEnabled: (id, enabled) => {
-      const { links } = deps.links.load();
-      const link = { ...find(id), enabled };
-      deps.links.save(links.map((one) => (one.id === id ? link : one)));
-      const state = deps.state.load(id);
-      if (enabled && state.paused !== undefined) {
-        // After an undo the copies may differ on purpose: look at them afresh.
-        const { paused: _paused, base: _base, pending: _pending, ...rest } = state;
-        deps.state.save(id, { ...emptyLinkState(), ...rest });
-      }
-      return link;
-    },
+    setEnabled: (id, enabled) =>
+      deps.lock(async () => {
+        const { links } = deps.links.load();
+        const link = { ...find(id), enabled };
+        deps.links.save(links.map((one) => (one.id === id ? link : one)));
+        const state = deps.state.load(id);
+        if (enabled && state.paused !== undefined) {
+          // After an undo the copies may differ on purpose: look at them afresh.
+          const { paused: _paused, base: _base, pending: _pending, ...rest } = state;
+          deps.state.save(id, { ...emptyLinkState(), ...rest });
+        }
+        return link;
+      }),
 
-    undone: (entryId) => pausedByUndo(deps, entryId, now()),
+    // Only an undo of a link's own entry waits for the lock.
+    undone: async (entryId) =>
+      isLinkEntry(deps, entryId) ? deps.lock(async () => pausedByUndo(deps, entryId, now())) : [],
 
-    remove: (id) => {
+    remove: async (id) => {
       find(id);
-      deps.links.save(deps.links.load().links.filter((link) => link.id !== id));
-      deps.state.remove(id);
+      await deps.lock(async () => {
+        deps.links.save(deps.links.load().links.filter((link) => link.id !== id));
+        deps.state.remove(id);
+      });
     },
   };
 }

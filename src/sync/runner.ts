@@ -128,38 +128,103 @@ export function parseLinksFile(raw: unknown): { links: Link[]; invalid: InvalidL
 }
 
 function isDue(state: LinkState, now: Date): boolean {
-  return state.paused === undefined && (state.nextRunAt === undefined || Date.parse(state.nextRunAt) <= now.getTime());
+  return state.nextRunAt === undefined || Date.parse(state.nextRunAt) <= now.getTime();
 }
 
-/** Sync the links that are due (or `onlyLinkId`, due or not). Call under the jobs lock. */
+/** Whether a history entry was one of a link's syncs (read without the lock). */
+export function isLinkEntry(deps: Pick<LinksDeps, "links" | "state">, entryId: string): boolean {
+  return deps.links.load().links.some((link) => {
+    try {
+      return (deps.state.load(link.id).entries ?? []).includes(entryId);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * A state saver that notes the history entry of a run that writes: its
+ * intended writes (`pending`) change only around writes. A run that writes
+ * nothing leaves no entry, so the ones that did are not pushed out.
+ */
+export function savingEntries(
+  save: (state: LinkState) => void,
+  first: LinkState,
+  entryId: string,
+): (next: LinkState) => LinkState {
+  let previous = first;
+  let noted = false;
+  return (next) => {
+    noted ||= JSON.stringify(next.pending) !== JSON.stringify(previous.pending);
+    const entries = next.entries ?? previous.entries ?? [];
+    previous = {
+      ...next,
+      entries: noted && !entries.includes(entryId) ? capList([...entries, entryId], ENTRIES_KEPT) : entries,
+    };
+    save(previous);
+    return previous;
+  };
+}
+
+function failedResult(now: Date, error: unknown): RunRecord["result"] {
+  return {
+    at: now.toISOString(),
+    status: "failed",
+    added: 0,
+    removed: 0,
+    dismissed: 0,
+    notes: [],
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/**
+ * Sync the links that are due (or `onlyLinkId`, due or not; never a paused
+ * one). Call under the jobs lock: every write of a link's state holds it.
+ */
 export async function runLinks(
   deps: LinksDeps,
   now: Date,
   options: { onlyLinkId?: string } = {},
 ): Promise<LinksSummary> {
   const { links } = deps.links.load();
-  const due = links.filter((link) =>
-    options.onlyLinkId === undefined ? link.enabled && isDue(deps.state.load(link.id), now) : link.id === options.onlyLinkId,
-  );
   const summary: LinksSummary = { reports: [], conflicts: 0 };
   const blocked = new Set<ServiceName>();
-  for (const link of due) {
+  const record = (link: Link, result: RunRecord["result"], started: number): void => {
+    deps.runs.append({ at: now.toISOString(), jobId: link.id, jobName: link.name, result, durationMs: Date.now() - started }, now);
+    summary.reports.push({ jobId: link.id, name: link.name, result });
+  };
+  for (const link of links) {
+    if (options.onlyLinkId === undefined ? !link.enabled : link.id !== options.onlyLinkId) {
+      continue;
+    }
+    const started = Date.now();
+    let state: LinkState;
+    try {
+      state = deps.state.load(link.id);
+    } catch (error) {
+      // Not taken as a first link, and the others still run.
+      record(link, failedResult(now, error), started);
+      continue;
+    }
+    if (state.paused !== undefined || (options.onlyLinkId === undefined && !isDue(state, now))) {
+      continue;
+    }
     const services = SERVICES.filter((service) => link.copies[service] !== undefined);
     if (services.some((service) => blocked.has(service))) {
       continue;
     }
-    const connected = await deps.connect(services);
-    if (!connected.ok) {
-      const service = connected.service ?? services[0]!;
-      blocked.add(service);
-      summary.blocked ??= { service, message: connected.message };
-      continue;
-    }
-    const started = Date.now();
-    let state = deps.state.load(link.id);
     let result: RunRecord["result"];
     try {
+      const connected = await deps.connect(services);
+      if (!connected.ok) {
+        const service = connected.service ?? services[0]!;
+        blocked.add(service);
+        summary.blocked ??= { service, message: connected.message };
+        continue;
+      }
       const outcome = await deps.journalRun(`Synced ${link.name}`, async (entry) => {
+        const save = savingEntries((next) => deps.state.save(link.id, next), state, entry.id);
         const synced = await syncLink({
           clients: connected.clients,
           copies: link.copies,
@@ -168,8 +233,7 @@ export async function runLinks(
           now,
           // Kept as it goes: the intended writes are on disk before the first.
           save: (next) => {
-            state = { ...next, entries: capList([...(next.entries ?? []), entry.id], ENTRIES_KEPT) };
-            deps.state.save(link.id, state);
+            state = save(next);
           },
         });
         return synced;
@@ -201,20 +265,11 @@ export async function runLinks(
       };
     } catch (error) {
       const failures = (state.consecutiveFailures ?? 0) + 1;
-      result = {
-        at: now.toISOString(),
-        status: "failed",
-        added: 0,
-        removed: 0,
-        dismissed: 0,
-        notes: [],
-        error: error instanceof Error ? error.message : String(error),
-      };
+      result = failedResult(now, error);
       state = { ...state, consecutiveFailures: failures, nextRunAt: retryAt(link.schedule, now, failures).toISOString() };
     }
     deps.state.save(link.id, state);
-    deps.runs.append({ at: now.toISOString(), jobId: link.id, jobName: link.name, result, durationMs: Date.now() - started }, now);
-    summary.reports.push({ jobId: link.id, name: link.name, result });
+    record(link, result, started);
   }
   return summary;
 }
@@ -222,7 +277,12 @@ export async function runLinks(
 /** Pause the links a history entry was a sync of; their ids. */
 export function pausedByUndo(deps: Pick<LinksDeps, "links" | "state">, entryId: string, now: Date): string[] {
   return deps.links.load().links.flatMap((link) => {
-    const state = deps.state.load(link.id);
+    let state: LinkState;
+    try {
+      state = deps.state.load(link.id);
+    } catch {
+      return []; // it cannot run either until it is fixed
+    }
     if (!(state.entries ?? []).includes(entryId)) {
       return [];
     }

@@ -2184,6 +2184,15 @@ describe("POST /api/history/plan and /api/history/undo", () => {
     expect(account.playlists.size).toBe(1);
   });
 
+  it("pauses a linked playlist the entry synced before undoing anything", async () => {
+    const { account, deps: d, id } = await created();
+    const seen: number[] = [];
+    d.links = { undone: vi.fn(async () => (seen.push(account.playlists.size), ["abcdef01"])) } as unknown as NonNullable<ApiDeps["links"]>;
+    expect((await handleApi(request("POST", "/api/history/undo", { id }), d)).status).toBe(200);
+    expect(d.links.undone).toHaveBeenCalledWith(id);
+    expect(seen).toEqual([1]); // the playlist was still there
+  });
+
   it("undoes an entry, records the undo, and refuses to undo it twice", async () => {
     const { journal, account, deps: d, id } = await created();
     const res = await handleApi(request("POST", "/api/history/undo", { id }), d);

@@ -14,18 +14,32 @@ function setup() {
   let file: Link[] = [];
   const states = new Map<string, LinkState>();
   const matches = new MemoryMatches();
+  let entry = 0;
+  let locked = 0;
   const service = linksService({
     links: { load: () => ({ links: file, invalid: [] }), save: (links) => void (file = links) },
     state: {
       load: (id) => states.get(id) ?? emptyLinkState(),
-      save: (id, state) => void states.set(id, state),
+      save: (id, state) => {
+        if (locked === 0) {
+          throw new Error("a link's state written without the lock");
+        }
+        states.set(id, state);
+      },
       remove: (id) => void states.delete(id),
     },
     runs: { append: () => {}, read: () => [] },
     matches,
     connect: async (services) => ({ ok: true, clients: new Map(services.map((name) => [name, accounts.get(name)!])) }),
-    journalRun: async (_label, fn) => fn({ id: "e1" }),
-    lock: async (fn) => fn(),
+    journalRun: async (_label, fn) => fn({ id: `e${++entry}` }),
+    lock: async (fn) => {
+      locked += 1;
+      try {
+        return await fn();
+      } finally {
+        locked -= 1;
+      }
+    },
     newId: () => "abcdef01",
     now: () => NOW,
   });
@@ -99,21 +113,33 @@ describe("linksService", () => {
     const { service, q, t, states, file } = setup();
     const a = q.seed("Mix", [1]);
     await service.create({ name: "Mix", copies: { qobuz: a, tidal: t.seed("Mix", [1]) } });
-    service.setEnabled("abcdef01", false);
+    await service.setEnabled("abcdef01", false);
     expect(file()[0]?.enabled).toBe(false);
     states.set("abcdef01", { ...states.get("abcdef01")!, paused: { since: "x", reason: "undone" } });
-    service.setEnabled("abcdef01", true);
+    await service.setEnabled("abcdef01", true);
     // Resuming after an undo looks at the copies afresh, as a first link.
     expect(states.get("abcdef01")).not.toHaveProperty("paused");
     expect(states.get("abcdef01")).not.toHaveProperty("base");
-    service.remove("abcdef01");
+    await service.remove("abcdef01");
     expect([file(), states.size, q.songs(a)]).toEqual([[], 0, [1]]);
   });
 
-  it("pauses a link whose sync was undone", async () => {
+  it("pauses a link whose sync was undone, and not for others", async () => {
     const { service, q, t, states } = setup();
-    await service.create({ name: "Mix", copies: { qobuz: q.seed("Mix", [1]), tidal: t.seed("Mix", [1]) } });
-    expect(service.undone("e1")).toEqual(["abcdef01"]);
+    const a = q.seed("Mix", [1]);
+    await service.create({ name: "Mix", copies: { qobuz: a, tidal: t.seed("Mix", [1]) } });
+    q.edit(a, (songs) => [...songs, 2]);
+    await service.run("abcdef01");
+    expect(await service.undone("nope")).toEqual([]);
+    expect(await service.undone("e2")).toEqual(["abcdef01"]);
+    expect(states.get("abcdef01")?.paused?.reason).toBe("undone");
+  });
+
+  it("pauses a link when the settling of its conflict is undone", async () => {
+    const { service, q, t, states } = setup();
+    await service.create({ name: "Mix", copies: { qobuz: q.seed("Mix", [1, 2]), tidal: t.seed("Mix", [1, 3]) } });
+    await service.resolve("abcdef01", { merge: "qobuz" }, false);
+    expect(await service.undone("e2")).toEqual(["abcdef01"]);
     expect(states.get("abcdef01")?.paused?.reason).toBe("undone");
   });
 

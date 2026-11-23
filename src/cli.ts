@@ -744,11 +744,12 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
     logger.info(`\n(dry run -- pass --apply to undo it: qobuz-helper undo ${item.id} --apply)`);
     return;
   }
-  const outcome = await applyUndo(journal, client, item, plan);
-  const paused = openLinks(journal, undefined).undone(item.id);
+  // Paused first, so that no sync reads the undo half-done as the user's edits.
+  const paused = await openLinks(journal, undefined).undone(item.id);
   if (paused.length > 0) {
     logger.info(`The linked playlist this synced is paused; resume it when its copies are as you want them.`);
   }
+  const outcome = await applyUndo(journal, client, item, plan);
   output.assign({ applied: true, result: outcome });
   logger.info(`\n${formatUndoResult(outcome)}`);
   if (outcome.undone) {

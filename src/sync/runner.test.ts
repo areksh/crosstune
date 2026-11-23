@@ -68,7 +68,7 @@ describe("runLinks", () => {
     const summary = await runLinks(deps, new Date(NOW.getTime() + 3_600_000));
     expect(accounts.get("tidal")!.songs(link.copies.tidal!)).toEqual([1, 2, 3]);
     expect(summary.reports[0]).toMatchObject({ jobId: "aaaaaaaa", result: { status: "ok", added: 1 } });
-    expect(states.get("aaaaaaaa")).toMatchObject({ nextRunAt: "2026-11-23T14:00:00.000Z", entries: ["e1", "e2"] });
+    expect(states.get("aaaaaaaa")).toMatchObject({ nextRunAt: "2026-11-23T14:00:00.000Z", entries: ["e2"] });
     expect(runs).toHaveLength(2);
   });
 
@@ -117,6 +117,44 @@ describe("runLinks", () => {
     expect(pausedByUndo(deps, "nope", NOW)).toEqual([]);
     expect(pausedByUndo(deps, "e2", NOW)).toEqual(["aaaaaaaa"]);
     expect(states.get("aaaaaaaa")?.paused).toEqual({ since: NOW.toISOString(), reason: "undone" });
+  });
+
+  it("records only the syncs that wrote something, so a real one is not pushed out", async () => {
+    const { deps, states, accounts, link } = setup();
+    for (let hour = 0; hour < 25; hour += 1) {
+      await runLinks(deps, new Date(NOW.getTime() + hour * 3_600_000));
+    }
+    expect(states.get("aaaaaaaa")?.entries ?? []).toEqual([]);
+    accounts.get("tidal")!.rename(link.copies.tidal!, "A");
+    accounts.get("qobuz")!.rename(link.copies.qobuz!, "B");
+    await runLinks(deps, new Date(NOW.getTime() + 30 * 3_600_000));
+    expect(states.get("aaaaaaaa")?.conflicts.length).toBeGreaterThan(0);
+    expect(states.get("aaaaaaaa")?.entries ?? []).toEqual([]);
+  });
+
+  it("does not run a paused link, even when asked to run it now", async () => {
+    const { deps, states } = setup();
+    states.set("aaaaaaaa", { ...emptyLinkState(), paused: { since: "x", reason: "undone" } });
+    expect((await runLinks(deps, NOW, { onlyLinkId: "aaaaaaaa" })).reports).toEqual([]);
+  });
+
+  it("reports a link whose state cannot be read, and goes on", async () => {
+    const { deps } = setup();
+    deps.state.load = () => {
+      throw new Error("links-state/aaaaaaaa.json cannot be read");
+    };
+    const summary = await runLinks(deps, NOW);
+    expect(summary.reports[0]?.result).toMatchObject({ status: "failed", error: expect.stringMatching(/cannot be read/) });
+  });
+
+  it("backs off while a service cannot be reached", async () => {
+    const { deps, states } = setup();
+    deps.connect = vi.fn(async () => {
+      throw new ServiceError("tidal", "network", "offline");
+    });
+    const summary = await runLinks(deps, NOW);
+    expect(summary.reports[0]?.result).toMatchObject({ status: "failed", error: "offline" });
+    expect(states.get("aaaaaaaa")).toMatchObject({ consecutiveFailures: 1, nextRunAt: "2026-11-23T12:15:00.000Z" });
   });
 
   it("runs one link now, due or not", async () => {
