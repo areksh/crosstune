@@ -384,11 +384,13 @@ import type { LinkConnect } from "./sync/runner.js";
 import { linksService, type LinksService } from "./sync/service.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
-import { homeService } from "./jobs/model.js";
+import { forgetInHistory } from "./features/forget.js";
+import { parseHistory, serializeRecords } from "./features/history.js";
+import { homeService, jobServices } from "./jobs/model.js";
 import { unflag } from "./jobs/stores.js";
 import { labelOf, ServiceError } from "./services/errors.js";
 import { ServiceHub } from "./services/hub.js";
-import { SERVICES, type ServiceName } from "./services/names.js";
+import { isServiceName, SERVICES, type ServiceName } from "./services/names.js";
 import { QobuzService } from "./services/qobuz/service.js";
 import type { Account, MusicService } from "./services/service.js";
 
@@ -507,6 +509,18 @@ async function main(): Promise<void> {
     const connections = openConnections(journal);
     await connections.accounts.resume();
     await runLinksNow(openLinks(journal, connections), { all: true });
+    output.flush();
+    return;
+  }
+
+  // `forget <service>`: sign out and delete what is kept about it.
+  if (command === "forget") {
+    const service = args[1];
+    if (!isServiceName(service) || args.length > 2) {
+      throw new Error("forget takes one service: qobuz, tidal or spotify");
+    }
+    openConnections(journal).accounts.forget(service);
+    forgetService(service);
     output.flush();
     return;
   }
@@ -883,9 +897,38 @@ function logConnected(accounts: Accounts): void {
   }
 }
 
-/** Forget a service's data (src/accounts/forget.ts). */
+/**
+ * Forget what is kept about a service, once its sign-in is dropped: its
+ * matches, the links and jobs that use it, and its entries in History.
+ */
 function forgetService(service: ServiceName): void {
-  logger.info(`Forgot ${labelOf(service)}.`);
+  const dir = configDir();
+  fileMatches(dir).forgetService(service);
+  const links = fileLinkStore(dir);
+  const linkStates = fileLinkStateStore(dir);
+  const { links: all } = links.load();
+  const gone = all.filter((link) => link.copies[service] !== undefined);
+  links.save(all.filter((link) => !gone.includes(link)));
+  gone.forEach((link) => linkStates.remove(link.id));
+  const jobs = fileJobStore(dir);
+  const states = fileJobStateStore(dir);
+  const { file } = jobs.load();
+  const unused = file.jobs.filter((job) => jobServices(job).includes(service));
+  jobs.save({ ...file, jobs: file.jobs.filter((job) => !unused.includes(job)) });
+  unused.forEach((job) => states.remove(job.id));
+  const history = fileHistoryStore();
+  const rewrite = (): number => {
+    const { records, dropped } = forgetInHistory(parseHistory(history.read()), service);
+    history.replace(serializeRecords(records));
+    return dropped;
+  };
+  const dropped = history.exclusive === undefined ? rewrite() : history.exclusive(rewrite);
+  if (dropped === undefined) {
+    throw new Error(`History is busy; its ${labelOf(service)} entries were not removed. Forget ${labelOf(service)} again in a moment.`);
+  }
+  logger.info(
+    `Forgot ${labelOf(service)}: ${gone.length} linked and ${unused.length} managed playlist(s) that used it, and ${dropped} History entr${dropped === 1 ? "y" : "ies"}.`,
+  );
 }
 
 /**

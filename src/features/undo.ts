@@ -21,6 +21,7 @@
  * or removed, and changed playlist details put back.
  */
 
+import { labelOf } from "../services/errors.js";
 import {
   checkAllOn,
   shortId,
@@ -192,6 +193,10 @@ export async function planUndo(
   const plan: UndoPlan = { entryId: item.id, label: item.label, steps: [], notes: [], warnings: [], unrestorable: [] };
   if (item.undone !== undefined) {
     plan.blocked = `Already undone (${item.undone.at}).`;
+    return plan;
+  }
+  if (item.forgotten !== undefined) {
+    plan.blocked = `Part of this changed ${labelOf(item.forgotten)}, which was forgotten, so it can no longer be undone.`;
     return plan;
   }
   for (const later of laterConflicts(item, items)) {

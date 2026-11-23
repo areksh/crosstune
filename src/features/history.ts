@@ -25,6 +25,7 @@ import {
   type PlaylistId,
   type TrackId,
 } from "../services/ids.js";
+import { isServiceName, type ServiceName } from "../services/names.js";
 
 /** The favourite collections an operation can touch. */
 export type FavouriteType = "tracks" | "albums" | "artists";
@@ -124,6 +125,8 @@ export interface HistoryEntry {
   undoes?: string;
   /** The action failed part-way; `ops` hold what did happen. */
   error?: string;
+  /** It also changed a service since forgotten: kept to read, not to undo. */
+  forgotten?: ServiceName;
 }
 
 /** A line of the history file. */
@@ -247,6 +250,9 @@ function toRecord(value: unknown): HistoryRecord | undefined {
   }
   if (isString(value["error"])) {
     entry.error = value["error"];
+  }
+  if (isServiceName(value["forgotten"])) {
+    entry.forgotten = value["forgotten"];
   }
   return entry;
 }
