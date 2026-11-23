@@ -46,6 +46,10 @@ let plan: CombinePlan | undefined;
 /** Where "Add these to..." copies what only the first has, for the plan shown. */
 let missingTarget: PlaylistId | undefined;
 let destination: Destination;
+/** Counts the combine requests: only the latest one's answer is shown. */
+let requestId = 0;
+/** Whether the latest request is still waiting for its answer. */
+let resolving = false;
 
 /** Wire up the combine view. Call once on load. */
 export function initCombineView(): void {
@@ -59,7 +63,8 @@ export function initCombineView(): void {
   el("combine-add-missing").addEventListener("click", () => void onAddMissing());
   // Once there is a result, changing how to combine re-combines.
   const recombine = (): void => {
-    if (plan !== undefined) {
+    // Also while the first combine is still out: the newer request supersedes it.
+    if (plan !== undefined || resolving) {
       void onResolve();
     }
   };
@@ -267,28 +272,43 @@ async function onResolve(): Promise<void> {
     return;
   }
 
+  // The settings as they are now: what is shown is for these, whatever is changed meanwhile.
+  const mode = radioValue("combine-mode", "merge");
+  const order = el<HTMLSelectElement>("combine-order").value;
+  const keep = el<HTMLSelectElement>("combine-keep").value;
+  const matchSongs = el<HTMLInputElement>("combine-match-songs").checked;
+  const mine = ++requestId;
+  resolving = true;
   button.disabled = true;
   button.textContent = "Combining...";
+  // The list on show is for older settings: it cannot be saved until the new one arrives.
+  el<HTMLButtonElement>("combine-commit").disabled = true;
   try {
-    plan = await api<CombinePlan>("POST", "/api/combine/resolve", {
-      sources,
-      mode: radioValue("combine-mode", "merge"),
-      order: el<HTMLSelectElement>("combine-order").value,
-      keep: el<HTMLSelectElement>("combine-keep").value,
-      matchSongs: el<HTMLInputElement>("combine-match-songs").checked,
-    });
-    missingTarget = missingGoesTo(radioValue("combine-mode", "merge") as CombineMode, sources);
-    render(plan);
+    const result = await api<CombinePlan>("POST", "/api/combine/resolve", { sources, mode, order, keep, matchSongs });
+    if (mine !== requestId) {
+      return;
+    }
+    plan = result;
+    missingTarget = missingGoesTo(mode as CombineMode, sources);
+    render(result, mode);
   } catch (error) {
-    showError(errorNode, (error as Error).message);
+    if (mine === requestId) {
+      showError(errorNode, (error as Error).message);
+      if (plan !== undefined) {
+        updateCount();
+      }
+    }
   } finally {
-    button.disabled = false;
-    button.textContent = "Combine";
+    if (mine === requestId) {
+      resolving = false;
+      button.disabled = false;
+      button.textContent = "Combine";
+    }
   }
 }
 
-function render(result: CombinePlan): void {
-  renderOverlap(result);
+function render(result: CombinePlan, mode: string): void {
+  renderOverlap(result, mode);
   const offer = missingTarget !== undefined && result.tracks.length > 0;
   el("combine-missing").hidden = !offer;
   if (offer) {
@@ -326,9 +346,8 @@ function trackMeta(track: Track, inputs: number[], labels: string[]): string {
 }
 
 /** The headline, the stacked only-first / shared / only-others bar and its legend. */
-function renderOverlap(result: CombinePlan): void {
+function renderOverlap(result: CombinePlan, mode: string): void {
   const { labels, counts } = result;
-  const mode = radioValue("combine-mode", "merge");
   const first = labels[0] ?? "the first";
   const total = el("combine-total");
   total.textContent =
