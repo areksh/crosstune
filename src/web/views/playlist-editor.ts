@@ -102,6 +102,11 @@ function isDirty(): boolean {
   return editor !== undefined && summarise(editor.edits.now).changed;
 }
 
+/** Whether the playlist on show has unsaved edits or a save under way (for asking before a reload). */
+export function editorHasUnsaved(): boolean {
+  return isDirty() || busy;
+}
+
 function hashFor(id: PlaylistId): string {
   return playlistHash(id);
 }
