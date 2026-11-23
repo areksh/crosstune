@@ -63,12 +63,12 @@ describe("validateLink", () => {
 describe("runLinks", () => {
   it("syncs what is due, as one history entry, and schedules the next", async () => {
     const { deps, states, accounts, runs, link } = setup();
-    accounts.get("qobuz")!.edit(link.copies.qobuz!, (songs) => [...songs, 3]);
     await runLinks(deps, NOW); // first link: equal copies
+    accounts.get("qobuz")!.edit(link.copies.qobuz!, (songs) => [...songs, 3]);
     const summary = await runLinks(deps, new Date(NOW.getTime() + 3_600_000));
     expect(accounts.get("tidal")!.songs(link.copies.tidal!)).toEqual([1, 2, 3]);
     expect(summary.reports[0]).toMatchObject({ jobId: "aaaaaaaa", result: { status: "ok", added: 1 } });
-    expect(states.get("aaaaaaaa")).toMatchObject({ nextRunAt: "2026-11-23T14:00:00.000Z", entries: ["e2"] });
+    expect(states.get("aaaaaaaa")).toMatchObject({ nextRunAt: "2026-11-23T14:00:00.000Z", entries: ["e1", "e2"] });
     expect(runs).toHaveLength(2);
   });
 
