@@ -50,7 +50,7 @@ describe("buildPlaylistFromArtists", () => {
     const client = stubClient({
       artistsByQuery: {
         Portishead: [{ id: 5, name: "Portishead" }],
-        Massive: [{ id: 8, name: "Massive Attack" }],
+        "Massive Attack": [{ id: 8, name: "Massive Attack" }],
       },
       tracksByArtist: {
         5: [{ id: 100, title: "Roads" }],
@@ -60,7 +60,7 @@ describe("buildPlaylistFromArtists", () => {
     });
 
     const result = await buildPlaylistFromArtists(client, {
-      artists: ["Portishead", "Massive"],
+      artists: ["Portishead", "Massive Attack"],
       playlistName: "Trip Hop",
     });
 
@@ -92,6 +92,26 @@ describe("buildPlaylistFromArtists", () => {
 
     expect(result.resolvedArtists[0]?.artist).toEqual({ id: 2, name: "Wire" });
     expect(client.getArtistTopTracks).toHaveBeenCalledWith(2, 10);
+  });
+
+  it("does not take another artist for a name no result is spelled like", async () => {
+    // A typo, or an artist the service lacks: the first hit is somebody else.
+    const client = stubClient({
+      artistsByQuery: {
+        Beyonse: [{ id: 1, name: "Beyond" }],
+        Beyonce: [
+          { id: 2, name: "Beyonce Tribute Band" },
+          { id: 3, name: "Beyoncé" },
+        ],
+      },
+      tracksByArtist: { 1: [{ id: 100, title: "x" }], 3: [{ id: 300, title: "Halo" }] },
+    });
+
+    const result = await resolveArtistTracks(client, { artists: ["Beyonse", "Beyonce"] });
+
+    expect(result.unresolvedArtists).toEqual(["Beyonse"]);
+    expect(result.resolvedArtists.map((r) => r.artist.id)).toEqual([3]);
+    expect(client.getArtistTopTracks).not.toHaveBeenCalledWith(1, expect.anything());
   });
 
   it("records artists that cannot be resolved and continues", async () => {
@@ -233,7 +253,7 @@ describe("resolveArtistTracks", () => {
   it("flags a matched artist with no tracks and drops it from the list", async () => {
     const client = stubClient({
       artistsByQuery: {
-        "The Miracles, Smokey Robinson": [
+        "Smokey Robinson & the Miracles": [
           { id: 9, name: "Smokey Robinson and the Miracles" },
         ],
       },
@@ -241,7 +261,7 @@ describe("resolveArtistTracks", () => {
     });
 
     const result = await resolveArtistTracks(client, {
-      artists: ["The Miracles, Smokey Robinson"],
+      artists: ["Smokey Robinson & the Miracles"],
       tracksPerArtist: 20,
     });
 
@@ -249,7 +269,7 @@ describe("resolveArtistTracks", () => {
     expect(result.partialArtists).toEqual([]);
     expect(result.emptyArtists).toEqual([
       {
-        query: "The Miracles, Smokey Robinson",
+        query: "Smokey Robinson & the Miracles",
         artist: { id: 9, name: "Smokey Robinson and the Miracles" },
         trackCount: 0,
         requested: 20,
@@ -491,7 +511,7 @@ describe("buildPlaylistFromArtists with a filter", () => {
 describe("resolveArtistTracks with a song picker", () => {
   const artistsByQuery = {
     Portishead: [{ id: 1, name: "Portishead" }],
-    Beth: [{ id: 2, name: "Beth Gibbons" }],
+    "Beth Gibbons": [{ id: 2, name: "Beth Gibbons" }],
   };
   const tracksByArtist: Record<number, Track[]> = {
     1: [
@@ -509,7 +529,7 @@ describe("resolveArtistTracks with a song picker", () => {
   it("replaces a later copy of a song with the next most popular track", async () => {
     const client = stubClient({ artistsByQuery, tracksByArtist });
     const result = await resolveArtistTracks(client, {
-      artists: ["Portishead", "Beth"],
+      artists: ["Portishead", "Beth Gibbons"],
       tracksPerArtist: 2,
       picker: new SongPicker({ oneCopy: true }),
     });
@@ -534,7 +554,7 @@ describe("resolveArtistTracks with a song picker", () => {
       return tracksByArtist[artistId] ?? [];
     });
     const result = await resolveArtistTracks(client, {
-      artists: ["Portishead", "Beth"],
+      artists: ["Portishead", "Beth Gibbons"],
       tracksPerArtist: 1,
       picker: new SongPicker({ oneCopy: true }),
     });

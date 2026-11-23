@@ -14,6 +14,7 @@
 
 import type { ArtistId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
+import { normalise } from "./deduplicate.js";
 import { parseMusicLink } from "./music-links.js";
 import { compileArtistTerm, normaliseArtistName } from "./track-filter.js";
 
@@ -148,6 +149,32 @@ export function matchedIndexes(
 ): number[] {
   const picked = new Set(results.flatMap((r) => (includeGuests ? [...r.main, ...r.guest] : r.main)));
   return [...picked].sort((a, b) => a - b);
+}
+
+/**
+ * Of an artist search's results, the one a typed name means: one spelled the
+ * same, ignoring case, accents and spacing (see {@link normaliseArtistName}),
+ * else one that differs only in punctuation or "&" for "and" ("Guns N Roses"
+ * for "Guns N' Roses"). Nothing else counts: the first hit for a misspelt name, or for an
+ * artist the service lacks, is somebody else, and taking them unseen is worse
+ * than reporting the name unmatched. Of several spelled alike, the search's
+ * first (its ranking) is taken.
+ */
+export function findArtistByName<T extends { name: string }>(
+  candidates: readonly T[],
+  name: string,
+): T | undefined {
+  const wanted = normaliseArtistName(name);
+  if (wanted.length === 0) {
+    return undefined;
+  }
+  const exact = candidates.find((artist) => normaliseArtistName(artist.name) === wanted);
+  if (exact !== undefined) {
+    return exact;
+  }
+  const fold = (text: string): string => normalise(text.replace(/&/g, " and "));
+  const loose = fold(name);
+  return loose.length === 0 ? undefined : candidates.find((artist) => fold(artist.name) === loose);
 }
 
 /** Names after "feat.", "ft.", "featuring" or "(with ...)" in a title or version. */

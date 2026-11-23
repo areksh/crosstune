@@ -30,6 +30,7 @@ import {
   type TrackId,
 } from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
+import { findArtistByName } from "./artist-match.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
@@ -541,9 +542,11 @@ export async function lookUpArtist(
   }
 }
 
-/** Prefer an exact (case-insensitive) name match, else the first (most relevant) result. */
+/**
+ * The result spelled like the query (see {@link findArtistByName}); never just
+ * the first result, which for a typo or an artist the service lacks is
+ * somebody else.
+ */
 export function pickArtist(candidates: Artist[], query: string): Artist | undefined {
-  const wanted = query.trim().toLowerCase();
-  const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
-  return exact ?? candidates[0];
+  return findArtistByName(candidates, query);
 }
