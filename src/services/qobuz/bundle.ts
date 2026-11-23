@@ -15,6 +15,7 @@
  * Qobuz changes it.
  */
 
+import { REQUEST_TIMEOUT_MS } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 
 const LOGIN_PAGE_URL = "https://play.qobuz.com/login";
@@ -178,7 +179,7 @@ export async function fetchBundleTokens(
 async function fetchText(fetchImpl: typeof fetch, url: string): Promise<string> {
   let response: Response;
   try {
-    response = await fetchImpl(url);
+    response = await fetchImpl(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (cause) {
     throw new QobuzError(
       "bundle-extraction",

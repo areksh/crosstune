@@ -25,7 +25,8 @@ export interface CredentialStore {
 /** The client capability needed to bootstrap, with or without a cache. */
 export interface InitClient {
   init(): Promise<void>;
-  initFromCache(credentials: ResolvedCredentials): void;
+  /** `onRejected`: the cached secret turned out wrong (see QobuzClient). */
+  initFromCache(credentials: ResolvedCredentials, onRejected?: () => void): void;
   readonly credentials: ResolvedCredentials;
 }
 
@@ -48,7 +49,9 @@ export function fileCredentialStore(
 
 /**
  * Initialise the client from cached credentials, or extract them fresh and
- * cache the result.
+ * cache the result. Cached credentials whose secret Qobuz turns out to reject
+ * are dropped, so the next start extracts them afresh rather than failing
+ * until the cache expires.
  */
 export async function initClientWithCache(
   client: InitClient,
@@ -56,7 +59,7 @@ export async function initClientWithCache(
 ): Promise<InitResult> {
   const cached = store.load();
   if (cached !== undefined) {
-    client.initFromCache(cached);
+    client.initFromCache(cached, () => store.clear());
     return { fromCache: true };
   }
   await client.init();

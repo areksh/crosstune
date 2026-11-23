@@ -342,7 +342,15 @@ describe("parseTracksPage", () => {
     expect(parseTracksPage(json)).toEqual({
       tracks: [{ id: 1, title: "A" }],
       total: 137,
+      returned: 1,
     });
+  });
+
+  it("counts the items returned, including those it cannot read", () => {
+    const json = { tracks: { items: [{ id: 1, title: "A" }, { id: "x" }, null], total: 3 } };
+    const page = parseTracksPage(json);
+    expect(page.tracks).toHaveLength(1);
+    expect(page.returned).toBe(3);
   });
 
   it("defaults total to zero when absent", () => {
@@ -357,6 +365,7 @@ describe("parseAlbumsPage", () => {
     };
     const page = parseAlbumsPage(json);
     expect(page.total).toBe(9);
+    expect(page.returned).toBe(1);
     expect(page.albums).toEqual([{ id: "a", title: "T", artist: "X" }]);
   });
 
@@ -371,6 +380,7 @@ describe("parseArtistsPage", () => {
     expect(parseArtistsPage(json)).toEqual({
       artists: [{ id: 3, name: "Bjork" }],
       total: 4,
+      returned: 1,
     });
   });
 
@@ -462,6 +472,7 @@ describe("parsePlaylistsPage", () => {
     expect(parsePlaylistsPage(json)).toEqual({
       playlists: [{ id: 1, name: "A" }],
       total: 9,
+      returned: 1,
     });
   });
 

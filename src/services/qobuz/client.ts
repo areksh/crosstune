@@ -9,7 +9,7 @@
 
 import { parseLoginResponse, type UserSession } from "./auth.js";
 import { fetchBundleTokens, type BundleTokens } from "./bundle.js";
-import { buildUrl, paths } from "./endpoints.js";
+import { buildUrl, paths, REQUEST_TIMEOUT_MS } from "./endpoints.js";
 import { QobuzError } from "./errors.js";
 import {
   parseAlbumDetails,
@@ -121,6 +121,8 @@ export class QobuzClient {
 
   #tokens?: BundleTokens;
   #validatedSecret?: string;
+  /** Set while a cached secret is unproven: see {@link initFromCache}. */
+  #onCachedSecretRejected: (() => void) | undefined;
   #session?: UserSession;
 
   constructor(options: QobuzClientOptions = {}) {
@@ -157,6 +159,7 @@ export class QobuzClient {
   async init(): Promise<void> {
     this.#tokens = await fetchBundleTokens(this.#fetch);
     this.#validatedSecret = await this.#validateSecret(this.#tokens.secrets);
+    this.#onCachedSecretRejected = undefined;
   }
 
   /**
@@ -180,8 +183,14 @@ export class QobuzClient {
    * Qobuz has since rotated its credentials the cached values become stale and
    * later requests will fail, so callers should discard the cache and fall back
    * to {@link init} on such failures.
+   *
+   * `onRejected` is how they learn of it: it is called (once) when the first
+   * signed request still fails with HTTP 400 after every retry -- what a wrong
+   * secret looks like. A signed request that gets any other answer first
+   * proves the secret, and the hook is dropped, so a later 400 of another
+   * cause does not discard a good cache.
    */
-  initFromCache(credentials: ResolvedCredentials): void {
+  initFromCache(credentials: ResolvedCredentials, onRejected?: () => void): void {
     this.#tokens =
       credentials.privateKey === undefined
         ? { appId: credentials.appId, secrets: [credentials.secret] }
@@ -191,6 +200,7 @@ export class QobuzClient {
             privateKey: credentials.privateKey,
           };
     this.#validatedSecret = credentials.secret;
+    this.#onCachedSecretRejected = onRejected;
   }
 
   /**
@@ -265,12 +275,7 @@ export class QobuzClient {
     if (response.status === 401) {
       throw new QobuzError("authentication", "Auth token rejected");
     }
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `Login failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "Login");
 
     const session = parseLoginResponse(await response.json());
     this.#session = session;
@@ -311,12 +316,7 @@ export class QobuzClient {
       },
     });
 
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `getUserFavorites failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "getUserFavorites");
     return response.json();
   }
 
@@ -348,12 +348,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist search");
     return parseArtists(await response.json());
   }
 
@@ -389,12 +384,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album search");
     return parseAlbums(await response.json());
   }
 
@@ -429,12 +419,7 @@ export class QobuzClient {
       },
       headers: this.#headers(),
     });
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `track search failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "track search");
     return parseTracks(await response.json());
   }
 
@@ -458,12 +443,7 @@ export class QobuzClient {
         ["offset", "0"],
       ],
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist/getSimilarArtists failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist/getSimilarArtists");
     return parseArtists(await response.json());
   }
 
@@ -488,12 +468,7 @@ export class QobuzClient {
     const response = await this.#signedGet("artistpage", paths.artistPage, [
       ["artist_id", String(artistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `artist/page failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "artist/page");
     const tracks = parseArtistPageTracks(await response.json());
     const ownTracks = tracks.filter(
       (track) => track.artistId === undefined || track.artistId === artistId,
@@ -532,21 +507,17 @@ export class QobuzClient {
           ["offset", String(offset)],
         ],
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `artist/getReleasesList failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "artist/getReleasesList");
       const page = parseReleasesPage(await response.json());
       releases.push(...page.releases.slice(0, maxReleases - releases.length));
-      if (!page.hasMore || page.releases.length === 0) {
+      if (!page.hasMore || page.returned === 0) {
         return { releases, truncated: false };
       }
       if (releases.length >= maxReleases) {
         return { releases, truncated: true };
       }
-      offset += page.releases.length;
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
     }
   }
 
@@ -572,12 +543,7 @@ export class QobuzClient {
       kvPairs,
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/create failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/create");
     return parsePlaylist(await response.json());
   }
 
@@ -603,12 +569,7 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/addTracks failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/addTracks");
     }
   }
 
@@ -644,12 +605,7 @@ export class QobuzClient {
           },
         },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `getUserFavorites failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "getUserFavorites");
       return parseTracksPage(await response.json());
     });
   }
@@ -662,7 +618,7 @@ export class QobuzClient {
   async getFavoriteAlbums(): Promise<Album[]> {
     return this.#collectFavorites("albums", (json) => {
       const page = parseAlbumsPage(json);
-      return { items: page.albums, total: page.total };
+      return { items: page.albums, total: page.total, returned: page.returned };
     });
   }
 
@@ -674,7 +630,7 @@ export class QobuzClient {
   async getFavoriteArtists(): Promise<Artist[]> {
     return this.#collectFavorites("artists", (json) => {
       const page = parseArtistsPage(json);
-      return { items: page.artists, total: page.total };
+      return { items: page.artists, total: page.total, returned: page.returned };
     });
   }
 
@@ -724,16 +680,12 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/getUserPlaylists failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/getUserPlaylists");
       const page = parsePlaylistsPage(await response.json());
       all.push(...page.playlists);
-      offset += page.playlists.length;
-      if (page.playlists.length === 0 || all.length >= page.total) {
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }
@@ -748,12 +700,7 @@ export class QobuzClient {
         ["offset", String(offset)],
         ["extra", "tracks"],
       ]);
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/get failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/get");
       return parseTracksPage(await response.json());
     });
   }
@@ -767,9 +714,7 @@ export class QobuzClient {
     const response = await this.#signedGet("artistpage", paths.artistPage, [
       ["artist_id", String(artistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `artist/page failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "artist/page");
     const artist = parseArtistPage(await response.json());
     if (artist === undefined) {
       throw new QobuzError("api-response", `artist/page returned no artist for ${artistId}`);
@@ -784,9 +729,7 @@ export class QobuzClient {
    */
   async getTrack(trackId: number): Promise<Track> {
     const response = await this.#signedGet("trackget", paths.trackGet, [["track_id", String(trackId)]]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `track/get failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "track/get");
     const track = parseTrackDetails(await response.json());
     if (track === undefined) {
       throw new QobuzError("api-response", `track/get returned no track for ${trackId}`);
@@ -802,9 +745,7 @@ export class QobuzClient {
    */
   async getAlbum(albumId: string): Promise<Album> {
     const response = await this.#signedGet("albumget", paths.albumGet, [["album_id", albumId]]);
-    if (!response.ok) {
-      throw new QobuzError("api-response", `album/get failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "album/get");
     const album = parseAlbumDetails(await response.json());
     if (album === undefined) {
       throw new QobuzError("api-response", `album/get returned no album for ${albumId}`);
@@ -817,12 +758,7 @@ export class QobuzClient {
     const response = await this.#signedGet("albumget", paths.albumGet, [
       ["album_id", albumId],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album/get");
     return parseAlbumReleaseDate(await response.json());
   }
 
@@ -836,12 +772,7 @@ export class QobuzClient {
     const response = await this.#signedGet("albumget", paths.albumGet, [
       ["album_id", albumId],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `album/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "album/get");
     return parseAlbumTracks(await response.json());
   }
 
@@ -865,12 +796,7 @@ export class QobuzClient {
         ],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `playlist/deleteTracks failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "playlist/deleteTracks");
     }
   }
 
@@ -909,12 +835,7 @@ export class QobuzClient {
       ],
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/updateTracksPosition failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/updateTracksPosition");
   }
 
   /**
@@ -960,12 +881,7 @@ export class QobuzClient {
       [["playlist_id", String(playlistId)]],
       { requireAuth: true },
     );
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/delete failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/delete");
   }
 
   /**
@@ -993,9 +909,7 @@ export class QobuzClient {
     const response = await this.#signedGet("playlistupdate", paths.playlistUpdate, kvPairs, {
       requireAuth: true,
     });
-    if (!response.ok) {
-      throw new QobuzError("api-response", `playlist/update failed with HTTP ${response.status}`);
-    }
+    this.#ensureOk(response, "playlist/update");
     return parsePlaylist(await response.json());
   }
 
@@ -1009,12 +923,7 @@ export class QobuzClient {
     const response = await this.#signedGet("playlistget", paths.playlistGet, [
       ["playlist_id", String(playlistId)],
     ]);
-    if (!response.ok) {
-      throw new QobuzError(
-        "api-response",
-        `playlist/get failed with HTTP ${response.status}`,
-      );
-    }
+    this.#ensureOk(response, "playlist/get");
     return parsePlaylist(await response.json());
   }
 
@@ -1025,7 +934,7 @@ export class QobuzClient {
    */
   async #collectFavorites<T>(
     type: "albums" | "artists",
-    parse: (json: unknown) => { items: T[]; total: number },
+    parse: (json: unknown) => { items: T[]; total: number; returned: number },
   ): Promise<T[]> {
     const session = this.#requireSession();
     const pageSize = 500;
@@ -1056,16 +965,12 @@ export class QobuzClient {
           },
         },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `getUserFavorites failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "getUserFavorites");
       const page = parse(await response.json());
       all.push(...page.items);
-      offset += page.items.length;
-      if (page.items.length === 0 || all.length >= page.total) {
+      // By what Qobuz returned, not what parsed: see #collectAllTracks.
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }
@@ -1087,12 +992,7 @@ export class QobuzClient {
         [[key, batch.join(",")]],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `favorite/create failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "favorite/create");
     }
   }
 
@@ -1111,16 +1011,19 @@ export class QobuzClient {
         [[key, batch.join(",")]],
         { requireAuth: true },
       );
-      if (!response.ok) {
-        throw new QobuzError(
-          "api-response",
-          `favorite/delete failed with HTTP ${response.status}`,
-        );
-      }
+      this.#ensureOk(response, "favorite/delete");
     }
   }
 
-  /** Page through a track source until every track has been collected. */
+  /**
+   * Page through a track source until every track has been collected.
+   *
+   * The offset moves on by the items Qobuz returned, and the paging stops on
+   * them too, never by the tracks that parsed: an item that cannot be read
+   * would otherwise start the next page one early, reading the page's last
+   * entry twice -- with the same playlist-track id, so that removing "the
+   * extra copy" would delete the only real entry.
+   */
   async #collectAllTracks(
     fetchPage: (limit: number, offset: number) => Promise<TracksPage>,
   ): Promise<Track[]> {
@@ -1130,8 +1033,8 @@ export class QobuzClient {
     for (;;) {
       const page = await fetchPage(pageSize, offset);
       all.push(...page.tracks);
-      offset += page.tracks.length;
-      if (page.tracks.length === 0 || all.length >= page.total) {
+      offset += page.returned;
+      if (page.returned === 0 || offset >= page.total) {
         return all;
       }
     }
@@ -1172,6 +1075,28 @@ export class QobuzClient {
     return this.#request("GET", path, { query, headers });
   }
 
+  /**
+   * Throw unless Qobuz accepted the request, `what` naming it in the message.
+   *
+   * A 401 means Qobuz no longer accepts the user's token (revoked, or signed
+   * out elsewhere), so it is an `authentication` error -- what tells the
+   * server to ask for a sign-in again, scheduled jobs to flag the service and
+   * matching to stop -- wherever it comes; any other refusal is
+   * `api-response` ("<what> failed with HTTP <status>").
+   */
+  #ensureOk(response: Response, what: string): void {
+    if (response.ok) {
+      return;
+    }
+    if (response.status === 401) {
+      throw new QobuzError(
+        "authentication",
+        `Qobuz did not accept the sign-in; connect Qobuz again (${what} failed with HTTP 401)`,
+      );
+    }
+    throw new QobuzError("api-response", `${what} failed with HTTP ${response.status}`);
+  }
+
   /** App id header, plus the user token when signed in (optional auth). */
   #headers(): Record<string, string> {
     const headers = this.#appIdHeaders();
@@ -1181,7 +1106,17 @@ export class QobuzClient {
     return headers;
   }
 
-  /** Try each candidate secret against a signed probe; return the first valid one. */
+  /**
+   * Try each candidate secret against a signed probe; return the first valid one.
+   *
+   * Only a 400 says "wrong secret, try the next". A 5xx, a 429 or no answer at
+   * all says nothing about the secret, so it is not taken as acceptance: the
+   * probe throws (kind `network`, or `rate-limited` for a 429) and no secret is
+   * chosen. Otherwise a Qobuz hiccup during the (weekly) re-extraction would
+   * validate a wrong candidate, which the credentials cache would then keep
+   * for days while every signed request failed with 400. Any other answer
+   * (200, or the 401 of a correctly signed request with no user) accepts it.
+   */
   async #validateSecret(secrets: readonly string[]): Promise<string> {
     for (const secret of secrets) {
       const timestamp = this.#now();
@@ -1204,10 +1139,22 @@ export class QobuzClient {
         // throttling, so it must not trigger the backoff-and-retry loop.
         retryOn400: false,
       });
-      // A wrong secret is rejected with 400; anything else means it was accepted.
-      if (response.status !== 400) {
-        return secret;
+      if (response.status === 400) {
+        continue;
       }
+      if (response.status === 429) {
+        throw new QobuzError(
+          "rate-limited",
+          "Qobuz is getting too many requests to check its app secret; try again later",
+        );
+      }
+      if (response.status >= 500) {
+        throw new QobuzError(
+          "network",
+          `Qobuz failed while its app secret was checked (HTTP ${response.status}); try again later`,
+        );
+      }
+      return secret;
     }
     throw new QobuzError(
       "bundle-extraction",
@@ -1240,7 +1187,7 @@ export class QobuzClient {
 
     const retryOn400 = options.retryOn400 ?? true;
     for (let attempt = 0; ; attempt += 1) {
-      const response = await this.#fetch(url, init);
+      const response = await this.#fetchOnce(method, path, url, init);
       this.#logger.debug(`${method} ${path} -> ${response.status}`);
       if (response.status === 400 && retryOn400 && attempt < MAX_RETRIES) {
         const delay = RETRY_BASE_MS * 2 ** attempt;
@@ -1251,7 +1198,40 @@ export class QobuzClient {
         await this.#sleep(delay);
         continue;
       }
+      if (options.query?.["request_sig"] !== undefined) {
+        this.#judgeCachedSecret(response.status);
+      }
       return response;
+    }
+  }
+
+  /**
+   * The first answer to a signed request settles an unproven cached secret:
+   * a 400 that outlasted the retries rejects it, anything else proves it.
+   */
+  #judgeCachedSecret(status: number): void {
+    const onRejected = this.#onCachedSecretRejected;
+    if (onRejected === undefined) {
+      return;
+    }
+    this.#onCachedSecretRejected = undefined;
+    if (status === 400) {
+      this.#logger.debug("The cached app secret was rejected (HTTP 400)");
+      onRejected();
+    }
+  }
+
+  /**
+   * One try, with a time limit of its own (a retry starts a fresh one). Qobuz
+   * not answering, or the connection breaking off, is a `network` error rather
+   * than whatever `fetch` threw, so callers can tell it from a refusal.
+   */
+  async #fetchOnce(method: string, path: string, url: URL, init: RequestInit): Promise<Response> {
+    try {
+      return await this.#fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    } catch (cause) {
+      this.#logger.debug(`${method} ${path} -> no answer`);
+      throw new QobuzError("network", "Qobuz could not be reached", { cause });
     }
   }
 

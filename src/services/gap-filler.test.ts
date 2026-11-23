@@ -106,6 +106,48 @@ describe("fillGaps", () => {
     expect(await filled.getSimilarArtists(artist, 5)).toEqual([{ id: "spotify:8", name: "Tricky" }]);
   });
 
+  it("leaves out a similar artist several here are called: a namesake is a guess", async () => {
+    const twoTrickys = spotify({
+      searchArtists: vi.fn(async (name: string): Promise<Artist[]> =>
+        name === "Tricky"
+          ? [
+              { id: tagId<ArtistId>("spotify", 8), name: "Tricky" },
+              { id: tagId<ArtistId>("spotify", 88), name: "Tricky" },
+            ]
+          : [],
+      ),
+    });
+    const filled = fillGaps(twoTrickys, () => [qobuz()], new MemoryMatches());
+    expect(await filled.getSimilarArtists(artist, 5)).toEqual([]);
+  });
+
+  it("takes nothing from a donor on which several artists have the name", async () => {
+    const namesakes = qobuz();
+    vi.mocked(namesakes.searchArtists).mockResolvedValue([
+      { id: tagId<ArtistId>("qobuz", 70), name: "Portishead" },
+      { id: tagId<ArtistId>("qobuz", 71), name: "Portishead" },
+    ]);
+    const filled = fillGaps(spotify(), () => [namesakes], new MemoryMatches());
+
+    await expect(filled.getArtistTopTracks(artist)).rejects.toMatchObject({ kind: "unsupported" });
+    await expect(filled.getSimilarArtists(artist, 5)).rejects.toMatchObject({ kind: "unsupported" });
+    expect(namesakes.getArtistTopTracks).not.toHaveBeenCalled();
+    expect(namesakes.getSimilarArtists).not.toHaveBeenCalled();
+  });
+
+  it("asks the next donor when the first has namesakes", async () => {
+    const namesakes = qobuz();
+    vi.mocked(namesakes.searchArtists).mockResolvedValue([
+      { id: tagId<ArtistId>("qobuz", 70), name: "Portishead" },
+      { id: tagId<ArtistId>("qobuz", 71), name: "Portishead" },
+    ]);
+    const tidal = { ...qobuz(), name: "tidal" } as MusicService;
+    const filled = fillGaps(spotify(), () => [namesakes, tidal], new MemoryMatches());
+
+    expect(await filled.getArtistTopTracks(artist, 10)).toHaveLength(3);
+    expect(tidal.getArtistTopTracks).toHaveBeenCalled();
+  });
+
   it("says what to connect when no service can tell", async () => {
     const filled = fillGaps(spotify(), () => [], new MemoryMatches());
     await expect(filled.getArtistTopTracks(artist)).rejects.toMatchObject({

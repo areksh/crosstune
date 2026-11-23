@@ -43,6 +43,7 @@ describe("parseReleasesPage", () => {
 
     expect(page).toEqual({
       hasMore: true,
+      returned: 1,
       releases: [
         {
           id: "rel1",
@@ -104,9 +105,12 @@ describe("parseReleasesPage", () => {
   });
 
   it("skips malformed items and tolerates junk", () => {
-    expect(parseReleasesPage({ items: [{ id: 5, title: "x" }, null, listItem()] }).releases).toHaveLength(1);
-    expect(parseReleasesPage(null)).toEqual({ releases: [], hasMore: false });
-    expect(parseReleasesPage({ items: "nope" })).toEqual({ releases: [], hasMore: false });
+    const page = parseReleasesPage({ items: [{ id: 5, title: "x" }, null, listItem()] });
+    expect(page.releases).toHaveLength(1);
+    // Every item Qobuz returned counts towards the next offset, read or not.
+    expect(page.returned).toBe(3);
+    expect(parseReleasesPage(null)).toEqual({ releases: [], hasMore: false, returned: 0 });
+    expect(parseReleasesPage({ items: "nope" })).toEqual({ releases: [], hasMore: false, returned: 0 });
   });
 
   it("reads a released_at timestamp when no date string is given", () => {

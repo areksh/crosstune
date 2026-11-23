@@ -272,6 +272,49 @@ describe("QobuzClient credentials caching", () => {
     const search = recorded.find((r) => r.url.pathname.endsWith("/artist/search"));
     expect(search?.headers.get("X-App-Id")).toBe("999888777");
   });
+
+  /** A cache-primed client whose signed searches are answered, in turn, with these statuses. */
+  function cachedClient(...statuses: number[]) {
+    const base = makeFetch({ recorded: [] });
+    let calls = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/album/search")) {
+        const status = statuses[calls] ?? 200;
+        calls += 1;
+        return new Response("{}", { status });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000, sleep: async () => {} });
+    const rejected = { count: 0 };
+    client.initFromCache({ appId: "100200300", secret: "stale" }, () => {
+      rejected.count += 1;
+    });
+    return { client, rejected };
+  }
+
+  it("says the cached secret was rejected when its first signed request still fails 400", async () => {
+    const { client, rejected } = cachedClient(...Array<number>(6).fill(400));
+
+    await expect(client.searchAlbums("x", 5)).rejects.toBeInstanceOf(QobuzError);
+
+    expect(rejected.count).toBe(1);
+  });
+
+  it("does not blame the cached secret once a signed request has worked", async () => {
+    const { client, rejected } = cachedClient(200, ...Array<number>(6).fill(400));
+
+    await client.searchAlbums("x", 5);
+    await expect(client.searchAlbums("x", 5)).rejects.toBeInstanceOf(QobuzError);
+
+    expect(rejected.count).toBe(0);
+  });
+
+  it("does not blame the cached secret for a throttled 400 that a retry rides out", async () => {
+    const { client, rejected } = cachedClient(400, 400, 200);
+    await client.searchAlbums("x", 5);
+    expect(rejected.count).toBe(0);
+  });
 });
 
 describe("QobuzClient request retries on HTTP 400", () => {
@@ -361,6 +404,240 @@ describe("QobuzClient request retries on HTTP 400", () => {
     // must move straight to the next candidate, never backing off and retrying.
     await expect(client.init()).rejects.toBeInstanceOf(QobuzError);
     expect(delays).toEqual([]);
+  });
+});
+
+describe("QobuzClient secret probe", () => {
+  // Two candidates: Berlin's "qobuztestsecret001", then London's "...002".
+  const TWO_SEEDS =
+    `production:{api:{appId:"100200300"}` +
+    SEED_BLOCK +
+    `;y.initialSeed("cW9idXp0ZXN0c2VjcmV0MDAy",window.utimezone.london)` +
+    `;name:"Europe/London",info:"${"A".repeat(22)}",extras:"${"B".repeat(22)}"`;
+
+  /** A client whose probes are answered, in turn, with the given statuses. */
+  function probed(...answers: Array<number | Error>) {
+    const base = makeFetch({ recorded: [], bundleJs: TWO_SEEDS });
+    let probes = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/track/getFileUrl")) {
+        const answer = answers[probes] ?? 200;
+        probes += 1;
+        if (answer instanceof Error) {
+          throw answer;
+        }
+        return new Response("{}", { status: answer });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000, sleep: async () => {} });
+    return { client, probes: () => probes };
+  }
+
+  it("moves past a candidate rejected with 400 to the next", async () => {
+    const { client } = probed(400, 200);
+    await client.init();
+    expect(client.credentials.secret).toBe("qobuztestsecret002");
+  });
+
+  it("chooses no secret when Qobuz fails (5xx) rather than rejecting the candidate", async () => {
+    const { client, probes } = probed(503);
+
+    await expect(client.init()).rejects.toMatchObject({ kind: "network" });
+    // It neither took the first candidate nor went on to the second.
+    expect(probes()).toBe(1);
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("chooses no secret when Qobuz is limiting requests (429)", async () => {
+    const { client } = probed(400, 429);
+    await expect(client.init()).rejects.toMatchObject({ kind: "rate-limited" });
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("chooses no secret when Qobuz cannot be reached", async () => {
+    const { client } = probed(new TypeError("fetch failed"));
+    await expect(client.init()).rejects.toMatchObject({ kind: "network" });
+    expect(() => client.credentials).toThrow(QobuzError);
+  });
+
+  it("accepts a candidate any other answer comes back for (e.g. 401: signed right, no user)", async () => {
+    const { client } = probed(401);
+    await client.init();
+    expect(client.credentials.secret).toBe("qobuztestsecret001");
+  });
+});
+
+describe("QobuzClient paging past items it cannot read", () => {
+  /**
+   * A signed-in client whose `path` serves `items` (under `key`) a page at a
+   * time, as Qobuz does: `limit` and `offset` honoured, `total` the full count.
+   */
+  async function serving(path: string, key: string, items: unknown[], hasMore = false) {
+    const base = makeFetch({ recorded: [], loginBody: validSessionBody() });
+    const offsets: number[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith(path)) {
+        const limit = Number(url.searchParams.get("limit"));
+        const offset = Number(url.searchParams.get("offset"));
+        offsets.push(offset);
+        const page = items.slice(offset, offset + limit);
+        const container = hasMore
+          ? { items: page, has_more: offset + limit < items.length }
+          : { items: page, total: items.length, offset, limit };
+        return new Response(JSON.stringify({ [key]: container }), { status: 200 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.loginWithOAuthCode("code");
+    return { client, offsets };
+  }
+
+  /** 501 items of which the 10th is one Qobuz sent but we cannot read. */
+  function withOneMalformed<T>(make: (i: number) => T): unknown[] {
+    return Array.from({ length: 501 }, (_, i) => (i === 9 ? { id: "broken" } : make(i)));
+  }
+
+  it("reads each playlist entry once, by the items Qobuz returned, not those it parsed", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, title: `T${i}`, playlist_track_id: 5000 + i }));
+    const { client, offsets } = await serving("/playlist/get", "tracks", items);
+
+    const tracks = await client.getPlaylistTracks(1);
+
+    const entries = tracks.map((t) => t.playlistTrackId);
+    expect(new Set(entries).size).toBe(entries.length);
+    expect(tracks).toHaveLength(500);
+    expect(entries).toContain(5500);
+    expect(offsets).toEqual([0, 500]);
+  });
+
+  it("reads each favourite track once", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, title: `T${i}` }));
+    const { client } = await serving("/favorite/getUserFavorites", "tracks", items);
+
+    const ids = (await client.getFavoriteTracks()).map((t) => t.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each favourite album once", async () => {
+    const items = withOneMalformed((i) => ({ id: `a${i}`, title: `A${i}`, artist: { name: "X" } }));
+    const { client } = await serving("/favorite/getUserFavorites", "albums", items);
+
+    const ids = (await client.getFavoriteAlbums()).map((a) => a.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each playlist once", async () => {
+    const items = withOneMalformed((i) => ({ id: 1000 + i, name: `P${i}` }));
+    const { client } = await serving("/playlist/getUserPlaylists", "playlists", items);
+
+    const ids = (await client.getUserPlaylists()).map((p) => p.id);
+
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+  });
+
+  it("reads each release once", async () => {
+    const items = withOneMalformed((i) => ({ id: `r${i}`, title: `R${i}` }));
+    const { client, offsets } = await serving("/artist/getReleasesList", "albums", items, true);
+
+    const { releases, truncated } = await client.getArtistReleases(1, 1000);
+
+    const ids = releases.map((r) => r.id);
+    expect(new Set(ids).size).toBe(500);
+    expect(ids).toHaveLength(500);
+    expect(truncated).toBe(false);
+    expect(offsets).toEqual([0, 100, 200, 300, 400, 500]);
+  });
+});
+
+describe("QobuzClient sign-in refused mid-session (HTTP 401)", () => {
+  /** A signed-in client to which Qobuz then answers every request with `status`. */
+  async function refusedWith(status: number) {
+    const base = makeFetch({ recorded: [], loginBody: validSessionBody() });
+    let signedIn = false;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (signedIn && !path.endsWith("/user/login")) {
+        return new Response("{}", { status });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.loginWithOAuthCode("code");
+    signedIn = true;
+    return client;
+  }
+
+  const calls: Array<[string, (client: QobuzClient) => Promise<unknown>]> = [
+    ["getUserPlaylists", (c) => c.getUserPlaylists()],
+    ["getPlaylistTracks", (c) => c.getPlaylistTracks(1)],
+    ["getFavoriteTracks", (c) => c.getFavoriteTracks()],
+    ["getFavoriteAlbums", (c) => c.getFavoriteAlbums()],
+    ["getUserFavorites", (c) => c.getUserFavorites("tracks")],
+    ["searchTracks", (c) => c.searchTracks("x")],
+    ["getArtistReleases", (c) => c.getArtistReleases(1)],
+    ["addTracksToPlaylist", (c) => c.addTracksToPlaylist(1, [2])],
+    ["removeFavoriteTracks", (c) => c.removeFavoriteTracks([2])],
+    ["updatePlaylist", (c) => c.updatePlaylist(1, { name: "x" })],
+  ];
+
+  it.each(calls)("%s reports it as an authentication error", async (_, call) => {
+    const client = await refusedWith(401);
+    await expect(call(client)).rejects.toMatchObject({ kind: "authentication", service: "qobuz" });
+  });
+
+  it("keeps other refusals as api-response, with their messages", async () => {
+    const client = await refusedWith(403);
+    await expect(client.getUserPlaylists()).rejects.toMatchObject({
+      kind: "api-response",
+      message: "playlist/getUserPlaylists failed with HTTP 403",
+    });
+  });
+});
+
+describe("QobuzClient network failures", () => {
+  it("reports a request Qobuz never answers as a network error", async () => {
+    const recorded: RecordedRequest[] = [];
+    const base = makeFetch({ recorded });
+    const cause = new TypeError("fetch failed");
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/album/search")) {
+        throw cause;
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+
+    const failure = client.searchAlbums("x", 5);
+
+    await expect(failure).rejects.toBeInstanceOf(QobuzError);
+    await expect(failure).rejects.toMatchObject({ kind: "network", service: "qobuz", cause });
+  });
+
+  it("gives every request a time limit", async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const base = makeFetch({ recorded: [] });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return base(input, init);
+    }) as typeof fetch;
+    const client = new QobuzClient({ fetchImpl, now: () => 1700000000 });
+    await client.init();
+    await client.searchAlbums("x", 5);
+
+    // The probe and the search (the bundle is fetched elsewhere).
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
   });
 });
 
