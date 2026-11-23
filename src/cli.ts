@@ -179,7 +179,7 @@
  * stderr instead (see src/cli/output.ts).
  */
 
-import { shortId, type ArtistId, type PlaylistId, type UserId } from "./services/ids.js";
+import { shortId, tagId, type ArtistId, type PlaylistId, type UserId } from "./services/ids.js";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -668,6 +668,15 @@ async function main(): Promise<void> {
       ? () => authenticateByPaste(client, consoleIO())
       : () => authenticateViaBrowser(client, { log: (message) => logger.info(message) }),
     (message) => logger.info(message),
+    (session) => {
+      // One account per service: the web UI refuses another, and so does this.
+      const known = fileAccountStore().account("qobuz");
+      if (known !== undefined && known.id !== tagId<UserId>("qobuz", session.userId)) {
+        throw new Error(
+          `qobuz-helper knows ${known.displayName} on Qobuz, and this is ${session.displayName}. Run \`qobuz-helper forget qobuz\` to use another account.`,
+        );
+      }
+    },
   );
   logger.info(
     `  ${restored ? "resumed session" : "signed in"} as ${session.displayName} (${session.subscriptionLabel})`,

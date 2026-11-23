@@ -85,3 +85,24 @@ describe("restoreOrLogin", () => {
     expect(browserLogin).not.toHaveBeenCalled();
   });
 });
+
+describe("restoreOrLogin, with an account known here", () => {
+  it("keeps nothing of a sign-in as someone else", async () => {
+    const store = memoryStore(undefined);
+    const client = { loginWithToken: vi.fn() };
+    const accept = vi.fn(() => {
+      throw new Error("knows A, and this is B");
+    });
+    await expect(restoreOrLogin(client, store, vi.fn(async () => session("b")), () => {}, accept)).rejects.toThrow(/knows A/);
+    expect(store.load()).toBeUndefined();
+  });
+
+  it("checks a resumed sign-in too", async () => {
+    const store = memoryStore("saved");
+    const client = { loginWithToken: vi.fn(async () => session("saved")) };
+    const accept = vi.fn(() => {
+      throw new Error("knows A, and this is B");
+    });
+    await expect(restoreOrLogin(client, store, vi.fn(), () => {}, accept)).rejects.toThrow(/knows A/);
+  });
+});

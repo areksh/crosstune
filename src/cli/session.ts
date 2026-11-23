@@ -47,17 +47,22 @@ export function fileTokenStore(filePath?: string): TokenStore {
  * A saved token that Qobuz rejects (an `authentication` error) is cleared and
  * replaced by a fresh sign-in. Other failures (network, server) propagate so
  * the saved token is kept for a later retry.
+ *
+ * `accept` may refuse who signed in (throwing): another account than the one
+ * known here (ADR-0011). A refused sign-in's token is not saved.
  */
 export async function restoreOrLogin(
   client: SessionClient,
   store: TokenStore,
   browserLogin: () => Promise<UserSession>,
   log: (message: string) => void = () => {},
+  accept: (session: UserSession) => void = () => {},
 ): Promise<RestoreResult> {
   const saved = store.load();
   if (saved !== undefined) {
     try {
       const session = await client.loginWithToken(saved);
+      accept(session);
       return { session, restored: true };
     } catch (error) {
       if (error instanceof QobuzError && error.kind === "authentication") {
@@ -70,6 +75,7 @@ export async function restoreOrLogin(
   }
 
   const session = await browserLogin();
+  accept(session);
   store.save(session.userAuthToken);
   return { session, restored: false };
 }
