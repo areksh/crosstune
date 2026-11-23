@@ -2,7 +2,8 @@
  * App shell: the frame (top bar and library sidebar), and hash-based routing.
  *
  * Each view is a section in the page, shown by the URL hash (src/ui/routes.ts:
- * "#/" is the library, "#/p/<id>" a playlist, "#/upgrade" a tool), so views are
+ * "#/" is the library, "#/p/<id>" a playlist, "#/p/<id>/repeats" a tool on it,
+ * "#/new/artists" a tool that starts a playlist; see src/web/hosting.ts), so views are
  * linkable and the back button works; old addresses are sent to their new
  * homes. Each view module wires its own controls once on load. This is DOM
  * glue; the logic it drives lives in tested modules.

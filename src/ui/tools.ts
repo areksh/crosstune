@@ -56,6 +56,8 @@ const LABELS: Record<SourceTool | NewTool, string> = {
 const ALL_LABELS: Partial<Record<SourceTool, string>> = {
   repeats: "Find repeats across them",
   upgrade: "Upgrade all",
+  // Favourites and every playlist: the whole library.
+  stats: "Library stats",
   export: "Export all",
 };
 
@@ -84,7 +86,7 @@ export function sourceToolView(tool: SourceTool): string {
 }
 
 /** A playlist as a tool's link box reads it: Qobuz's as a link, others as the tagged id. */
-function playlistLink(id: PlaylistId): string {
+export function playlistLink(id: PlaylistId): string {
   return serviceOf(id) === "qobuz" ? `https://play.qobuz.com/playlist/${shortId(id)}` : String(id);
 }
 

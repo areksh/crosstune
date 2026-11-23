@@ -396,6 +396,32 @@ button.tab[aria-pressed="true"] {
   visibility: hidden;
 }
 
+/* Touch screens have no hover: the tick is always there, in its own column. */
+@media (hover: none) {
+  .lib-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .lib-tick {
+    position: static;
+    translate: none;
+    opacity: 1;
+    margin-left: 6px;
+  }
+
+  .lib-item .lib-row {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sidebar.ticking .lib-item .lib-cover,
+  .lib-item:hover .lib-cover {
+    visibility: visible;
+  }
+}
+
 .lib-group {
   position: sticky;
   bottom: -24px;

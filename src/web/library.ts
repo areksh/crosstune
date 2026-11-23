@@ -11,7 +11,7 @@ import { SERVICE_LABELS, type ServiceName } from "../services/names.js";
 import { linkMark } from "../sync/wording.js";
 import { coverBackground, generatedCover } from "../ui/cover-art.js";
 import { groupActions, libraryRows, sidebarRows, type LibraryRow, type SidebarRow } from "../ui/library.js";
-import { routeHash, type Route } from "../ui/routes.js";
+import { parseRoute, routeHash, type Route } from "../ui/routes.js";
 import { api } from "./api.js";
 import { el } from "./dom.js";
 import { currentTab, TAB_CHANGED } from "./shell.js";
@@ -295,6 +295,12 @@ async function deleteTicked(chosen: readonly ManagerPlaylist[]): Promise<void> {
     }
   }
   await refreshLibrary();
+  // The page showed one of them (its page, or a tool on it): go to its service's list.
+  const here = parseRoute(location.hash);
+  const gone = here.kind === "playlist" ? chosen.find((playlist) => playlist.id === here.id && !ticked.has(playlist.id)) : undefined;
+  if (gone !== undefined) {
+    location.hash = routeHash({ kind: "all", service: serviceOf(gone.id) });
+  }
   if (failed.length > 0) {
     await openDialog({ title: "Some were not deleted", body: failed, confirm: "Close", cancel: null });
   }

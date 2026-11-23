@@ -55,6 +55,8 @@ describe("toolLabel", () => {
     expect(toolLabel("repeats")).toBe("Find repeats");
     expect(toolLabel("repeats", "all")).toBe("Find repeats across them");
     expect(toolLabel("upgrade", "all")).toBe("Upgrade all");
+    // It reads favourites as well as every playlist.
+    expect(toolLabel("stats", "all")).toBe("Library stats");
     expect(toolLabel("artists")).toBe("Playlist from artists");
   });
 });
