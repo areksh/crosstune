@@ -15,6 +15,7 @@ export default defineConfig({
         "src/web/**",
         "src/server/http.ts",
         "src/cli/oauth-login.ts",
+        "src/cli/sign-in-listener.ts",
         "src/cli/open-browser.ts",
       ],
     },
