@@ -1900,7 +1900,8 @@ function parseCombineInput(body: unknown): Parsed<CombineInput> {
 /**
  * Library stats for a source (`{ source: { type: "favourites" | "everything" }
  * | { type: "playlist", playlistId } }`). Each decade and top-artist bucket
- * carries its track ids, which the view saves through `/api/commit`.
+ * carries its track ids, which the view saves through `/api/commit`; `songs`
+ * holds what matching needs of each track, to copy a bucket to another service.
  */
 async function libraryStats(body: unknown, deps: ApiDeps): Promise<ApiResponse> {
   const source = isRecord(body) ? body["source"] : undefined;
@@ -1917,7 +1918,16 @@ async function libraryStats(body: unknown, deps: ApiDeps): Promise<ApiResponse> 
     };
   }
   const library = await collectLibrary(deps.service, parsed);
-  return { status: 200, body: computeStats(library) };
+  const songs = library.tracks.map(({ id, title, version, artist, isrc, album, duration }) => ({
+    id,
+    title,
+    ...(version !== undefined && { version }),
+    ...(artist !== undefined && { artist }),
+    ...(isrc !== undefined && { isrc }),
+    ...(album !== undefined && { album }),
+    ...(duration !== undefined && { duration }),
+  }));
+  return { status: 200, body: { ...computeStats(library), songs } };
 }
 
 function isKeepStrategy(value: unknown): value is KeepStrategy {

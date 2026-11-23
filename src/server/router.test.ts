@@ -1483,6 +1483,16 @@ describe("POST /api/stats", () => {
     });
   });
 
+  it("lists what matching needs of each track, to copy a bucket to another service", async () => {
+    const res = await handleApi(
+      request("POST", "/api/stats", { source: { type: "favourites" } }),
+      deps({ service: service({ getFavoriteTracks: vi.fn(async () => [{ ...tracks[0]!, isrc: "GBAAA9400001", bitDepth: 16 }]) }) }),
+    );
+    expect((res.body as { songs: unknown }).songs).toEqual([
+      { id: qid(1), title: "Roads", artist: "Portishead", isrc: "GBAAA9400001", duration: 300 },
+    ]);
+  });
+
   it("reads a playlist under its name", async () => {
     const getPlaylistTracks = vi.fn(async () => tracks);
     const res = await handleApi(
