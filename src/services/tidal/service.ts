@@ -17,10 +17,11 @@
  *    left out of a removal (19); UNLISTED is private, an empty description
  *    clears it, and a name over 250 characters is a 400 (20, now refused here).
  *  - Found: one ISRC's copies may list a track twice (now given once).
+ *  - Favourites: adding a track again keeps one, with its date; albums and
+ *    artists add, read and remove (22).
  *  - Not seen: a track unavailable in the user's country (7); whether an
  *    artist's albums include ones they only appear on (12); the most items a
- *    playlist holds (21); adding a favourite twice (22, not probed: it writes
- *    to the user's library).
+ *    playlist holds (21).
  */
 
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";

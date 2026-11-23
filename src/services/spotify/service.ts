@@ -14,8 +14,10 @@
  *    older snapshot is worked out against the playlist as it is (4); a read
  *    holds the first items with the playlist (`items.items[].item`, 5) and
  *    shows a write straight after it (6); search gives 10 a page (8);
- *    `DELETE /me/library?uris=` takes a playlist out, and with it out of the
- *    user's playlists (9, 10); `isrc:` search finds every copy, with
+ *    `PUT` and `DELETE /me/library?uris=` (in the query) save and remove
+ *    songs, albums and artists, a song saved twice is kept once, and a
+ *    playlist taken out leaves the user's playlists and comes back when put
+ *    back (9, 10); `isrc:` search finds every copy, with
  *    `external_ids.isrc` (11); `is_playable` comes without a market (12): read
  *    into `streamable`, so a sync takes a removed song that still plays as
  *    removed, but playability is not claimed, so no tidy-up removes by it;
@@ -25,8 +27,7 @@
  *    their profile), but every read says true, so it is not read: a playlist's
  *    visibility is what was last set here, else unknown.
  *  - Not seen: local files (3); a null item (7); relinking (13); a 429 or
- *    QUOTA_EXCEEDED (15); an added song no longer offered (16); saving songs,
- *    albums or artists to the library (9, not probed: it writes to the user's).
+ *    QUOTA_EXCEEDED (15); an added song no longer offered (16).
  */
 
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "../../features/concurrency.js";
