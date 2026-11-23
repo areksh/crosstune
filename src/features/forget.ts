@@ -6,7 +6,7 @@
  */
 
 import { parseId, type ServiceName } from "../services/ids.js";
-import type { HistoryRecord, Operation } from "./history.js";
+import { parseHistory, serializeRecords, type HistoryRecord, type Operation } from "./history.js";
 
 function idsOf(op: Operation): string[] {
   switch (op.kind) {
@@ -46,4 +46,40 @@ export function forgetInHistory(
     records: kept.filter((record) => record.type === "entry" || !dropped.has(record.id)),
     dropped: dropped.size,
   };
+}
+
+/**
+ * {@link forgetInHistory} over the file's text, line by line: a line that is
+ * not a readable record (damaged, of another version, or with an operation
+ * this version does not know) is kept exactly as it was, whatever it holds.
+ */
+export function forgetInHistoryText(text: string, service: ServiceName): { text: string; dropped: number } {
+  const lines = text.split("\n").filter((line) => line.length > 0);
+  const parsed = lines.map((line) => parseHistory(line)[0]);
+  const { records, dropped } = forgetInHistory(
+    parsed.filter((record): record is HistoryRecord => record !== undefined),
+    service,
+  );
+  const kept = new Map<HistoryRecord, HistoryRecord>();
+  const survivors = new Set(records.filter((record) => record.type === "undone").map((record) => record.id));
+  for (const record of records) {
+    if (record.type === "entry") {
+      kept.set(parsed.find((one) => one?.type === "entry" && one.id === record.id)!, record);
+    }
+  }
+  const out = lines.flatMap((line, index) => {
+    const record = parsed[index];
+    if (record === undefined) {
+      return [line];
+    }
+    if (record.type === "undone") {
+      return survivors.has(record.id) ? [line] : [];
+    }
+    const now = kept.get(record);
+    if (now === undefined) {
+      return [];
+    }
+    return [now === record ? line : serializeRecords([now]).trimEnd()];
+  });
+  return { text: out.map((line) => `${line}\n`).join(""), dropped };
 }

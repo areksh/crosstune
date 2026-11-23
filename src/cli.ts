@@ -238,8 +238,8 @@ import {
   formatSuggestions,
 } from "./jobs/format.js";
 import { emptyJobState, validateJob, type Job } from "./jobs/model.js";
-import { runPass, type RefreshClient } from "./jobs/refresh.js";
-import { acceptNow, runDue, type ConnectResult, type RunDueDeps } from "./jobs/run-due.js";
+import { runPass } from "./jobs/refresh.js";
+import { acceptNow, runDue, type RunDueDeps } from "./jobs/run-due.js";
 import { scheduleSnippet } from "./jobs/schedule-print.js";
 import { jobsService, type JobsService } from "./jobs/service.js";
 import { openInBrowser } from "./cli/open-browser.js";
@@ -386,9 +386,8 @@ import type { LinkConnect } from "./sync/runner.js";
 import { linksService, type LinksService } from "./sync/service.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
-import { forgetInHistory } from "./features/forget.js";
+import { forgetInHistoryText } from "./features/forget.js";
 import { commitTransfer, resolveTransfer } from "./features/transfer.js";
-import { parseHistory, serializeRecords } from "./features/history.js";
 import { homeService, jobServices } from "./jobs/model.js";
 import { unflag } from "./jobs/stores.js";
 import { labelOf, ServiceError } from "./services/errors.js";
@@ -939,8 +938,8 @@ function forgetService(service: ServiceName): void {
   unused.forEach((job) => states.remove(job.id));
   const history = fileHistoryStore();
   const rewrite = (): number => {
-    const { records, dropped } = forgetInHistory(parseHistory(history.read()), service);
-    history.replace(serializeRecords(records));
+    const { text, dropped } = forgetInHistoryText(history.read(), service);
+    history.replace(text);
     return dropped;
   };
   const dropped = history.exclusive === undefined ? rewrite() : history.exclusive(rewrite);

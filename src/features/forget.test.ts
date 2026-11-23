@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { tagId } from "../services/ids.js";
-import { forgetInHistory } from "./forget.js";
+import { forgetInHistory, forgetInHistoryText } from "./forget.js";
 import type { HistoryRecord } from "./history.js";
 
 const entry = (id: string, ops: unknown[]): HistoryRecord =>
@@ -51,5 +51,19 @@ describe("an entry kept after forgetting", () => {
     expect(items[0]).toMatchObject({ forgotten: "tidal" });
     const plan = await planUndo({ getPlaylistTracks: async () => [] } as never, items[0]!, items);
     expect(plan.blocked).toMatch(/TIDAL.*forgotten/);
+  });
+});
+
+describe("forgetInHistoryText", () => {
+  it("changes only the lines about the service, keeping every other line as it was", async () => {
+    const { serializeRecords } = await import("./history.js");
+    const mine = serializeRecords([entry("a", [{ kind: "create-playlist", playlistId: t(1), name: "T" }])]);
+    const marker = serializeRecords([{ type: "undone", id: "a", at: "2026-11-23T11:00:00.000Z" }]);
+    const theirs = serializeRecords([entry("b", [{ kind: "create-playlist", playlistId: q(1), name: "Q" }])]);
+    const damaged = "{not json\n";
+    const future = `${JSON.stringify({ v: 99, type: "entry", id: "c", ops: [{ kind: "new-thing", playlistId: t(2) }] })}\n`;
+    const { text, dropped } = forgetInHistoryText(`${mine}${damaged}${theirs}${marker}${future}`, "tidal");
+    expect(text).toBe(`${damaged}${theirs}${future}`);
+    expect(dropped).toBe(1);
   });
 });
