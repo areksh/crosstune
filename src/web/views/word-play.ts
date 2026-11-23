@@ -345,7 +345,7 @@ function renderCard(slotIndex: number): HTMLElement {
 
   const song = document.createElement("div");
   song.className = "wp-song";
-  song.appendChild(coverSlot(candidate.track.image));
+  song.appendChild(coverSlot(candidate.track.image, candidate.track.album ?? candidate.track.title));
   const by = [candidate.track.artist, candidate.track.album].filter(
     (part): part is string => part !== undefined && part.length > 0,
   );

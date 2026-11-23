@@ -282,7 +282,7 @@ function renderAlbumGroup(resolved: ResolvedAlbum, index: number): HTMLElement {
   }
   select.disabled = resolved.versions.length < 2;
   select.addEventListener("change", () => syncCover(group));
-  head.prepend(coverSlot(preferred?.image));
+  head.prepend(coverSlot(preferred?.image, preferred?.title));
 
   group.appendChild(select);
   return group;
@@ -293,7 +293,8 @@ function syncCover(group: HTMLElement): void {
   const slot = group.querySelector<HTMLElement>(".group-head > .cover");
   if (slot !== null) {
     const id = selectOf(group).value;
-    setCover(slot, versionsOf(group).find((version) => version.id === id)?.image);
+    const version = versionsOf(group).find((version) => version.id === id);
+    setCover(slot, version?.image, version?.title);
   }
 }
 

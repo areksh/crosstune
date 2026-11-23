@@ -1,7 +1,8 @@
 /*
- * "Console": a hi-fi amplifier. Warm charcoal, warm off-white text and one
- * amber backlight. The quality badges glow like LED readouts; that glow is the
- * one bold element, so everything else stays quiet.
+ * "Cover glow": near-black, rounded, art-forward. The one bold element is the
+ * colour of the cover in view (a real one, or one drawn from the playlist's
+ * name; src/ui/cover-art.ts), which tints the playlist's header. Everything
+ * else is light text on translucent white surfaces, with pill-shaped controls.
  */
 
 /* Archivo (SIL OFL, see fonts/OFL.txt), self-hosted: the page makes no
@@ -34,34 +35,57 @@
 :root {
   color-scheme: dark;
 
-  --ground: #1a1d1f;
-  --panel: #202427;
-  --inset: #15181a;
-  --line: #2e3337;
-  --line-strong: #3a4044;
+  --ground: #0e0f14;
+  --panel: #16171e;
+  --inset: #0a0b0f;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.15);
 
-  --text: #ece8df;
-  --text-2: #cfcac0;
-  --muted: #a39e93;
+  /* Translucent surfaces, so the cover's glow shows through. */
+  --surface-1: rgba(255, 255, 255, 0.03);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-3: rgba(255, 255, 255, 0.12);
 
-  --accent: #f3a83b;
-  --on-accent: #1a1d1f;
-  --accent-hover: #f7c47a;
+  --text: #f4f4f8;
+  --text-2: #c9c9d6;
+  --muted: #8a8aa0;
+  --placeholder: #6c6c80;
 
-  --nav-active-bg: #2b2720;
-  --nav-active-text: #f6c987;
+  /* The primary action is white on dark; links take the brand's pink. */
+  --accent: #f4f4f8;
+  --on-accent: #111216;
+  --accent-hover: #ffffff;
+  --link: #ff9cbc;
+  --link-hover: #ffc2d6;
+  --brand: linear-gradient(90deg, #ff6b9a, #8f7bff);
+  --step-on-bg: rgba(255, 107, 154, 0.22);
+  --step-on-text: #ffc2d6;
 
-  --notice-bg: #241f17;
-  --notice-line: #5a4724;
-  --notice-text: #ead7b6;
+  --nav-active-bg: rgba(255, 255, 255, 0.09);
+  --nav-active-text: #ffffff;
 
-  --error: #f0907a;
-  --ok: #7fc8a9;
-  --keep: #7fc8a9;
-  --drop: #f0907a;
+  --notice-bg: rgba(255, 107, 154, 0.08);
+  --notice-line: rgba(255, 107, 154, 0.35);
+  --notice-text: #ffd6e3;
 
-  --hires-bg: #17130c;
-  --hires-text: #f7b44a;
+  --error: #ff8a8a;
+  --error-tint: rgba(255, 138, 138, 0.08);
+  --ok: #4fe08a;
+  --ok-tint: rgba(79, 224, 138, 0.08);
+  --keep: #4fe08a;
+  --drop: #ff8a8a;
+
+  --hires: #ffd778;
+  --hires-bg: rgba(255, 215, 120, 0.15);
+  --hires-text: var(--hires);
+
+  /* Service marks: dots and tab marks, not the services' logos. */
+  --svc-qobuz: #8f98ff;
+  --svc-tidal: #4fe0e0;
+  --svc-spotify: #4fe08a;
+
+  --radius: 10px;
+  --radius-s: 8px;
 
   --font: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --gutter-x: 48px;
@@ -88,11 +112,11 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
 }
 
 a:hover {
-  color: var(--accent-hover);
+  color: var(--link-hover);
 }
 
 :focus-visible {
@@ -104,9 +128,9 @@ h1,
 h2,
 h3,
 h4 {
-  font-stretch: 75%;
-  font-weight: 700;
-  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   margin: 0;
 }
 
@@ -139,7 +163,6 @@ h4 {
   padding: 0 10px;
   color: var(--text);
   text-decoration: none;
-  font-stretch: 75%;
   font-weight: 750;
   font-size: 23px;
   letter-spacing: 0.01em;
@@ -296,9 +319,9 @@ h4 {
 }
 
 .steps li[aria-current="step"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--step-on-bg);
+  border-color: transparent;
+  color: var(--step-on-text);
   font-weight: 650;
 }
 
@@ -327,7 +350,7 @@ h4 {
   flex-direction: column;
   gap: 3px;
   padding: 12px 0;
-  border-bottom: 1px solid #24282b;
+  border-bottom: 1px solid var(--line);
   color: var(--text);
   text-decoration: none;
 }
@@ -354,9 +377,9 @@ h4 {
 /* Panels and forms */
 
 .panel {
-  background: var(--panel);
+  background: var(--surface-1);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 20px 22px 22px;
   margin-bottom: 28px;
 }
@@ -421,7 +444,7 @@ select {
   background: var(--inset);
   color: var(--text);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 0 12px;
   min-height: 44px;
   max-width: 100%;
@@ -443,7 +466,7 @@ input[type="file"] {
 }
 
 ::placeholder {
-  color: #7d786f;
+  color: var(--placeholder);
 }
 
 input[type="checkbox"],
@@ -466,7 +489,7 @@ button {
   min-height: 44px;
   padding: 0 20px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--accent);
   color: var(--on-accent);
   font: inherit;
@@ -481,15 +504,15 @@ button:hover:not(:disabled) {
 }
 
 button.secondary {
-  background: transparent;
+  background: var(--surface-2);
   color: var(--text);
-  border: 1px solid var(--line-strong);
+  border: 1px solid transparent;
   font-weight: 500;
 }
 
 button.secondary:hover:not(:disabled) {
-  background: var(--panel);
-  border-color: var(--muted);
+  background: var(--surface-3);
+  border-color: transparent;
 }
 
 button:disabled {
@@ -945,10 +968,9 @@ button:disabled {
   width: 46px;
   height: 46px;
   flex-shrink: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
-  background: #262a2d;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
 }
 
 .cover img {
@@ -960,6 +982,47 @@ button:disabled {
 
 .artwork-on .cover img {
   display: block;
+}
+
+/* A cover drawn from a name (src/ui/cover-art.ts): its gradient is set inline;
+   a real cover, once artwork is on, lies over it. */
+.gen-cover {
+  background-size: cover;
+}
+
+/* A service's mark: a dot in its colour (data-service="qobuz" ...). */
+.svc-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.svc-dot[data-service="qobuz"] {
+  background: var(--svc-qobuz);
+}
+
+.svc-dot[data-service="tidal"] {
+  background: var(--svc-tidal);
+}
+
+.svc-dot[data-service="spotify"] {
+  background: var(--svc-spotify);
+}
+
+/* A small rounded label. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .group-head > .cover {
@@ -979,11 +1042,12 @@ button:disabled {
   font-size: 12px;
 }
 
-/* Quality badges: hi-res glows like an LED readout; CD quality stays quiet. */
+/* Quality badges: hi-res in warm gold; CD quality stays quiet. */
 .quality {
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--line-strong);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--surface-2);
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
@@ -994,9 +1058,7 @@ button:disabled {
 
 .quality.hires {
   background: var(--hires-bg);
-  border-color: var(--notice-line);
   color: var(--hires-text);
-  text-shadow: 0 0 8px rgba(243, 168, 59, 0.55);
 }
 
 /* Playlist from albums: version pickers and fetched tracks */
@@ -1072,7 +1134,7 @@ input[type="time"] {
   background: var(--inset);
   color: var(--text);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 0 12px;
   min-height: 44px;
   max-width: 100%;
@@ -1172,12 +1234,12 @@ input[type="time"] {
 }
 
 .dedup-track.keep {
-  background: rgba(127, 200, 169, 0.07);
+  background: var(--ok-tint);
   box-shadow: inset 3px 0 0 var(--keep);
 }
 
 .dedup-track.drop {
-  background: rgba(240, 144, 122, 0.06);
+  background: var(--error-tint);
   box-shadow: inset 3px 0 0 var(--drop);
 }
 
@@ -1322,7 +1384,6 @@ input[type="time"] {
 
 .commit-count {
   margin: 0 auto 0 0;
-  font-stretch: 75%;
   font-weight: 700;
   font-size: 22px;
 }
@@ -1515,7 +1576,6 @@ button.remove-row {
 }
 
 .overlap-total {
-  font-stretch: 75%;
   font-weight: 700;
   font-size: 30px;
 }
@@ -1538,11 +1598,11 @@ button.remove-row {
 }
 
 .overlap-shared {
-  background: #f6d8a8;
+  background: var(--link);
 }
 
 .overlap-others {
-  background: #6e7c84;
+  background: var(--muted);
 }
 
 .overlap-legend {
@@ -1634,17 +1694,15 @@ button.remove-row {
   text-overflow: ellipsis;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
-  background: #2c3134;
+  background: var(--surface-2);
   color: var(--text-2);
 }
 
 .quality-segment.hires {
   background: var(--hires-bg);
-  border: 1px solid var(--notice-line);
   border-radius: 6px 0 0 6px;
   color: var(--hires-text);
   font-weight: 650;
-  text-shadow: 0 0 8px rgba(243, 168, 59, 0.55);
 }
 
 .quality-segment.unknown {
@@ -1674,15 +1732,15 @@ button.remove-row {
 .bar-track {
   display: block;
   height: 14px;
-  border-radius: 3px;
-  background: #24282b;
+  border-radius: 999px;
+  background: var(--surface-2);
 }
 
 .bar-fill {
   display: block;
   height: 100%;
-  border-radius: 3px;
-  background: #8c8576;
+  border-radius: 999px;
+  background: var(--muted);
 }
 
 .bar-fill.largest {
@@ -1719,7 +1777,7 @@ button.small {
   gap: 12px;
   align-items: center;
   padding: 6px 0;
-  border-bottom: 1px solid #24282b;
+  border-bottom: 1px solid var(--line);
   font-size: 15px;
 }
 
@@ -1942,7 +2000,6 @@ button.small {
 }
 
 .wp-phrase {
-  font-stretch: 70%;
   font-weight: 800;
   font-size: 34px;
   line-height: 1;
@@ -2468,7 +2525,7 @@ button.history-undo {
 }
 
 .link-state.ok {
-  border-color: rgba(127, 200, 169, 0.45);
+  border-color: rgba(79, 224, 138, 0.45);
   color: var(--ok);
 }
 
@@ -2479,7 +2536,7 @@ button.history-undo {
 
 .link-state.urgent {
   border-color: var(--error);
-  background: rgba(240, 144, 122, 0.12);
+  background: var(--error-tint);
   color: var(--error);
   font-weight: 600;
 }
@@ -2488,7 +2545,7 @@ button.history-undo {
   border: 1px solid var(--error);
   border-left-width: 4px;
   border-radius: 8px;
-  background: rgba(240, 144, 122, 0.07);
+  background: var(--error-tint);
   padding: 12px 16px;
   font-size: 14px;
 }
@@ -2871,7 +2928,7 @@ button.menu-item:hover:not(:disabled) {
 }
 
 .dialog::backdrop {
-  background: rgba(10, 12, 13, 0.7);
+  background: rgba(5, 6, 10, 0.72);
 }
 
 .dialog h2 {

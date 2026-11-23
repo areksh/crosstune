@@ -8,6 +8,7 @@
  * this browser only.
  */
 
+import { coverBackground, generatedCover } from "../ui/cover-art.js";
 import { el } from "./dom.js";
 
 const STORAGE_KEY = "crosstune:show-artwork";
@@ -39,13 +40,18 @@ function load(img: HTMLImageElement): void {
 }
 
 /**
- * A cover slot: a neutral placeholder square holding the cover image, which
- * only loads while artwork is on. With no URL, just the placeholder.
+ * A cover slot: a placeholder square holding the cover image, which only loads
+ * while artwork is on. Given a seed (the album's name, or the song's), the
+ * placeholder is a cover drawn from it; with no URL, just the placeholder.
  */
-export function coverSlot(url: string | undefined): HTMLElement {
+export function coverSlot(url: string | undefined, seed?: string): HTMLElement {
   const slot = document.createElement("span");
   slot.className = "cover";
   slot.setAttribute("aria-hidden", "true");
+  if (seed !== undefined) {
+    slot.classList.add("gen-cover");
+    slot.style.background = coverBackground(generatedCover(seed));
+  }
   if (url !== undefined && url.startsWith("https://")) {
     const img = document.createElement("img");
     img.alt = "";
@@ -61,8 +67,8 @@ export function coverSlot(url: string | undefined): HTMLElement {
 }
 
 /** Point an existing cover slot at another cover (e.g. a different version). */
-export function setCover(slot: HTMLElement, url: string | undefined): void {
-  slot.replaceWith(coverSlot(url));
+export function setCover(slot: HTMLElement, url: string | undefined, seed?: string): void {
+  slot.replaceWith(coverSlot(url, seed));
 }
 
 function apply(): void {

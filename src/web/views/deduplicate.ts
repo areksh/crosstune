@@ -315,7 +315,7 @@ function renderSong(song: AcrossSong, index: number): HTMLElement {
       updateApplyButton();
     });
     row.appendChild(box);
-    row.appendChild(coverSlot(tracks[0]?.image ?? song.track.image));
+    row.appendChild(coverSlot(tracks[0]?.image ?? song.track.image, song.track.album ?? song.track.title));
     const copies = tracks.length > 1 ? `${tracks.length} copies` : undefined;
     row.appendChild(trackText(playlist.name, [copies, tracks[0]?.album].filter(Boolean).join(", ") || undefined));
     const pill = tracks[0] === undefined ? undefined : qualityPill(tracks[0]);
@@ -416,7 +416,7 @@ function renderGroupTrack(track: DedupTrack, position: number, keep: boolean, pl
     updateApplyButton();
   });
   row.appendChild(checkbox);
-  row.appendChild(coverSlot(track.image));
+  row.appendChild(coverSlot(track.image, track.album ?? track.title));
 
   row.appendChild(
     trackText(`${track.artist ? `${track.artist} - ` : ""}${titleOf(track)}`, trackMeta(track)),

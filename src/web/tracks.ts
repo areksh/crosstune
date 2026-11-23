@@ -157,7 +157,7 @@ export function trackRow(
   row.appendChild(checkbox);
 
   if (options.noCover !== true) {
-    row.appendChild(coverSlot(track.image));
+    row.appendChild(coverSlot(track.image, track.album ?? track.title));
   }
   row.appendChild(trackText(titleOf(track), options.meta));
   const pill = qualityPill(track);

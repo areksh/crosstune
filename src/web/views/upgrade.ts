@@ -223,7 +223,7 @@ function upgradeRow(item: Item): HTMLElement {
     updateBar();
   });
   row.appendChild(box);
-  row.appendChild(coverSlot(item.track.image));
+  row.appendChild(coverSlot(item.track.image, item.track.album ?? item.track.title));
   const text = trackText(titleOf(item.track), subline(item.track, item.location));
   const note = document.createElement("span");
   note.className = "match-note";

@@ -238,7 +238,7 @@ function render(plan: NewReleasesPlan): void {
 function releaseCard(release: Release): HTMLElement {
   const card = document.createElement("label");
   card.className = "release-card";
-  card.appendChild(coverSlot(release.image));
+  card.appendChild(coverSlot(release.image, release.title));
 
   const text = document.createElement("span");
   text.className = "release-text";

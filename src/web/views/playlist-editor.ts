@@ -440,7 +440,7 @@ function createRow(entry: Entry): HTMLElement {
   handle.title = "Drag to move";
   const box = span("pl-check", "");
   box.setAttribute("aria-hidden", "true");
-  row.append(handle, box, span("pl-number", ""), coverSlot(entry.image));
+  row.append(handle, box, span("pl-number", ""), coverSlot(entry.image, entry.album ?? entry.title));
 
   const artists = [entry.artist, ...(entry.jointArtists ?? [])].filter((name) => name !== undefined).join(", ");
   row.append(trackText(titleOf(entry), [artists, entry.album].filter((part) => part !== undefined && part !== "").join(" · ")));
