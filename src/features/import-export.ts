@@ -22,6 +22,7 @@
  * for hand-editing or moving lists between services.
  */
 
+import { titleKeys, tokens, tokensOverlap, withoutFeaturing } from "./song-text.js";
 import { normaliseIsrc } from "../services/isrc.js";
 import {
   checkAllOn,
@@ -810,18 +811,6 @@ function pickByIsrc(
 }
 
 /**
- * A trailing featured-artist credit in a title: "(feat. X)", "[with X]",
- * " - feat. X". Spotify keeps these in the title; Qobuz in the version.
- */
-const FEATURING =
-  /\s*[([]\s*(?:feat\.?|ft\.?|featuring|with)\s[^)\]]*[)\]]|\s+-\s+(?:feat\.?|ft\.?|featuring)\s.*$/gi;
-
-function withoutFeaturing(title: string): string {
-  const stripped = title.replace(FEATURING, "").trim();
-  return stripped.length > 0 ? stripped : title;
-}
-
-/**
  * Pick the search result that best matches a wanted track. An ISRC match wins
  * outright; otherwise the title must match (with or without a "feat." credit,
  * and against Qobuz's title alone or title plus version, so Spotify's
@@ -856,26 +845,6 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
     return wantArtists.some((artist) => tokensOverlap(artist, candidateArtist));
   });
   return matches.find((track) => track.streamable !== false) ?? matches[0];
-}
-
-/** Normalised forms a title may be compared by: as given, and without "feat.". */
-function titleKeys(title: string): string[] {
-  const keys = [normalise(title), normalise(withoutFeaturing(title))];
-  return keys.filter((key, index) => key.length > 0 && keys.indexOf(key) === index);
-}
-
-function tokens(text: string): string[] {
-  return normalise(text)
-    .split(" ")
-    .filter((token) => token.length > 0);
-}
-
-/** True when either token list is a subset of the other (catches band prefixes). */
-function tokensOverlap(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length === 0 || b.length === 0) return false;
-  const setA = new Set(a);
-  const setB = new Set(b);
-  return a.every((t) => setB.has(t)) || b.every((t) => setA.has(t));
 }
 
 function trackLabel(item: ParsedTrack): string {
