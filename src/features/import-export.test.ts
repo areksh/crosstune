@@ -208,6 +208,28 @@ describe("resolveImport", () => {
     expect(plan.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
   });
 
+  it("takes an artist only by name, never the first search hit", async () => {
+    const searchArtists = vi.fn(async (query: string): Promise<Artist[]> =>
+      query === "Bjork"
+        ? [
+            { id: qid(70), name: "Björk Tribute Band" },
+            { id: qid(71), name: "Björk" },
+          ]
+        : query === "Guns N Roses"
+          ? [{ id: qid(72), name: "Guns N' Roses" }]
+          : [{ id: qid(73), name: "Someone Qobuz Does Have" }],
+    );
+    const plan = await resolveImport(fakeResolver({ searchArtists }), {
+      kind: "artists",
+      items: [{ name: "Bjork" }, { name: "Guns N Roses" }, { name: "An Artist Qobuz Lacks" }],
+    });
+    expect(plan.matched).toEqual([
+      { label: "Bjork", id: qid(71), via: "search" },
+      { label: "Guns N Roses", id: qid(72), via: "search" },
+    ]);
+    expect(plan.unmatched).toEqual(["An Artist Qobuz Lacks"]);
+  });
+
   it("reports an item whose search failed as unmatched and carries on with the rest", async () => {
     const searchTracks = vi.fn(async (query: string): Promise<Track[]> => {
       if (query.includes("Broken")) {
