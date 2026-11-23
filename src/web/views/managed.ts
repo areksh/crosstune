@@ -21,7 +21,8 @@ import type { ArtistRef, Job, JobState, PlaylistInput, Suggestion } from "../../
 import type { RefreshPreview } from "../../jobs/refresh.js";
 import type { AcceptOutcome, RunSummary } from "../../jobs/run-due.js";
 import type { JobView } from "../../jobs/service.js";
-import type { GlobalFlags, RunRecord } from "../../jobs/stores.js";
+import { signInFlags, type GlobalFlags, type RunRecord } from "../../jobs/stores.js";
+import { labelOf } from "../../services/errors.js";
 import { parsePlaylistId } from "../../features/qobuz-links.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
@@ -201,9 +202,9 @@ async function load(): Promise<void> {
 
 function renderFlags(list: JobsList): void {
   const lines = [
-    ...(list.flags.needsSignIn !== undefined
-      ? ["Managed playlists are stopped: the Qobuz session expired. Sign in again with qobuz-helper login."]
-      : []),
+    ...signInFlags(list.flags).map(
+      ({ service }) => `Managed playlists that use ${labelOf(service)} are stopped: its sign-in expired. Sign in again in Accounts.`,
+    ),
     ...(list.flags.bundleBroken !== undefined
       ? [`Managed playlists are stopped: Qobuz changed its web player (${list.flags.bundleBroken.message}). Update qobuz-helper.`]
       : []),

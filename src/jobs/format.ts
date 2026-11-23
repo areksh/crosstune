@@ -16,7 +16,8 @@ import type { ReleaseWindow } from "../features/new-releases.js";
 import type { RefreshPreview } from "./refresh.js";
 import type { AcceptOutcome, RunSummary } from "./run-due.js";
 import type { JobView } from "./service.js";
-import type { GlobalFlags } from "./stores.js";
+import { labelOf } from "../services/errors.js";
+import { signInFlags, type GlobalFlags } from "./stores.js";
 
 const DAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
 
@@ -158,9 +159,11 @@ export function describeTarget(job: Job, playlistId: PlaylistId | undefined, nam
 
 function describeFlags(flags: GlobalFlags): string[] {
   return [
-    ...(flags.needsSignIn !== undefined
-      ? [`! Jobs are stopped: the Qobuz session expired. Sign in again with: qobuz-helper login`]
-      : []),
+    ...signInFlags(flags).map(({ service }) =>
+      service === "qobuz"
+        ? "! Jobs are stopped: the Qobuz session expired. Sign in again with: qobuz-helper login"
+        : `! Jobs using ${labelOf(service)} are stopped: its sign-in expired. Sign in again with: qobuz-helper login ${service}`,
+    ),
     ...(flags.bundleBroken !== undefined
       ? [`! Jobs are stopped: Qobuz changed its web player (${flags.bundleBroken.message}). Update qobuz-helper.`]
       : []),

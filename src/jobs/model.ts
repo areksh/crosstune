@@ -16,11 +16,14 @@
  */
 
 import {
+  SERVICES,
   readId,
+  serviceOf,
   type AnyId,
   type ArtistId,
   type EntryId,
   type PlaylistId,
+  type ServiceName,
   type TrackId,
 } from "../services/ids.js";
 import { randomUUID } from "node:crypto";
@@ -202,9 +205,10 @@ export const DEFAULT_TIDY = {
 // --- the job -----------------------------------------------------------------
 
 export type Target =
-  | { type: "created"; isPublic: boolean }
+  /** `service`: where it is made or whose favourites; absent means Qobuz. */
+  | { type: "created"; isPublic: boolean; service?: ServiceName }
   | { type: "adopted"; playlistId: PlaylistId }
-  | { type: "favourites" };
+  | { type: "favourites"; service?: ServiceName };
 
 export interface Shape {
   maxReleases?: number;
@@ -226,6 +230,17 @@ export interface PlaylistJob {
   source?: SourceDef;
   shape?: Shape;
   tidy: TidySet;
+}
+
+/** The service of the playlist (or favourites) a job manages. */
+export function homeService(job: Pick<Job, "target">): ServiceName {
+  return job.target.type === "adopted" ? serviceOf(job.target.playlistId) : (job.target.service ?? "qobuz");
+}
+
+/** Every service a job uses, its own first. */
+export function jobServices(job: Job): ServiceName[] {
+  const { playlists } = sourceReads(job.source);
+  return [...new Set([homeService(job), ...playlists.map(serviceOf)])];
 }
 
 /** @deprecated the v1 name. */
@@ -817,15 +832,24 @@ function tidySet(raw: unknown): TidySet {
   return out;
 }
 
+function chosenService(value: unknown): { service?: ServiceName } {
+  const service = oneOf(value, "target.service", SERVICES, "qobuz");
+  return service === "qobuz" ? {} : { service };
+}
+
 function target(raw: unknown): Target {
   const value = record(raw, "target");
   switch (value["type"]) {
     case "created":
-      return { type: "created", isPublic: optionalBoolean(value["isPublic"], "target.isPublic", false) };
+      return {
+        type: "created",
+        isPublic: optionalBoolean(value["isPublic"], "target.isPublic", false),
+        ...chosenService(value["service"]),
+      };
     case "adopted":
       return { type: "adopted", playlistId: idOf<PlaylistId>(value["playlistId"], "target.playlistId") };
     case "favourites":
-      return { type: "favourites" };
+      return { type: "favourites", ...chosenService(value["service"]) };
     default:
       throw new Error("target type must be created, adopted or favourites");
   }

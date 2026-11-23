@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { qid } from "../services/ids.test-support.js";
+import { ServiceError } from "../services/errors.js";
 import { QobuzError } from "../services/qobuz/index.js";
 import { tryAcquireLock } from "../cli/file-lock.js";
 import {
   emptyJobState,
+  jobServices,
   validateJob,
   type InvalidJob,
   type Job,
@@ -314,5 +316,109 @@ describe("acceptNow", () => {
     const { deps } = setup([job("aaaaaaaa")]);
     deps.connect.mockResolvedValueOnce({ ok: false, reason: "needs-sign-in", message: "expired" } as never);
     expect(await acceptNow(deps, "aaaaaaaa", "all", NOW)).toEqual({ status: "needs-sign-in", message: "expired" });
+  });
+});
+
+describe("jobs on several services", () => {
+  const onTidal = (id: string) =>
+    validateJob({
+      id,
+      name: `Job ${id}`,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      kind: "playlist",
+      schedule: { every: "hour" },
+      target: { type: "adopted", playlistId: "tidal:mix" },
+      tidy: { dedupe: {} },
+    });
+  const follower = (id: string) =>
+    validateJob({
+      id,
+      name: `Job ${id}`,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      kind: "playlist",
+      schedule: { every: "hour" },
+      target: { type: "created", service: "tidal" },
+      source: { type: "follow", playlistId: "spotify:abc" },
+    });
+
+  it("know which services they use, their own first", () => {
+    expect(jobServices(job("aaaaaaaa"))).toEqual(["qobuz"]);
+    expect(jobServices(onTidal("aaaaaaaa"))).toEqual(["tidal"]);
+    expect(jobServices(follower("aaaaaaaa"))).toEqual(["tidal", "spotify"]);
+  });
+
+  it("keep a chosen service in the definition, and none for Qobuz", () => {
+    expect(follower("aaaaaaaa").target).toEqual({ type: "created", isPublic: false, service: "tidal" });
+    expect(job("aaaaaaaa").target).toEqual({ type: "created", isPublic: false });
+    expect(() =>
+      validateJob({ ...follower("aaaaaaaa"), target: { type: "created", service: "nope" } }),
+    ).toThrow(/service/);
+  });
+
+  it("connect to what each job uses, once per set", async () => {
+    const { deps } = setup([job("aaaaaaaa"), job("bbbbbbbb"), onTidal("cccccccc")]);
+    await runDue(deps, NOW);
+    expect(deps.connect.mock.calls).toEqual([[["qobuz"]], [["tidal"]]]);
+  });
+
+  it("run the others when one service needs a sign-in, and say which", async () => {
+    const { deps, order, states, flags } = setup([job("aaaaaaaa"), onTidal("bbbbbbbb"), follower("cccccccc")]);
+    deps.connect.mockImplementation((async (services: readonly string[]) =>
+      services.includes("tidal")
+        ? { ok: false, reason: "needs-sign-in", message: "TIDAL expired", service: "tidal" }
+        : { ok: true, client: {} }) as never);
+    const summary = await runDue(deps, NOW);
+    expect(order).toEqual(["aaaaaaaa"]);
+    expect(summary).toMatchObject({ status: "needs-sign-in", message: "TIDAL expired" });
+    expect(summary.reports.map((r) => r.jobId)).toEqual(["aaaaaaaa"]);
+    expect(flags()).toEqual({ signIn: { tidal: { since: NOW.toISOString(), message: "TIDAL expired" } } });
+    expect(states.get("bbbbbbbb")?.nextRunAt).toBeUndefined();
+  });
+
+  it("stop using a service rejected mid-run, and carry on without it", async () => {
+    const { deps, order, flags } = setup([onTidal("aaaaaaaa"), onTidal("bbbbbbbb"), job("cccccccc")]);
+    deps.refresh.mockImplementationOnce(async () => {
+      throw new ServiceError("tidal", "authentication", "rejected");
+    });
+    const summary = await runDue(deps, NOW);
+    expect(order).toEqual(["cccccccc"]);
+    expect(summary.status).toBe("needs-sign-in");
+    expect(flags().signIn?.tidal?.message).toBe("rejected");
+    expect(flags().needsSignIn).toBeUndefined();
+  });
+
+  it("clear only the flag of a service that works again", async () => {
+    const { deps, flags } = setup([onTidal("aaaaaaaa")]);
+    deps.global.save({
+      needsSignIn: { since: "x", message: "qobuz" },
+      signIn: { tidal: { since: "x", message: "t" }, spotify: { since: "x", message: "s" } },
+    });
+    await runDue(deps, NOW);
+    expect(flags()).toEqual({
+      needsSignIn: { since: "x", message: "qobuz" },
+      signIn: { spotify: { since: "x", message: "s" } },
+    });
+  });
+
+  it("keep the time a service first needed a sign-in", async () => {
+    const { deps, flags } = setup([onTidal("aaaaaaaa")]);
+    deps.global.save({ signIn: { tidal: { since: "earlier", message: "old" } } });
+    deps.connect.mockResolvedValue({ ok: false, reason: "needs-sign-in", message: "still", service: "tidal" } as never);
+    await runDue(deps, NOW);
+    expect(flags().signIn?.tidal).toEqual({ since: "earlier", message: "still" });
+  });
+
+  it("fail, not stop, a job whose service could not be reached", async () => {
+    const { deps, states, order } = setup([onTidal("aaaaaaaa"), job("bbbbbbbb")]);
+    deps.connect.mockImplementation((async (services: readonly string[]) => {
+      if (services.includes("tidal")) {
+        throw new ServiceError("tidal", "network", "offline");
+      }
+      return { ok: true, client: {} };
+    }) as never);
+    const summary = await runDue(deps, NOW);
+    expect(order).toEqual(["bbbbbbbb"]);
+    expect(summary.status).toBe("ran");
+    expect(states.get("aaaaaaaa")).toMatchObject({ consecutiveFailures: 1, lastResult: { status: "failed", error: "offline" } });
   });
 });

@@ -8,17 +8,18 @@
  * stops every job until it is fixed, and is remembered in the global flags.
  */
 
-import type { TrackId } from "../services/ids.js";
+import type { ServiceName, TrackId } from "../services/ids.js";
 import { ServiceError } from "../services/model.js";
 import { runOrder } from "./dependencies.js";
-import type { InvalidJob, Job, JobState, RunResultSummary } from "./model.js";
+import { homeService, jobServices, type InvalidJob, type Job, type JobState, type RunResultSummary } from "./model.js";
 import { RefreshWriteError, runPass, type RefreshClient } from "./refresh.js";
 import { acceptSuggestions, type AcceptResult, type SuggestionKeys } from "./suggestions.js";
 import { nextRunAt, retryAt } from "./schedule.js";
 import {
   JobsFileError,
   JobStateError,
-  type GlobalFlags,
+  flagSignIn,
+  unflag,
   type GlobalStore,
   type JobStateStore,
   type JobStore,
@@ -27,9 +28,16 @@ import {
 
 export type ConnectResult =
   | { ok: true; client: RefreshClient }
-  | { ok: false; reason: "needs-sign-in" | "bundle-broken"; message: string };
+  | {
+      ok: false;
+      reason: "needs-sign-in" | "bundle-broken";
+      message: string;
+      /** The service concerned; absent means Qobuz. */
+      service?: ServiceName;
+    };
 
-export type Connect = () => Promise<ConnectResult>;
+/** Connect to the services a job uses, its own first. */
+export type Connect = (services: readonly ServiceName[]) => Promise<ConnectResult>;
 
 export interface RunDueDeps {
   jobs: JobStore;
@@ -133,29 +141,57 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
     return { status: "nothing-due", reports: [], invalid };
   }
 
-  const connected = await deps.connect();
-  const flags = deps.global.load();
-  if (!connected.ok) {
-    const key = connected.reason === "needs-sign-in" ? "needsSignIn" : "bundleBroken";
-    if (options.dryRun !== true) {
-      deps.global.save({
-        ...flags,
-        [key]: { since: flags[key]?.since ?? now.toISOString(), message: connected.message },
-      });
+  const dryRun = options.dryRun === true;
+  const connections = new Map<string, ConnectResult>();
+  /** Services found to need a sign-in (or a fix) in this run. */
+  const stopped = new Map<ServiceName, { reason: "needs-sign-in" | "bundle-broken"; message: string }>();
+  let blocked: { reason: "needs-sign-in" | "bundle-broken"; message: string } | undefined;
+  const stop = (service: ServiceName, reason: "needs-sign-in" | "bundle-broken", message: string): void => {
+    stopped.set(service, { reason, message });
+    blocked ??= { reason, message };
+    if (!dryRun) {
+      const flags = deps.global.load();
+      const flag = { since: now.toISOString(), message };
+      deps.global.save(
+        reason === "bundle-broken"
+          ? { ...flags, bundleBroken: { ...flag, since: flags.bundleBroken?.since ?? flag.since } }
+          : flagSignIn(flags, service, flag),
+      );
     }
-    return { status: connected.reason, reports: [], invalid, message: connected.message };
-  }
-  if ((flags.needsSignIn !== undefined || flags.bundleBroken !== undefined) && options.dryRun !== true) {
-    deps.global.save({});
-  }
+  };
+  const connectFor = async (services: readonly ServiceName[]): Promise<ConnectResult> => {
+    const key = services.join(" ");
+    let connection = connections.get(key);
+    if (connection === undefined) {
+      connection = await deps.connect(services);
+      connections.set(key, connection);
+      if (connection.ok && !dryRun) {
+        const flags = deps.global.load();
+        const cleared = unflag(flags, services);
+        if (JSON.stringify(cleared) !== JSON.stringify(flags)) {
+          deps.global.save(cleared);
+        }
+      }
+    }
+    return connection;
+  };
 
   const refresh = deps.refresh ?? runPass;
   const reports: JobRunReport[] = [];
   for (const { job, state } of due) {
+    const services = jobServices(job);
+    if (services.some((service) => stopped.has(service))) {
+      continue; // Not this job's fault: still due once signed in again.
+    }
     const started = Date.now();
     let next: JobState;
     let result: RunResultSummary;
     try {
+      const connected = await connectFor(services);
+      if (!connected.ok) {
+        stop(connected.service ?? "qobuz", connected.reason, connected.message);
+        continue;
+      }
       const favouriteDates = favouriteDatesOf(deps, file.jobs, job);
       const outcome = await deps.journalRun(`Managed: ${job.name}`, () =>
         refresh(connected.client, job, state, {
@@ -176,18 +212,12 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
       const base = error instanceof RefreshWriteError ? error.state : state;
       const message = cause instanceof Error ? cause.message : String(cause);
       if (cause instanceof ServiceError && cause.kind === "authentication") {
-        // Not this job's fault: count nothing, and stop until signed in again.
-        if (options.dryRun !== true) {
-          if (base !== state) {
-            deps.state.save(job.id, base);
-          }
-          const signedOut: GlobalFlags = {
-            ...deps.global.load(),
-            needsSignIn: { since: now.toISOString(), message },
-          };
-          deps.global.save(signedOut);
+        // Not this job's fault: count nothing, and leave the service until signed in again.
+        if (!dryRun && base !== state) {
+          deps.state.save(job.id, base);
         }
-        return { status: "needs-sign-in", reports, invalid, message };
+        stop(cause.service ?? homeService(job), "needs-sign-in", message);
+        continue;
       }
       const failures = base.consecutiveFailures + 1;
       result = {
@@ -216,7 +246,9 @@ async function runLocked(deps: RunDueDeps, now: Date, options: RunDueOptions): P
       );
     }
   }
-  return { status: "ran", reports, invalid };
+  return blocked === undefined
+    ? { status: "ran", reports, invalid }
+    : { status: blocked.reason, reports, invalid, message: blocked.message };
 }
 
 /**
@@ -264,7 +296,7 @@ export async function acceptNow(
       throw new Error(`No job ${jobId}`);
     }
     const state = deps.state.load(jobId);
-    const connected = await deps.connect();
+    const connected = await deps.connect(jobServices(job));
     if (!connected.ok) {
       return { status: connected.reason, message: connected.message };
     }
