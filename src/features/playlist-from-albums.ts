@@ -411,7 +411,8 @@ export interface FetchAlbumTracksResult {
   /**
    * Ids of albums whose track list could not be fetched (e.g. Qobuz returned a
    * 404 for the id, or a transient error). Reported rather than fatal so one bad
-   * album does not sink the whole operation.
+   * album does not sink the whole operation. An error every album would run
+   * into (signed out, rate-limited; see {@link stopsEverySong}) is thrown.
    */
   failedAlbumIds: AlbumId[];
 }
@@ -454,7 +455,10 @@ export async function fetchAlbumTracks(
       try {
         const tracks = await client.getAlbumTracks(albumId);
         return { albumId, tracks: applyTrackFilter(tracks, filter) };
-      } catch {
+      } catch (error) {
+        if (stopsEverySong(error)) {
+          throw error;
+        }
         return { albumId, failed: true };
       }
     },
@@ -583,7 +587,8 @@ export async function writeAlbumPlaylist(
 
   // Pick a version per album and gather its tracks. An album whose tracks fail
   // to fetch is reported rather than fatal, so one bad album does not sink the
-  // whole playlist.
+  // whole playlist -- unless every album would fail the same way (signed out,
+  // rate-limited): then nothing is written.
   const fetched: { query: string; album: Album; tracks: FilteredTrack[] }[] = [];
   const failedAlbums: string[] = [];
   for (const resolved of resolvedAlbums) {
@@ -591,7 +596,10 @@ export async function writeAlbumPlaylist(
     let tracks: Track[];
     try {
       tracks = await client.getAlbumTracks(album.id);
-    } catch {
+    } catch (error) {
+      if (stopsEverySong(error)) {
+        throw error;
+      }
       failedAlbums.push(resolved.query);
       continue;
     }

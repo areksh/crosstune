@@ -341,6 +341,15 @@ describe("fetchAlbumTracks", () => {
     ]);
     expect(result.failedAlbumIds).toEqual(["bad"]);
   });
+
+  it.each(["authentication", "rate-limited", "quota"])(
+    "stops on a %s error instead of reporting every album failed",
+    async (kind) => {
+      const client = stubClient({});
+      client.getAlbumTracks.mockRejectedValue(new ServiceError("qobuz", kind, "signed out"));
+      await expect(fetchAlbumTracks(client, ["a", "b"])).rejects.toThrow("signed out");
+    },
+  );
 });
 
 describe("fetchAlbumTracks with a filter", () => {
@@ -697,6 +706,32 @@ describe("buildPlaylistFromAlbums", () => {
     expect(result.failedAlbums).toEqual(["Radiohead - OK Computer"]);
     expect(result.unresolvedAlbums).toEqual([]);
     expect(client.addTracksToPlaylist).toHaveBeenCalledWith(5, [10]);
+  });
+
+  it("stops, writing nothing, when signed out while fetching an album's tracks", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Daft Punk Discovery": [album({ id: "disc", title: "Discovery", artist: "Daft Punk" })],
+        "Radiohead OK Computer": [album({ id: "okc", title: "OK Computer", artist: "Radiohead" })],
+      },
+    });
+    client.getAlbumTracks.mockImplementation(async (id: string) => {
+      if (id === "okc") {
+        throw new ServiceError("qobuz", "authentication", "signed out");
+      }
+      return [{ id: 10, title: "One More Time" }];
+    });
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [
+          { artist: "Daft Punk", album: "Discovery" },
+          { artist: "Radiohead", album: "OK Computer" },
+        ],
+        playlistName: "Mix",
+      }),
+    ).rejects.toThrow("signed out");
+    expect(client.createPlaylist).not.toHaveBeenCalled();
   });
 
   it("throws when no albums are given", async () => {
