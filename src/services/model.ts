@@ -126,6 +126,8 @@ export interface Playlist {
   ownerId?: UserId;
   /** A link to it on its service. */
   url?: string;
+  /** Its cover (https), when the service has one; loaded only if artwork is on (ADR-0004). */
+  image?: string;
 }
 
 /** An album release of an artist, with its type and (when known) its main artist id. */

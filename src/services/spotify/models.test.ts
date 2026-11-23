@@ -242,4 +242,10 @@ describe("parseArtist and parsePlaylist", () => {
     });
     expect(parsePlaylist({ id: "p1" })).toBeUndefined();
   });
+
+  it("takes the playlist's cover from its images, none when Spotify sends null", () => {
+    const images = [{ url: "https://i.scdn.co/image/ab67616d00001e02", width: 640, height: 640 }];
+    expect(parsePlaylist({ id: "p1", name: "Mix", images })?.image).toBe("https://i.scdn.co/image/ab67616d00001e02");
+    expect(parsePlaylist({ id: "p1", name: "Mix", images: null })).not.toHaveProperty("image");
+  });
 });

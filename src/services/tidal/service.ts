@@ -438,8 +438,11 @@ export class TidalService implements MusicService {
   async getUserPlaylists(): Promise<Playlist[]> {
     const { account, countryCode } = await this.#whoever();
     const playlists: Playlist[] = [];
-    for await (const document of this.#client.pages("/playlists", { "filter[owners.id]": "me", countryCode })) {
-      playlists.push(...resourcesOf(document).map((resource) => ({ ...parsePlaylist(resource), ownerId: account.id })));
+    // With their cover art (probed live 2026-11-23: "artworks" come back in `included`).
+    const query = { "filter[owners.id]": "me", countryCode, include: ["coverArt"] };
+    for await (const document of this.#client.pages("/playlists", query)) {
+      const index = indexIncluded(document);
+      playlists.push(...resourcesOf(document).map((resource) => ({ ...parsePlaylist(resource, index), ownerId: account.id })));
     }
     return playlists;
   }

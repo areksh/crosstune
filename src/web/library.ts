@@ -13,6 +13,7 @@ import { coverBackground, generatedCover } from "../ui/cover-art.js";
 import { groupActions, libraryRows, sidebarRows, type LibraryRow, type SidebarRow } from "../ui/library.js";
 import { parseRoute, routeHash, type Route } from "../ui/routes.js";
 import { api } from "./api.js";
+import { artworkInto } from "./artwork.js";
 import { el } from "./dom.js";
 import { currentTab, TAB_CHANGED } from "./shell.js";
 import { openDialog } from "./dialog.js";
@@ -161,6 +162,7 @@ function playlistRow(playlist: SidebarRow): HTMLLIElement {
   cover.className = "lib-cover gen-cover";
   cover.setAttribute("aria-hidden", "true");
   cover.style.background = coverBackground(generatedCover(playlist.name));
+  artworkInto(cover, playlist.image);
   const { item, link } = row(routeHash({ kind: "playlist", id: playlist.id }), playlist.name, cover, dot(playlist.service));
   if (playlist.linked) {
     const mark = document.createElement("span");

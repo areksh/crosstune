@@ -188,7 +188,7 @@ export async function openEditor(id: PlaylistId, known?: ManagerPlaylist): Promi
   el("pl-meta").textContent = "";
   el("pl-notice").hidden = true;
   el("pl-editor-body").hidden = true;
-  renderPlaylistHeader({ id, name: known?.name ?? "Playlist" });
+  renderPlaylistHeader({ id, name: known?.name ?? "Playlist", ...(known?.image !== undefined && { image: known.image }) });
   el("pl-actions").hidden = true;
   el("pl-more").hidden = true;
   showError(el("pl-editor-error"), undefined);

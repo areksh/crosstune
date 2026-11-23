@@ -438,7 +438,7 @@ const VISIBILITY = new Map<unknown, boolean>([
  *
  * @throws {ServiceError} if it has no id.
  */
-export function parsePlaylist(resource: unknown): Playlist {
+export function parsePlaylist(resource: unknown, index: Index = new Map()): Playlist {
   const ref = refIn(resource);
   if (ref === undefined) {
     throw unreadable("a playlist without an id");
@@ -453,6 +453,7 @@ export function parsePlaylist(resource: unknown): Playlist {
   const updatedAt = momentOf(attributes["lastModifiedAt"]);
   const [owner] = relatedOf(resource, "owners");
   const url = urlOf(attributes);
+  const image = coverOf(resource, index);
   return {
     id: tagId<PlaylistId>("tidal", ref.id),
     name,
@@ -463,6 +464,7 @@ export function parsePlaylist(resource: unknown): Playlist {
     ...(updatedAt !== undefined && { updatedAt }),
     ...(owner !== undefined && { ownerId: tagId<UserId>("tidal", owner.id) }),
     ...(url !== undefined && { url }),
+    ...(image !== undefined && { image }),
   };
 }
 

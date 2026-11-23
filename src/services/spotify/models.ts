@@ -224,6 +224,8 @@ export function parsePlaylist(item: unknown): Playlist | undefined {
     isCollaborative: flag(item["collaborative"]),
     ownerId: isRecord(item["owner"]) ? tagged<UserId>(item["owner"]["id"]) : undefined,
     url: linkOf(item),
+    // `images` is null for an empty playlist.
+    image: coverOf(item["images"]),
   });
 }
 

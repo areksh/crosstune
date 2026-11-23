@@ -380,6 +380,14 @@ describe("parseArtistsPage", () => {
 });
 
 describe("parsePlaylist", () => {
+  it("takes the playlist's cover from its album covers, https only", () => {
+    const cover = "https://static.qobuz.com/images/covers/6a/94/hdhy9ck3d946a_300.jpg";
+    expect(parsePlaylist({ id: 1, name: "P", images300: [cover, "https://static.qobuz.com/b_300.jpg"] }).image).toBe(cover);
+    expect(parsePlaylist({ id: 1, name: "P", image_rectangle: [cover] }).image).toBe(cover);
+    expect(parsePlaylist({ id: 1, name: "P" })).not.toHaveProperty("image");
+    expect(parsePlaylist({ id: 1, name: "P", images300: ["http://static.qobuz.com/a_300.jpg"] })).not.toHaveProperty("image");
+  });
+
   it("extracts id and name", () => {
     expect(parsePlaylist({ id: 999, name: "Jazz" })).toEqual({ id: 999, name: "Jazz" });
   });

@@ -1263,6 +1263,25 @@ button:disabled {
   display: block;
 }
 
+/* A slot that is not a .cover (the sidebar's, a page header's) holding a real cover. */
+.cover-host {
+  position: relative;
+  overflow: hidden;
+}
+
+.cover-host img {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.artwork-on .cover-host img {
+  display: block;
+}
+
 /* A cover drawn from a name (src/ui/cover-art.ts): its gradient is set inline;
    a real cover, once artwork is on, lies over it. */
 .gen-cover {

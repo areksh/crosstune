@@ -26,6 +26,7 @@ export interface SidebarRow {
   name: string;
   service: ServiceName;
   trackCount?: number;
+  image?: string;
   linked: boolean;
 }
 
@@ -47,6 +48,7 @@ export function sidebarRows(
       name: playlist.name,
       service: serviceOf(playlist.id),
       ...(playlist.trackCount !== undefined && { trackCount: playlist.trackCount }),
+      ...(playlist.image !== undefined && { image: playlist.image }),
       linked: options.linked.has(playlist.id),
     }));
 }

@@ -11,7 +11,7 @@ import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art
 import { parseRoute } from "../ui/routes.js";
 import { formatDuration } from "../features/playlist-shape.js";
 import { api, type Track } from "./api.js";
-import { coverSlot } from "./artwork.js";
+import { artworkInto, coverSlot } from "./artwork.js";
 import { el } from "./dom.js";
 import { clockTime, qualityPill, titleOf, trackText } from "./tracks.js";
 import { songCount } from "./views/playlist-actions.js";
@@ -38,17 +38,18 @@ export function actionButton(text: string, act: () => void): HTMLButtonElement {
 }
 
 /** Paint a page's header: the cover drawn from its name, its glow, and the eyebrow. */
-function paintHero(prefix: string, name: string, eyebrow: string): void {
+function paintHero(prefix: string, name: string, eyebrow: string, image?: string): void {
   const cover = generatedCover(name);
   el(`${prefix}-cover`).style.background = coverBackground(cover);
   el(`${prefix}-hero`).style.background = glowBackground(cover);
   el(`${prefix}-eyebrow`).textContent = eyebrow;
+  artworkInto(el(`${prefix}-cover`), image);
 }
 
 /** The playlist page's header; `linkedWith` names the services of its other copies. */
-export function renderPlaylistHeader(playlist: { id: PlaylistId; name: string }, linkedWith?: string): void {
+export function renderPlaylistHeader(playlist: { id: PlaylistId; name: string; image?: string }, linkedWith?: string): void {
   const kind = `${SERVICE_LABELS[serviceOf(playlist.id)]} playlist`;
-  paintHero("pl", playlist.name, linkedWith === undefined ? kind : `${kind} · ⇄ ${linkedWith}`);
+  paintHero("pl", playlist.name, linkedWith === undefined ? kind : `${kind} · ⇄ ${linkedWith}`, playlist.image);
 }
 
 /** Wire up the Favourites page. Call once on load. */

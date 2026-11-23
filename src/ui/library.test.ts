@@ -51,6 +51,11 @@ describe("sidebarRows", () => {
     expect(rows).toEqual([{ id: "qobuz:1", name: "Techno", service: "qobuz", trackCount: 112, linked: false }]);
   });
 
+  it("carries the cover when the service has one", () => {
+    const withCover = { ...pl("qobuz:9", "Covered", "2026-01-01"), image: "https://static.qobuz.com/x_300.jpg" };
+    expect(sidebarRows([withCover], { tab: "all", filter: "", linked: new Set() })[0]?.image).toBe("https://static.qobuz.com/x_300.jpg");
+  });
+
   it("filters by name, ignoring case and surrounding space", () => {
     expect(sidebarRows(list, { tab: "all", filter: " UK ", linked: new Set() }).map((row) => row.id)).toEqual(["tidal:x"]);
   });

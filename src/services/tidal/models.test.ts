@@ -325,6 +325,33 @@ describe("parsePlaylist", () => {
   const playlist = (attributes: Record<string, unknown>, relationships?: unknown) =>
     parsePlaylist({ type: "playlists", id: "550e-84", attributes, relationships });
 
+  it("takes its cover art from the included artwork, as albums do", () => {
+    const document = {
+      data: { type: "playlists", id: "550e-84", attributes: { name: "Mix" }, relationships: { coverArt: many("artworks", "art1") } },
+      included: [
+        {
+          type: "artworks",
+          id: "art1",
+          attributes: {
+            mediaType: "IMAGE",
+            files: [
+              { href: "https://resources.tidal.com/images/e6/160x160.jpg", meta: { width: 160, height: 160 } },
+              { href: "https://resources.tidal.com/images/e6/320x320.jpg", meta: { width: 320, height: 320 } },
+              { href: "https://resources.tidal.com/images/e6/640x640.jpg", meta: { width: 640, height: 640 } },
+            ],
+          },
+        },
+      ],
+    };
+    const album = parseAlbum(
+      { type: "albums", id: "a1", attributes: { title: "A" }, relationships: { coverArt: many("artworks", "art1") } },
+      indexIncluded(document),
+    );
+    expect(parsePlaylist(resourceOf(document), indexIncluded(document)).image).toBe(album.image);
+    expect(album.image).toMatch(/^https:\/\/resources\.tidal\.com\//);
+    expect(playlist({ name: "Mix" })).not.toHaveProperty("image");
+  });
+
   it("reads everything the tools use", () => {
     expect(
       playlist(

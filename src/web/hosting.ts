@@ -15,6 +15,7 @@ import { coverBackground, generatedCover, glowBackground } from "../ui/cover-art
 import { parseRoute, routeHash, viewOf, type Route } from "../ui/routes.js";
 import { hostingDecision } from "../ui/hosting-decision.js";
 import { sourceToolFill, toolLabel, type Fill, type Source } from "../ui/tools.js";
+import { artworkInto } from "./artwork.js";
 import { openDialog } from "./dialog.js";
 import { el } from "./dom.js";
 import { knownPlaylist, LIBRARY_LOADED } from "./library.js";
@@ -205,15 +206,17 @@ export function prepareHosting(route: Route, stay: () => void = () => history.ba
 window.addEventListener(LIBRARY_LOADED, () => {
   const route = parseRoute(location.hash);
   if (route.kind === "playlist" && route.tool !== undefined) {
-    paintContext(knownPlaylist(route.id)?.name ?? "Playlist");
+    const known = knownPlaylist(route.id);
+    paintContext(known?.name ?? "Playlist", known?.image);
   }
 });
 
-function paintContext(name: string): void {
+function paintContext(name: string, image?: string): void {
   const cover = generatedCover(name);
   el("context-cover").style.background = coverBackground(cover);
   el("context-bar").style.background = glowBackground(cover);
   el("context-name").textContent = name;
+  artworkInto(el("context-cover"), image);
 }
 
 /** Show the context bar and hide the tool's own title and source picker, for a hosted route. */
@@ -232,7 +235,7 @@ export function showHosting(route: Route): void {
   } else {
     body.dataset["hostedPart"] = hosted.part;
   }
-  paintContext(hosted.name);
+  paintContext(hosted.name, route.kind === "playlist" ? knownPlaylist(route.id)?.image : undefined);
   el<HTMLAnchorElement>("context-back").href = hosted.back;
   const section = document.getElementById(`view-${viewOf(route)}`);
   el("context-problem").hidden = problem === undefined;

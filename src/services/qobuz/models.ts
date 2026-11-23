@@ -514,6 +514,13 @@ function toPlaylist(item: unknown): Playlist | undefined {
   if (isRecord(owner) && typeof owner["id"] === "number") {
     playlist.ownerId = owner["id"];
   }
+  // A playlist's cover is the first of its albums' covers (Qobuz shows a mosaic of them).
+  const cover = [item["images300"], item["image_rectangle"]]
+    .flatMap((list) => (Array.isArray(list) ? list.slice(0, 1) : []))
+    .find((url): url is string => typeof url === "string" && url.startsWith("https://"));
+  if (cover !== undefined) {
+    playlist.image = cover;
+  }
   return playlist;
 }
 

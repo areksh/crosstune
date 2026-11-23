@@ -66,6 +66,28 @@ export function coverSlot(url: string | undefined, seed?: string): HTMLElement {
   return slot;
 }
 
+/**
+ * Put a cover into an existing slot (the sidebar's, a page header's): the same
+ * lazy, no-referrer image as `coverSlot`, loaded only while artwork is on,
+ * over whatever the slot shows meanwhile (a cover drawn from the name).
+ */
+export function artworkInto(slot: HTMLElement, url: string | undefined): void {
+  slot.querySelector("img")?.remove();
+  slot.classList.add("cover-host");
+  if (url === undefined || !url.startsWith("https://")) {
+    return;
+  }
+  const img = document.createElement("img");
+  img.alt = "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.referrerPolicy = "no-referrer";
+  img.dataset["src"] = url;
+  img.addEventListener("error", () => img.remove());
+  load(img);
+  slot.appendChild(img);
+}
+
 /** Point an existing cover slot at another cover (e.g. a different version). */
 export function setCover(slot: HTMLElement, url: string | undefined, seed?: string): void {
   slot.replaceWith(coverSlot(url, seed));
@@ -74,7 +96,7 @@ export function setCover(slot: HTMLElement, url: string | undefined, seed?: stri
 function apply(): void {
   document.body.classList.toggle("artwork-on", enabled);
   if (enabled) {
-    document.querySelectorAll<HTMLImageElement>(".cover img[data-src]").forEach(load);
+    document.querySelectorAll<HTMLImageElement>(".cover img[data-src], .cover-host img[data-src]").forEach(load);
   }
 }
 
