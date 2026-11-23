@@ -47,52 +47,132 @@ const NOISE_WORDS = new Set([
   "anniversary",
   "reissue",
   "bonus",
-  "mono",
-  "stereo",
   "remasterise",
   "remasterised",
 ]);
 
 /**
- * Words that are only noise in the presence of a noise marker (e.g. "Remastered
- * Version", "Deluxe Edition"), but meaningful on their own ("Extended Version").
+ * Edition markers only in the version part ("Song (Mono)", "Song - Stereo
+ * Version"): as plain title words they are the song's name ("Stereo Love").
+ */
+const VERSION_NOISE_WORDS = new Set(["mono", "stereo"]);
+
+/**
+ * Words that are only noise in the presence of a noise marker in the same part
+ * (e.g. "Remastered Version", "Deluxe Edition"), but meaningful on their own
+ * ("Extended Version").
  */
 const CONTEXTUAL_WORDS = new Set(["version", "edition"]);
+
+const YEAR = /^(19|20)\d{2}$/;
+
+/**
+ * A word of the text, with where it stands: `inVersion` for a word inside
+ * brackets or after a spaced dash ("Song (2011 Remaster)", "Song - Live") --
+ * the version label, as services write it into a title -- and `part`, which
+ * bracketed or dash-separated piece it is in.
+ */
+interface Word {
+  text: string;
+  inVersion: boolean;
+  part: number;
+}
+
+/** Split folded text into words, noting which are in the version part. */
+function wordsOf(folded: string): Word[] {
+  const words: Word[] = [];
+  const chars = [...folded];
+  let depth = 0;
+  let afterDash = false;
+  let part = 0;
+  let word = "";
+  const flush = (): void => {
+    if (word.length > 0) {
+      words.push({ text: word, inVersion: depth > 0 || afterDash, part });
+      word = "";
+    }
+  };
+  chars.forEach((char, index) => {
+    if (char === "(" || char === "[" || char === "{") {
+      flush();
+      depth += 1;
+      part += 1;
+    } else if (char === ")" || char === "]" || char === "}") {
+      flush();
+      depth = Math.max(0, depth - 1);
+      part += 1;
+    } else if (
+      /[-\u2013\u2014]/.test(char) &&
+      depth === 0 &&
+      /\s/.test(chars[index - 1] ?? "") &&
+      /\s/.test(chars[index + 1] ?? "")
+    ) {
+      flush();
+      afterDash = true;
+      part += 1;
+    } else if (/[\p{L}\p{M}\p{N}]/u.test(char)) {
+      word += char;
+    } else {
+      flush();
+    }
+  });
+  flush();
+  return words;
+}
 
 /**
  * Normalise a piece of text (a title or an artist name) for comparison.
  *
- * Lowercases, folds accents, drops bracketing, removes edition noise (and any
- * year or contextual word attached to it), strips remaining punctuation, and
- * collapses whitespace. Letters and digits of every script are kept; text that
- * is all punctuation ("!!!") becomes empty.
+ * Lowercases, folds accents, drops bracketing, removes edition noise, strips
+ * remaining punctuation, and collapses whitespace. Letters and digits of every
+ * script are kept; text that is all punctuation ("!!!") becomes empty.
+ *
+ * What goes with the noise is kept narrow, because a wrong drop makes two
+ * different songs one (and the deduplicator then offers one for deletion):
+ * - "version"/"edition" only beside noise in the same bracket or dash part
+ *   ("Deluxe Edition", "2011 Remastered Version");
+ * - a year only in the version part (in brackets or after a dash) and right
+ *   beside a noise word ("(2011 Remaster)", "- Remastered 2012", "- Remaster
+ *   (2009)"). A year in the title itself is the song's name ("1979", "Summer
+ *   1999") and is never dropped, so a title cannot shrink to nothing by it;
+ * - "mono"/"stereo" only in the version part, never as title words.
  */
 export function normalise(text: string): string {
   const folded = text
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "") // strip Latin combining diacritical marks
     .normalize("NFC") // recompose what other scripts need (kana, Hangul)
-    .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " "); // punctuation/brackets -> space
+    .toLowerCase();
 
-  const tokens = folded.split(/\s+/).filter((t) => t.length > 0);
-  const noiseFound = tokens.some((t) => NOISE_WORDS.has(t));
-
-  const kept = tokens.filter((token) => {
-    if (NOISE_WORDS.has(token)) {
+  const words = wordsOf(folded);
+  const isNoise = (word: Word): boolean =>
+    NOISE_WORDS.has(word.text) || (word.inVersion && VERSION_NOISE_WORDS.has(word.text));
+  const noisyParts = new Set(words.filter(isNoise).map((word) => word.part));
+  const isContextual = (word: Word): boolean =>
+    CONTEXTUAL_WORDS.has(word.text) && noisyParts.has(word.part);
+  // The nearest word on one side that is not itself a dropped "version"/"edition".
+  const neighbour = (index: number, step: 1 | -1): Word | undefined => {
+    for (let at = index + step; at >= 0 && at < words.length; at += step) {
+      const word = words[at]!;
+      if (!isContextual(word)) {
+        return word;
+      }
+    }
+    return undefined;
+  };
+  const isEditionYear = (word: Word, index: number): boolean => {
+    if (!word.inVersion || !YEAR.test(word.text)) {
       return false;
     }
-    if (noiseFound && CONTEXTUAL_WORDS.has(token)) {
-      return false;
-    }
-    // Drop a year only when it sits alongside removed edition noise.
-    if (noiseFound && /^(19|20)\d{2}$/.test(token)) {
-      return false;
-    }
-    return true;
-  });
+    const before = neighbour(index, -1);
+    const after = neighbour(index, 1);
+    return (before !== undefined && isNoise(before)) || (after !== undefined && isNoise(after));
+  };
 
-  return kept.join(" ");
+  return words
+    .filter((word, index) => !isNoise(word) && !isContextual(word) && !isEditionYear(word, index))
+    .map((word) => word.text)
+    .join(" ");
 }
 
 /** Version labels that name the ordinary recording, so do not set a copy apart. */

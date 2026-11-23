@@ -51,6 +51,23 @@ describe("normalise", () => {
     expect(normalise("1999")).toBe("1999");
     expect(normalise("Symphony No. 5")).toBe("symphony no 5");
   });
+
+  it("drops a year only beside edition noise in the version part, never one in the title", () => {
+    expect(normalise("1979 (Remastered 2012)")).toBe("1979");
+    expect(normalise("Summer 1999 Remastered")).toBe("summer 1999");
+    expect(normalise("Summer 1999 (Remastered)")).toBe("summer 1999");
+    expect(normalise("Song - Remaster (2009)")).toBe("song");
+    expect(normalise("Song [2011 Remastered Version]")).toBe("song");
+    // A year in the version part that no noise word stands beside is kept.
+    expect(normalise("Song (Live 1979)")).toBe("song live 1979");
+  });
+
+  it("takes mono and stereo for noise only in the version part", () => {
+    expect(normalise("Stereo Love")).toBe("stereo love");
+    expect(normalise("Mono No Aware")).toBe("mono no aware");
+    expect(normalise("Song (Mono)")).toBe("song");
+    expect(normalise("Song - Stereo Version")).toBe("song");
+  });
 });
 
 describe("trackSignature", () => {
@@ -563,6 +580,21 @@ describe("versions", () => {
   it("points out songs held in several versions, with all their copies", () => {
     const groups = findOtherVersions([song(1), song(2, "Live"), song(3, "Remastered"), { ...song(4), title: "Glory Box" }]);
     expect(groups.map((g) => g.map((t) => t.id))).toEqual([[1, 2, 3]]);
+  });
+
+  it("matches a title that is a year to its remaster, and keeps songs named for different years apart", () => {
+    const ids = (tracks: DedupTrack[]) => findDuplicateGroups(tracks).map((g) => g.map((t) => t.id));
+    const by = (id: number, title: string, version?: string): DedupTrack => ({
+      id,
+      title,
+      artist: "Smashing Pumpkins",
+      ...(version !== undefined && { version }),
+    });
+    expect(ids([by(1, "1979"), by(2, "1979", "Remastered 2012")])).toEqual([[1, 2]]);
+    expect(ids([by(1, "Summer 1999", "Remastered"), by(2, "Summer 2001", "Remastered")])).toEqual([]);
+    expect(ids([by(1, "Summer 1999 Remastered"), by(2, "Summer 2001 Remastered")])).toEqual([]);
+    expect(ids([by(1, "Stereo Love"), by(2, "Love")])).toEqual([]);
+    expect(ids([by(1, "Love"), by(2, "Love", "Mono")])).toEqual([[1, 2]]);
   });
 
   it("does not call duplicates other versions", () => {
