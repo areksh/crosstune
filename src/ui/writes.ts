@@ -22,8 +22,9 @@ const WRITES = new Set([
 /** Reads that are sent as POST under jobs and links. */
 const READS = [/^\/api\/jobs\/(preview|artists)$/, /^\/api\/links\/[^/]+\/compare$/];
 
-export function isWriteRequest(method: string, path: string): boolean {
-  if (method === "GET") {
+export function isWriteRequest(method: string, path: string, body?: unknown): boolean {
+  // A dry run (a job's check, a link's settle preview) reads only.
+  if (method === "GET" || (typeof body === "object" && body !== null && (body as Record<string, unknown>)["dryRun"] === true)) {
     return false;
   }
   if (WRITES.has(path)) {

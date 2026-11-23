@@ -7,7 +7,7 @@
  * opens Techno, "repeats" finds repeats), and only then taken as an artist.
  */
 
-import { classifyPaste, type PasteSummary } from "../features/music-links.js";
+import { classifyPaste, parseMusicLink, type PasteSummary } from "../features/music-links.js";
 import type { PlaylistId } from "../services/ids.js";
 import type { ServiceName } from "../services/names.js";
 import { routeHash, type Route } from "./routes.js";
@@ -76,7 +76,7 @@ function pasteSuggestions(found: PasteSummary, context: AskContext): AskSuggesti
         label:
           found.artists.length > 1
             ? "Build a playlist from these artists"
-            : /^https?:\/\//.test(found.artists[0] ?? "")
+            : parseMusicLink(found.artists[0] ?? "") !== undefined
               ? "Build a playlist from this artist"
               : `Build a playlist from ${found.artists[0]}`,
         hash: routeHash({ kind: "new", tool: "artists" }),
@@ -127,7 +127,7 @@ export function askSuggestions(text: string, context: AskContext): AskSuggestion
   const found = classifyPaste(trimmed);
   const oneLine = !trimmed.includes("\n");
   // One line that is not a link: looked for by name first ("Chill - Evening" may be an album too).
-  const plain = oneLine && !/https?:\/\//.test(trimmed);
+  const plain = oneLine && parseMusicLink(trimmed) === undefined && !/^https?:\/\//.test(trimmed);
   if (!plain) {
     return pasteSuggestions(found, context).slice(0, MOST);
   }
@@ -144,5 +144,7 @@ export function askSuggestions(text: string, context: AskContext): AskSuggestion
         return route === undefined ? [] : [{ label: destination.label, hash: routeHash(route) }];
       });
   // A word that names a tool is the tool; any other line may be an artist.
-  return [...tools, ...playlists, ...(tools.length > 0 ? [] : pasteSuggestions(found, context))].slice(0, MOST);
+  // An "X - Y" line keeps its album suggestion even when it names a tool too.
+  const paste = tools.length > 0 && found.albums.length === 0 ? [] : pasteSuggestions(found, context);
+  return [...tools, ...playlists, ...paste].slice(0, MOST);
 }

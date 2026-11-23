@@ -74,6 +74,15 @@ describe("askSuggestions", () => {
     );
   });
 
+  it("names an artist given as a Spotify address or a link without https as an artist", () => {
+    expect(askSuggestions("spotify:artist:6liAMWkVf5LH7YR9yfFy1Y", context)[0]?.label).toBe("Build a playlist from this artist");
+    expect(askSuggestions("open.spotify.com/artist/6liAMWkVf5LH7YR9yfFy1Y", context)[0]?.label).toBe("Build a playlist from this artist");
+  });
+
+  it("keeps the album suggestion for an \"X - Y\" line that also names a tool", () => {
+    expect(askSuggestions("Import - Live", context).some((s) => s.label === "Build a playlist from these albums")).toBe(true);
+  });
+
   it("says when a link is of a kind no tool takes, rather than offering nothing", () => {
     expect(askSuggestions("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", context)).toEqual([
       { label: "Track and label links are not used by a tool yet" },

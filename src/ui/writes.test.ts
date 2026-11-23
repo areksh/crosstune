@@ -15,6 +15,12 @@ describe("isWriteRequest", () => {
     expect(isWriteRequest("DELETE", "/api/links/3")).toBe(true);
   });
 
+  it("does not count a dry run as a change", () => {
+    expect(isWriteRequest("POST", "/api/jobs/3/run", { dryRun: true })).toBe(false);
+    expect(isWriteRequest("POST", "/api/links/3/resolve", { dryRun: true })).toBe(false);
+    expect(isWriteRequest("POST", "/api/jobs/3/run", {})).toBe(true);
+  });
+
   it("does not count reads, previews and plans", () => {
     expect(isWriteRequest("GET", "/api/manager/playlists")).toBe(false);
     expect(isWriteRequest("POST", "/api/upgrade/resolve")).toBe(false);

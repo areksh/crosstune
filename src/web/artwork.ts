@@ -101,20 +101,29 @@ export function artworkOn(): boolean {
  */
 type Rgb = { r: number; g: number; b: number };
 
-/** Colours already read, by cover URL (undefined: could not be read). */
-const colours = new Map<string, Rgb | undefined>();
+/** Colours read (or being read), by cover URL; a failed read is tried again next time. */
+const reads = new Map<string, Promise<Rgb | undefined>>();
+/** Colours known, for painting at once. */
+const colours = new Map<string, Rgb>();
 
 export function readCoverColour(url: string): Promise<Rgb | undefined> {
   if (!enabled || !url.startsWith("https://")) {
     return Promise.resolve(undefined);
   }
-  if (colours.has(url)) {
-    return Promise.resolve(colours.get(url));
+  let read = reads.get(url);
+  if (read === undefined) {
+    // One request per cover, however many headers ask meanwhile.
+    read = readFresh(url).then((rgb) => {
+      if (rgb === undefined) {
+        reads.delete(url);
+      } else {
+        colours.set(url, rgb);
+      }
+      return rgb;
+    });
+    reads.set(url, read);
   }
-  return readFresh(url).then((rgb) => {
-    colours.set(url, rgb);
-    return rgb;
-  });
+  return read;
 }
 
 function readFresh(url: string): Promise<Rgb | undefined> {
@@ -166,7 +175,7 @@ export function tintFromCover(target: HTMLElement, url: string | undefined): voi
   if (url === undefined) {
     return;
   }
-  const known = enabled && colours.has(url) ? colours.get(url) : undefined;
+  const known = enabled ? colours.get(url) : undefined;
   if (known !== undefined) {
     // Read before: painted at once, so a re-render (after a save) does not flicker.
     target.style.background = glowBackground(coverFromColour(known));

@@ -28,6 +28,8 @@ function pickable(): number[] {
 export function initAsk(): void {
   const box = el<HTMLTextAreaElement>("ask");
   box.addEventListener("input", () => {
+    // Typing again: this is no longer the text a picked suggestion went off with.
+    goingTo = undefined;
     grow(box);
     update(box.value);
   });
@@ -46,7 +48,8 @@ export function initAsk(): void {
     }, 150);
   });
   box.addEventListener("keydown", (event) => {
-    if (event.isComposing) {
+    // keyCode 229: Safari's Enter that confirms the composition comes after it ends.
+    if (event.isComposing || event.keyCode === 229) {
       // Typing through an input method (Japanese, Chinese...): Enter confirms the text.
       return;
     }
@@ -73,10 +76,13 @@ export function initAsk(): void {
     if (event.defaultPrevented || event.altKey) {
       return;
     }
-    const inField = event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]") !== null;
+    // Another field than the box: Ctrl+K edits text there, and "/" is typed.
+    const inField =
+      event.target !== box &&
+      event.target instanceof HTMLElement &&
+      event.target.closest("input, textarea, select, [contenteditable]") !== null;
     const shortcut = event.key === "k" && (event.ctrlKey || event.metaKey) && !event.shiftKey;
-    const slash = event.key === "/" && !event.ctrlKey && !event.metaKey;
-    // Not from another field: Ctrl+K edits text there, and "/" is typed.
+    const slash = event.key === "/" && !event.ctrlKey && !event.metaKey && event.target !== box;
     if (!inField && (shortcut || slash)) {
       event.preventDefault();
       box.focus();
@@ -125,7 +131,7 @@ function render(): void {
       item.id = `ask-option-${index}`;
       item.setAttribute("role", "option");
       item.className = "ask-option";
-      item.setAttribute("aria-selected", String(index === highlighted));
+      item.setAttribute("aria-selected", String(index === highlighted && suggestion.hash !== undefined));
       item.textContent = suggestion.label;
       if (suggestion.hash === undefined) {
         item.setAttribute("aria-disabled", "true");

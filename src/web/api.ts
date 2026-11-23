@@ -114,7 +114,7 @@ export async function api<T>(
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const writing = isWriteRequest(method, path);
+  const writing = isWriteRequest(method, path, body);
   if (writing) {
     inFlight += 1;
   }

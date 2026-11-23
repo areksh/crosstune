@@ -119,10 +119,6 @@ function unsavedPreviews(): string[] {
     const view = node.closest<HTMLElement>(".view");
     titles.add(view?.querySelector("h1")?.textContent?.trim() || "a tool");
   }
-  if (writesInFlight() > 0) {
-    // The service may finish it, but a fresh page would not say how it went.
-    titles.add("a change still being saved");
-  }
   return [...titles];
 }
 
@@ -133,12 +129,17 @@ function unsavedPreviews(): string[] {
  */
 export async function reloadHere(before: () => boolean | void, stay: () => void = () => {}): Promise<void> {
   const unsaved = unsavedPreviews();
-  if (unsaved.length > 0) {
+  const saving = writesInFlight() > 0;
+  if (unsaved.length > 0 || saving) {
     const asked = location.hash;
     const leave = await openDialog({
       title: "Leave without saving?",
       body: [
-        `Opening this loads the page afresh, which clears what you have not saved in ${unsaved.join(", ")}.`,
+        ...(unsaved.length > 0
+          ? [`Opening this loads the page afresh, which clears what you have not saved in ${unsaved.join(", ")}.`]
+          : []),
+        // The service may finish it, but a fresh page would not say how it went.
+        ...(saving ? ["A change is still being saved; a fresh page would not show how it ended."] : []),
       ],
       confirm: "Leave and lose it",
       cancel: "Stay here",
