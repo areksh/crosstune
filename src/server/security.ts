@@ -28,6 +28,11 @@ export interface AuthConfig {
 
 export type AuthResult = { ok: true } | { ok: false; reason: string };
 
+/** Whether a Host header names this server (`localhost` or `127.0.0.1` on our port). */
+export function hostAllowed(host: string | undefined, port: number): boolean {
+  return host !== undefined && [`127.0.0.1:${port}`, `localhost:${port}`].includes(host);
+}
+
 /** Decide whether an API request may proceed. */
 export function authorise(
   headers: RequestHeaders,
@@ -36,7 +41,7 @@ export function authorise(
   const allowedHosts = [`127.0.0.1:${config.port}`, `localhost:${config.port}`];
   const allowedOrigins = allowedHosts.map((host) => `http://${host}`);
 
-  if (headers.host === undefined || !allowedHosts.includes(headers.host)) {
+  if (!hostAllowed(headers.host, config.port)) {
     return { ok: false, reason: "host not allowed" };
   }
   if (headers.origin !== undefined && !allowedOrigins.includes(headers.origin)) {

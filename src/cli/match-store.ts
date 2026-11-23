@@ -61,7 +61,7 @@ export function fileMatches(dir: string = configDir()): MatchMemory {
   const update = (change: (matches: Matches) => void): void => {
     const matches = structuredClone(load());
     change(matches);
-    mkdirSync(dirname(path), { recursive: true });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     const temporary = `${path}.${process.pid}.tmp`;
     writeFileSync(temporary, `${JSON.stringify({ version: 1, matches }, null, 2)}\n`, { mode: 0o600 });
     renameSync(temporary, path);

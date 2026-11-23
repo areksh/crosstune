@@ -15,6 +15,7 @@ import type { UserSession } from "../services/qobuz/index.js";
 import { QobuzClient } from "../services/qobuz/index.js";
 import { buildOAuthUrl, parseRedirectCode } from "../services/qobuz/oauth.js";
 import { openInBrowser } from "./open-browser.js";
+import { isSubresourceRequest } from "./sign-in-listener.js";
 
 const OAUTH_TIMEOUT_MS = 180_000;
 
@@ -67,6 +68,12 @@ function captureAuthorizationCode(
     }, OAUTH_TIMEOUT_MS);
 
     server.on("request", (req, res) => {
+      // A page's <img> or fetch must not use up the sign-in that waits.
+      if (isSubresourceRequest(req.headers)) {
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("Forbidden");
+        return;
+      }
       const code = parseRedirectCode(req.url ?? "");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(code === undefined ? WAITING_HTML : SUCCESS_HTML);

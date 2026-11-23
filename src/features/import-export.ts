@@ -231,9 +231,9 @@ function serializeCollectionCsv(collection: Collection): string {
 function serializeCollectionText(collection: Collection): string {
   const lines = collection.items.map((item) => {
     if (collection.kind === "artists") {
-      return (item as ExportArtist).name;
+      return oneLine((item as ExportArtist).name);
     }
-    return artistTitleLine(item as ExportTrack | ExportAlbum);
+    return oneLine(artistTitleLine(item as ExportTrack | ExportAlbum));
   });
   return `${lines.join("\n")}\n`;
 }
@@ -246,7 +246,7 @@ function serializeCollectionText(collection: Collection): string {
 function serializeTracksM3u(tracks: readonly ExportTrack[]): string {
   const lines = ["#EXTM3U"];
   for (const track of tracks) {
-    lines.push(`#EXTINF:-1,${artistTitleLine(track)}`);
+    lines.push(`#EXTINF:-1,${oneLine(artistTitleLine(track))}`);
     lines.push(`qobuz://track/${shortId(track.id)}`);
   }
   return `${lines.join("\n")}\n`;
@@ -266,9 +266,31 @@ function stringField(value: unknown): string {
   return value === undefined || value === null ? "" : String(value);
 }
 
-/** Quote a CSV field when it contains a comma, quote or newline; double quotes. */
+/**
+ * A field a spreadsheet would run as a formula: it starts with one of these (or
+ * with the apostrophe {@link csvEscape} puts before one, so that a title which
+ * really begins `'=` still reads back as it was written).
+ */
+const FORMULA_START = /^'?[=+\-@\t\r]/;
+
+/**
+ * Quote a CSV field when it contains a comma, quote or newline; double quotes.
+ * A field a spreadsheet would run as a formula gets a leading `'` first (OWASP's
+ * CSV-injection advice); {@link unguardFormula} takes it off again on import.
+ */
 function csvEscape(field: string): string {
-  return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+  const safe = FORMULA_START.test(field) ? `'${field}` : field;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** Undo {@link csvEscape}'s guard: drop the `'` it put before a formula start. */
+function unguardFormula(field: string): string {
+  return field.startsWith("'") && FORMULA_START.test(field.slice(1)) ? field.slice(1) : field;
+}
+
+/** Control characters (a newline would start another entry) become spaces in line formats. */
+function oneLine(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f]/g, " ");
 }
 
 // --- Parsing ---------------------------------------------------------------
@@ -460,7 +482,7 @@ function parseCollectionCsv(
     const index = header.indexOf(column);
     if (index === -1) return undefined;
     const value = row[index];
-    return value !== undefined && value.length > 0 ? value : undefined;
+    return value !== undefined && value.length > 0 ? unguardFormula(value) : undefined;
   };
   const body = rows.slice(1).filter((row) => row.some((cell) => cell.length > 0));
   if (kind === "tracks") {

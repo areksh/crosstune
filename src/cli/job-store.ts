@@ -46,7 +46,7 @@ export {
 };
 
 function writeAtomically(path: string, text: string): void {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, text, { mode: 0o600 });
   renameSync(temporary, path);
@@ -145,7 +145,7 @@ export function fileRunLog(dir: string = configDir()): RunLog {
       if (kept.length < all.length) {
         writeAtomically(path, kept.map((r) => `${JSON.stringify(r)}\n`).join(""));
       } else {
-        mkdirSync(dirname(path), { recursive: true });
+        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
         appendFileSync(path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
       }
     },

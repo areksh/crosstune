@@ -52,7 +52,7 @@ export function saveCredentials(
   options: { now?: () => number } = {},
 ): void {
   const now = options.now ?? (() => Date.now());
-  mkdirSync(dirname(filePath), { recursive: true });
+  mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
   const data: CacheFile = {
     version: CACHE_VERSION,
     cachedAt: now(),

@@ -18,8 +18,9 @@ export function openInBrowser(url: string): void {
       args = [url];
       break;
     case "win32":
-      command = "cmd";
-      args = ["/c", "start", "", url];
+      // No shell: `cmd /c start` would take an `&` in the URL as a new command.
+      command = "rundll32";
+      args = ["url.dll,FileProtocolHandler", url];
       break;
     default:
       command = "xdg-open";

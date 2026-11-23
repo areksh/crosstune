@@ -43,17 +43,17 @@ export function fileHistoryStore(
       }
     },
     append: (text) => {
-      mkdirSync(dirname(filePath), { recursive: true });
+      mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
       appendFileSync(filePath, text, { mode: 0o600 });
     },
     replace: (text) => {
-      mkdirSync(dirname(filePath), { recursive: true });
+      mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
       const temporary = `${filePath}.${process.pid}.tmp`;
       writeFileSync(temporary, text, { mode: 0o600 });
       renameSync(temporary, filePath);
     },
     exclusive: <T>(fn: () => T): T | undefined => {
-      mkdirSync(dirname(filePath), { recursive: true });
+      mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
       // Another process holds the lock for milliseconds: wait a little.
       let lock = tryAcquireLock(`${filePath}.lock`, { staleMs: HISTORY_LOCK_STALE_MS });
       for (let waited = 0; lock === undefined && waited < lockWaitMs; waited += 25) {
