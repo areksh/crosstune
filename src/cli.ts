@@ -217,11 +217,11 @@ import {
 } from "./cli/args.js";
 import { clearCredentials } from "./cli/bundle-store.js";
 import { fileHistoryStore } from "./cli/history-store.js";
+import { configDir } from "./cli/config-dir.js";
 import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
 import { authenticateByPaste, authenticateViaBrowser } from "./cli/oauth-login.js";
-import { configDir, moveOldConfigDir } from "./cli/config-dir.js";
 import { acquireLockWithin, tryAcquireLock } from "./cli/file-lock.js";
 import {
   fileGlobalStore,
@@ -424,10 +424,6 @@ async function main(): Promise<void> {
   logger = createLogger(level, logSinksFor(json, defaultSinks));
   const command = args[0] ?? "check";
   output = createOutput(json, command);
-  // The app was called qobuz-helper (ADR-0014): its folder moves, once.
-  if (moveOldConfigDir()) {
-    logger.info(`Moved your settings from the qobuz-helper folder to ${configDir()}.`);
-  }
   if (command === "--help" || command === "-h") {
     printUsage();
     return;

@@ -8,11 +8,6 @@ playlists the same on all of them.
 use the tools, and nothing about you is stored on any server -- the sign-ins
 are saved locally and never leave your machine.
 
-It was called `qobuz-helper` until it worked with more than Qobuz. The
-`qobuz-helper` command still works, and its settings folder
-(`~/.config/qobuz-helper`) is moved to `~/.config/crosstune` the first time
-`crosstune` runs (ADR-0014).
-
 ## Why this exists
 
 Qobuz has no official public API, so these tools talk to the same private JSON
