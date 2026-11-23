@@ -5,6 +5,7 @@
  */
 
 import { isServiceName, type ServiceName } from "../services/names.js";
+import type { Tab } from "../ui/library.js";
 
 const STORAGE_KEY = "crosstune:service";
 
@@ -42,4 +43,26 @@ export function connectedServices(): readonly ServiceName[] {
 
 export function setConnectedServices(services: readonly ServiceName[]): void {
   connected = services;
+}
+
+const TAB_KEY = "crosstune:tab";
+
+/**
+ * The service tab the sidebar shows (or "all"). Only a filter on the list:
+ * a tool works on its playlist's service, or on the one remembered above.
+ */
+export function chosenTab(): string | undefined {
+  try {
+    return localStorage.getItem(TAB_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberTab(tab: Tab): void {
+  try {
+    localStorage.setItem(TAB_KEY, tab);
+  } catch {
+    // Storage unavailable: the tab lasts this page.
+  }
 }

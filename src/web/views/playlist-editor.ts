@@ -71,6 +71,7 @@ import { enableDrag } from "../drag-list.js";
 import { storePrefill, type Prefill } from "../prefill.js";
 import { clockTime, qualityPill, titleOf, trackText } from "../tracks.js";
 import { confirmDelete, editDetails, managedNotice, playlistHash, playlistLink, songCount } from "./playlist-actions.js";
+import { refreshLibrary } from "../library.js";
 import { knownLinks, LINKS_CHANGED } from "./links.js";
 import { linkMark } from "../../sync/wording.js";
 
@@ -192,7 +193,7 @@ export async function openEditor(id: PlaylistId, known?: ManagerPlaylist): Promi
   el("pl-editor-status").textContent =
     known?.trackCount === undefined ? "Reading its songs..." : `Reading ${songCount(known.trackCount)}...`;
   try {
-    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: id });
+    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: id }, serviceOf(id));
     if (mine === request) {
       show(opened);
     }
@@ -972,7 +973,7 @@ async function copyToService(): Promise<void> {
 
 async function copyNow(ids: readonly EntryId[], destination: Destination): Promise<void> {
   await working("Copying...", async () => {
-    const result = await api<ConfirmedAdd>("POST", "/api/manager/copy", { trackIds: trackIdsOf(ids), destination });
+    const result = await api<ConfirmedAdd>("POST", "/api/manager/copy", { trackIds: trackIdsOf(ids), destination }, serviceOf(current().playlist.id));
     say(describeAdd(result, "Copied"));
   });
 }
@@ -1003,7 +1004,7 @@ async function favouriteSelected(): Promise<void> {
   await working("Adding to Favourites...", async () => {
     const { added, already } = await api<{ added: number; already: number }>("POST", "/api/manager/favourite", {
       trackIds: ids,
-    });
+    }, serviceOf(current().playlist.id));
     const there = already === 0 ? "" : ` ${already} ${already === 1 ? "was" : "were"} there already.`;
     say(`Added ${songCount(added)} to your Favourites.${there}`);
   });
@@ -1124,7 +1125,7 @@ async function selectAlreadyIn(where: "favourites" | "playlist"): Promise<void> 
   }
   let found: readonly Track[] | undefined;
   await working(`Reading ${name}...`, async () => {
-    ({ tracks: found } = await api<{ tracks: Track[] }>("POST", "/api/manager/compare", body));
+    ({ tracks: found } = await api<{ tracks: Track[] }>("POST", "/api/manager/compare", body, serviceOf(current().playlist.id)));
   });
   if (found !== undefined && isStill(mine)) {
     selectPicked(alreadyInIds(kept(), found), `songs already in ${name}`);
@@ -1234,6 +1235,7 @@ async function lookUpLinks(lines: readonly string[]): Promise<void> {
       "POST",
       "/api/manager/artist-links",
       { lines },
+      editor === undefined ? undefined : serviceOf(editor.playlist.id),
     );
     for (const { line, artist, problem } of found.links) {
       links.set(line, artist ?? { problem: problem ?? "not found" });
@@ -1374,7 +1376,7 @@ function renderMore(): void {
       const result = await api<{ playlist: ManagerPlaylist }>("POST", "/api/manager/update", {
         playlistId: playlist.id,
         ...changes,
-      });
+      }, serviceOf(playlist.id));
       if (!isStill(mine)) {
         return;
       }
@@ -1383,6 +1385,7 @@ function renderMore(): void {
       renderMeta();
       renderMore();
       say(text);
+      void refreshLibrary();
     });
   const items: HTMLElement[] = [];
   if (playlist.owned) {
@@ -1442,11 +1445,13 @@ async function duplicateHere(): Promise<void> {
       "POST",
       "/api/manager/duplicate",
       { playlistId: playlist.id, name: name.value.trim() },
+      serviceOf(playlist.id),
     );
     say(
       `Made ${result.playlist.name} with ${songCount(result.added)}` +
         (result.missing > 0 ? `; ${serviceName()} no longer offers ${result.missing}.` : "."),
     );
+    void refreshLibrary();
   });
 }
 
@@ -1458,13 +1463,14 @@ async function deleteHere(): Promise<void> {
   }
   let deleted = false;
   await working("Deleting...", async () => {
-    await api("POST", "/api/manager/delete", { playlistId: playlist.id });
+    await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
     deleted = true;
   });
   if (deleted) {
     closeEditor();
     sessionDeleted(playlist.name);
-    location.hash = "#/playlists";
+    void refreshLibrary();
+    location.hash = "#/";
   }
 }
 
@@ -1533,7 +1539,7 @@ async function save(): Promise<void> {
     const outcome = await api<SaveOutcome>("POST", "/api/manager/save", {
       playlistId: playlist.id,
       ...draftChanges(draft),
-    });
+    }, serviceOf(playlist.id));
     if (outcome.status === "changed") {
       drift = outcome;
       return;
@@ -1541,13 +1547,13 @@ async function save(): Promise<void> {
     const report = describeSaved(outcome);
     let opened: Opened;
     try {
-      opened = await api<Opened>("POST", "/api/manager/open", { playlistId: playlist.id });
+      opened = await api<Opened>("POST", "/api/manager/open", { playlistId: playlist.id }, serviceOf(playlist.id));
     } catch (error) {
       // The draft no longer matches the playlist: do not leave it up as unsaved.
       closeEditor();
       el("pl-editor-body").hidden = true;
       say(report);
-      throw new Error(`The playlist could not be read again (${(error as Error).message}). Go back to Playlists and open it again.`);
+      throw new Error(`The playlist could not be read again (${(error as Error).message}). Open it again from the library.`);
     }
     const scroll = window.scrollY;
     if (outcome.failed === undefined) {
@@ -1562,6 +1568,7 @@ async function save(): Promise<void> {
     }
     window.scrollTo(0, scroll);
     say(report);
+    void refreshLibrary();
     if (outcome.failed !== undefined) {
       showError(
         el("pl-editor-error"),
@@ -1623,7 +1630,7 @@ async function offerRebase(outcome: Extract<SaveOutcome, { status: "changed" }>,
     return;
   }
   await working("Reading it again...", async () => {
-    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: mine.playlist.id });
+    const opened = await api<Opened>("POST", "/api/manager/open", { playlistId: mine.playlist.id }, serviceOf(mine.playlist.id));
     show(opened, rebase(draft, opened.entries.map((entry) => entry.playlistTrackId)));
     say("Brought in the changes made elsewhere. Check the list, then save.");
   });

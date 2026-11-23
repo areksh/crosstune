@@ -8,7 +8,7 @@
 export interface GeneratedCover {
   /** The base hue, 0-359. */
   hue: number;
-  /** Three CSS `hsl()` colours: the light main one, a neighbour, a dark contrast. */
+  /** Three CSS `hsl()` colours of one family: the light main one, a neighbour, a dark one. */
   colours: [string, string, string];
 }
 
@@ -36,7 +36,7 @@ export function generatedCover(seed: string): GeneratedCover {
   const hue = hash(seed.trim().toLowerCase()) % 360;
   return {
     hue,
-    colours: [hsl(hue, 78, 64), hsl(hue + 35, 80, 60), hsl(hue + 210, 55, 45)],
+    colours: [hsl(hue, 78, 64), hsl(hue + 30, 80, 56), hsl(hue + 60, 60, 34)],
   };
 }
 

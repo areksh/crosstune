@@ -15,57 +15,37 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="layout">
-      <aside class="sidebar">
-        <a class="brand" href="#/home">
-          <span class="brand-dot" aria-hidden="true"></span>crosstune
-        </a>
-        <!-- Each tool is one nav-link line in its group (plus a VIEWS entry in main.ts). -->
-        <nav class="nav" aria-label="Tools">
-          <div class="nav-group">
-            <span class="nav-label">Build</span>
-            <a class="nav-link" data-view="home" href="#/home">Home</a>
-            <a class="nav-link" data-view="playlist" href="#/playlist">Playlist from artists</a>
-            <a class="nav-link" data-view="albums" href="#/albums">Playlist from albums</a>
-            <a class="nav-link" data-view="similar" href="#/similar">Similar artists</a>
-            <a class="nav-link" data-view="word-play" href="#/word-play">Word play</a>
-          </div>
-          <div class="nav-group">
-            <span class="nav-label">Tidy up</span>
-            <a class="nav-link" data-view="playlists" href="#/playlists">Playlists</a>
-            <a class="nav-link" data-view="deduplicate" href="#/deduplicate">Deduplicator</a>
-            <a class="nav-link" data-view="combine" href="#/combine">Combine playlists</a>
-            <a class="nav-link" data-view="upgrade" href="#/upgrade">Upgrade &amp; repair</a>
-          </div>
-          <div class="nav-group">
-            <span class="nav-label">Explore</span>
-            <a class="nav-link" data-view="stats" href="#/stats">Library stats</a>
-            <a class="nav-link" data-view="new-releases" href="#/new-releases">New releases</a>
-            <a class="nav-link" data-view="managed" href="#/managed">Managed playlists</a>
-          </div>
-          <div class="nav-group">
-            <span class="nav-label">Your data</span>
-            <a class="nav-link" data-view="import-export" href="#/import-export">Import &amp; export</a>
-            <a class="nav-link" data-view="history" href="#/history">History</a>
-            <a class="nav-link" data-view="accounts" href="#/accounts">Accounts</a>
-          </div>
-        </nav>
-        <div class="sidebar-footer">
-          <label id="service-picker" class="service-picker" hidden>
-            <span class="session-label">Music service</span>
-            <select id="service-select"></select>
-          </label>
-          <span id="session-label" class="session-label">Signed in as</span>
-          <a id="session" class="session" href="#/accounts">Connecting...</a>
-          <label
-            class="checkbox artwork-toggle"
-            title="Covers load straight from the music service's image server; no sign-in details are sent."
-          >
-            <input id="show-artwork" type="checkbox" aria-describedby="artwork-hint" />
-            Show artwork
-          </label>
-          <span id="artwork-hint" class="artwork-hint">Covers load from the service's image server.</span>
+    <!-- The frame: a top bar over the library sidebar and the main area (src/web/shell.ts, library.ts). -->
+    <header class="topbar">
+      <a class="brand" href="#/">crosstune</a>
+      <div id="tabs" class="tabs" role="group" aria-label="Show playlists from"></div>
+      <span class="topbar-gap"></span>
+      <a id="nav-jobs" class="top-link" href="#/managed">Jobs</a>
+      <a id="nav-history" class="top-link" href="#/history">History</a>
+      <a id="nav-settings" class="top-link" href="#/settings">Settings</a>
+      <details id="new-menu" class="menu new-menu">
+        <summary>+ New</summary>
+        <div class="menu-items new-menu-items">
+          <p class="menu-label">New playlist from&hellip;</p>
+          <a class="new-item" href="#/playlist"><b>Artists</b><span>Each artist's most popular tracks</span></a>
+          <a class="new-item" href="#/albums"><b>Albums</b><span>"Artist - Album" lines or a discography</span></a>
+          <a class="new-item" href="#/similar"><b>Similar artists</b><span>Grow a list through artists like them</span></a>
+          <a class="new-item" href="#/word-play"><b>Word play</b><span>A sentence, an acrostic, A to Z in song titles</span></a>
+          <a class="new-item" href="#/combine"><b>Combine playlists</b><span>Merge several into one, each song once</span></a>
+          <a class="new-item" href="#/import-export"><b>Import a file</b><span>Spotify/Exportify CSV, a crosstune backup</span></a>
+          <p class="menu-label">Keep it fresh</p>
+          <a class="new-item" href="#/managed"><b>Managed playlist</b><span>Rebuilt on a schedule (lives under Jobs)</span></a>
         </div>
+      </details>
+    </header>
+    <div class="layout">
+      <aside class="sidebar" aria-label="Your library">
+        <input id="lib-filter" type="search" placeholder="Filter playlists" aria-label="Filter playlists" />
+        <h2 class="lib-label">Playlists</h2>
+        <p id="lib-status" class="hint lib-status" aria-live="polite">Loading...</p>
+        <ul id="lib-playlists" class="lib-list"></ul>
+        <h2 class="lib-label">Library</h2>
+        <ul id="lib-library" class="lib-list"></ul>
       </aside>
 
       <main class="content">
@@ -1104,7 +1084,7 @@
 
           <div id="pl-editor" hidden>
             <header class="pl-editor-head">
-              <a href="#/playlists" class="pl-back">&larr; Playlists</a>
+              <a href="#/" class="pl-back">&larr; Library</a>
               <div class="pl-title-row">
                 <h1 id="pl-name"></h1>
                 <div class="pl-head-actions">
@@ -1193,6 +1173,19 @@
             </div>
             <p id="pl-live" class="visually-hidden" aria-live="polite"></p>
           </div>
+        </section>
+
+        <!-- Favourites of one service ("#/favourites/<service>", src/web/playlist-page.ts) -->
+        <section id="view-favourites" class="view" hidden>
+          <header id="fav-hero" class="pl-hero">
+            <span id="fav-cover" class="hero-cover gen-cover" aria-hidden="true"></span>
+            <div class="hero-text">
+              <p id="fav-eyebrow" class="eyebrow"></p>
+              <h1>Favourites</h1>
+              <div id="fav-actions" class="pl-actions"></div>
+            </div>
+          </header>
+          <p class="hint">Your favourite songs will be listed here.</p>
         </section>
 
         <!-- Deduplicator -->
@@ -2297,15 +2290,33 @@
         <section id="view-accounts" class="view" hidden>
           <header class="view-header">
             <div class="view-title">
-              <h1>Accounts</h1>
+              <h1>Settings</h1>
               <p class="lede">
                 The music services crosstune works with. You sign in on each
                 service's own page; the sign-in is kept on this computer only.
               </p>
             </div>
           </header>
+          <h2 class="settings-head">Accounts</h2>
           <p id="accounts-error" class="error" hidden></p>
           <div id="accounts-list" class="accounts-list"></div>
+          <h2 class="settings-head">Artwork</h2>
+          <label
+            class="checkbox artwork-toggle"
+            title="Covers load straight from the music service's image server; no sign-in details are sent."
+          >
+            <input id="show-artwork" type="checkbox" aria-describedby="artwork-hint" />
+            Show album covers
+          </label>
+          <p id="artwork-hint" class="hint artwork-hint">
+            Covers load from Qobuz, TIDAL and Spotify's image servers, which tells them
+            which albums you are looking at. While this is off, covers are drawn from
+            the album's or playlist's name, and nothing leaves this computer.
+          </p>
+          <h2 class="settings-head">Your data</h2>
+          <p class="hint">
+            <a href="#/import-export">Import, export or back up everything</a>.
+          </p>
         </section>
 
         <section id="view-history" class="view" hidden>

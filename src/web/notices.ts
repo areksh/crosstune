@@ -7,6 +7,8 @@ import { el } from "./dom.js";
 export interface Notice {
   text: string;
   link?: { href: string; text: string };
+  /** More choices after the link; one with `onClick` acts instead of navigating. */
+  links?: { href: string; text: string; onClick?: () => void }[];
   /** Drawn as a problem rather than a reminder. */
   urgent?: boolean;
 }
@@ -24,12 +26,25 @@ export function showNotices(notices: readonly Notice[]): void {
       link.textContent = notice.link.text;
       line.append(" ", link);
     }
+    for (const choice of notice.links ?? []) {
+      const link = document.createElement("a");
+      link.href = choice.href;
+      link.textContent = choice.text;
+      const act = choice.onClick;
+      if (act !== undefined) {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          act();
+        });
+      }
+      line.append(" ", link);
+    }
     box.appendChild(line);
   }
   box.hidden = notices.length === 0;
 }
 
-const ACCOUNTS = { href: "#/accounts", text: "Open Accounts" };
+const ACCOUNTS = { href: "#/settings", text: "Open Settings" };
 
 /** What the accounts need. */
 export function accountNotices(accounts: readonly AccountView[]): Notice[] {
@@ -53,7 +68,7 @@ export function accountNotices(accounts: readonly AccountView[]): Notice[] {
   });
 }
 
-const MANAGED = { href: "#/managed", text: "Open Managed playlists" };
+const MANAGED = { href: "#/managed", text: "Open Jobs" };
 
 /** What the linked playlists need: conflicts loudly, waiting questions less. */
 export function linkNotices(attention: LinkAttention): Notice[] {

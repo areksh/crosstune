@@ -19,11 +19,17 @@ import { confirmDelete, editDetails, managedNotice, playlistHash, songCount } fr
 import { closeEditor, initPlaylistEditor, onDeleted, openEditor } from "./playlist-editor.js";
 import { knownLinks, LINKS_CHANGED } from "./links.js";
 import { linkMark } from "../../sync/wording.js";
+import type { ServiceName } from "../../services/names.js";
+import { parseRoute } from "../../ui/routes.js";
+import { knownPlaylist, refreshLibrary } from "../library.js";
+import { showAllActions } from "../playlist-page.js";
 
 let playlists: ManagerPlaylist[] = [];
 const ticked = new Set<PlaylistId>();
 let request = 0;
 let plan: RemoveArtistsPlan | undefined;
+/** The service whose playlists the list shows. */
+let listService: ServiceName | undefined;
 
 /** Wire up the playlists view. Call once on load. */
 export function initPlaylistsView(): void {
@@ -50,23 +56,28 @@ export function initPlaylistsView(): void {
   route();
 }
 
-/** Show the list or the editor, by the hash. */
+/** Show a playlist ("#/p/<id>") or a service's list ("#/all/<service>"), by the hash. */
 function route(): void {
-  const [view, id] = location.hash.replace(/^#\/?/, "").split("/");
-  if (view !== "playlists") {
+  const where = parseRoute(location.hash);
+  if (where.kind !== "playlist" && where.kind !== "all") {
     // Read it afresh next time: it may change meanwhile (an undo, another tool).
     // Unsaved edits have been asked about (guardUnsavedPlaylist).
     closeEditor();
     return;
   }
-  const open = id === undefined ? undefined : idInHash(id);
-  el("pl-list-page").hidden = open !== undefined;
-  el("pl-editor").hidden = open === undefined;
-  if (open !== undefined) {
-    void openEditor(open, playlists.find((p) => p.id === open));
+  el("pl-list-page").hidden = where.kind === "playlist";
+  el("pl-editor").hidden = where.kind !== "playlist";
+  if (where.kind === "playlist") {
+    void openEditor(where.id, playlists.find((p) => p.id === where.id) ?? knownPlaylist(where.id));
     window.scrollTo(0, 0);
   } else {
     closeEditor();
+    if (listService !== where.service) {
+      listService = where.service;
+      playlists = [];
+      ticked.clear();
+    }
+    showAllActions(where.service);
     void load();
   }
 }
@@ -85,7 +96,7 @@ async function load(): Promise<void> {
     el("pl-status").textContent = "Loading...";
   }
   try {
-    const result = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists");
+    const result = await api<{ playlists: ManagerPlaylist[] }>("GET", "/api/manager/playlists", undefined, listService);
     if (mine === request) {
       playlists = result.playlists;
       const ids = new Set(playlists.map((p) => p.id));
@@ -248,7 +259,7 @@ async function rename(playlist: ManagerPlaylist): Promise<void> {
   const changes = await editDetails(playlist);
   if (changes !== undefined) {
     await change("Saving...", async () => {
-      await api("POST", "/api/manager/update", { playlistId: playlist.id, ...changes });
+      await api("POST", "/api/manager/update", { playlistId: playlist.id, ...changes }, serviceOf(playlist.id));
       return "Saved its details.";
     });
   }
@@ -278,7 +289,7 @@ async function duplicate(playlist: ManagerPlaylist): Promise<void> {
 async function remove(playlist: ManagerPlaylist): Promise<void> {
   if (await confirmDelete(playlist)) {
     await change("Deleting...", async () => {
-      await api("POST", "/api/manager/delete", { playlistId: playlist.id });
+      await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
       ticked.delete(playlist.id);
       return `Deleted ${playlist.name}. You can undo this in History.`;
     });
@@ -333,7 +344,7 @@ async function findArtists(): Promise<void> {
     plan = await api<RemoveArtistsPlan>("POST", "/api/manager/remove-artists/resolve", {
       playlistIds: [...ticked],
       lines,
-    });
+    }, listService);
     renderPlan(plan);
   } catch (error) {
     showError(el("pl-artists-error"), (error as Error).message);
@@ -405,15 +416,6 @@ function renderHit({ entry, as, names }: ArtistHit, playlistId: PlaylistId): HTM
   return row;
 }
 
-/** The playlist a hash names; an address that cannot be read names none. */
-function idInHash(text: string): PlaylistId | undefined {
-  try {
-    return readId<PlaylistId>(decodeURIComponent(text));
-  } catch {
-    return undefined;
-  }
-}
-
 function tickedHits(): Map<PlaylistId, EntryId[]> {
   const removals = new Map<PlaylistId, EntryId[]>();
   for (const box of document.querySelectorAll<HTMLInputElement>("#pl-artists-hits .pl-hit:checked")) {
@@ -457,12 +459,13 @@ async function removeArtists(): Promise<void> {
   const panel = el("pl-artists");
   panel.inert = true;
   try {
-    const { reports } = await api<{ reports: RemovalReport[] }>("POST", "/api/manager/remove-artists/commit", { removals });
+    const { reports } = await api<{ reports: RemovalReport[] }>("POST", "/api/manager/remove-artists/commit", { removals }, listService);
     const removed = reports.reduce((n, report) => n + report.removed, 0);
     const failed = reports.filter((report) => report.error !== undefined);
     closeArtists();
     ticked.clear();
     await load();
+    void refreshLibrary();
     say(removed === 0 ? "Nothing was removed." : `Removed ${songCount(removed)}. You can undo this in History.`);
     if (failed.length > 0) {
       const nameOf = (id: PlaylistId): string => playlists.find((p) => p.id === id)?.name ?? `playlist ${shortId(id)}`;

@@ -4,10 +4,11 @@ import { labelOf } from "../../services/errors.js";
 import { serviceOf, shortId, type PlaylistId } from "../../services/ids.js";
 import type { ManagerPlaylist } from "../../features/playlist-manager.js";
 import { dialogField, openDialog, textInput } from "../dialog.js";
+import { routeHash } from "../../ui/routes.js";
 
 /** The page address of a playlist (Qobuz's keep the short form they always had). */
 export function playlistHash(id: PlaylistId): string {
-  return `#/playlists/${encodeURIComponent(shortId(id))}`;
+  return routeHash({ kind: "playlist", id });
 }
 
 /** A playlist as text a tool's link box takes: a link where one is known, else its id. */
