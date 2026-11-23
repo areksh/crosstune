@@ -2,8 +2,7 @@
  * Defensive parsers from Spotify's JSON to the neutral model (../model.ts).
  *
  * Nothing is guessed: what a response leaves out stays absent. Spotify gives no
- * quality, and `is_playable` is not read, as it is not known when to trust it
- * (see service.ts).
+ * quality; `is_playable` is read where it is given (see service.ts).
  */
 
 import { tagId, type AlbumId, type AnyId, type ArtistId, type PlaylistId, type TrackId, type UserId } from "../ids.js";
@@ -112,6 +111,10 @@ export function parseTrack(item: unknown): Track | undefined {
     image: coverOf(album["images"]),
     duration: secondsOf(item),
     url: linkOf(item),
+    // Whether the user can play it, given without a market (seen live). The
+    // service still claims no playability, so tidy-ups leave Spotify alone;
+    // a sync takes a removed song that is still playable as removed.
+    streamable: typeof item["is_playable"] === "boolean" ? item["is_playable"] : undefined,
   });
 }
 
@@ -216,7 +219,8 @@ export function parsePlaylist(item: unknown): Playlist | undefined {
     name: item["name"],
     trackCount: isRecord(item["items"]) ? number(item["items"]["total"]) : undefined,
     description: text(typeof item["description"] === "string" ? item["description"].trim() : undefined),
-    isPublic: flag(item["public"]),
+    // `public` is not read: live, every read says true, of private playlists
+    // too (it means "shown on the profile", and reads do not report it).
     isCollaborative: flag(item["collaborative"]),
     ownerId: isRecord(item["owner"]) ? tagged<UserId>(item["owner"]["id"]) : undefined,
     url: linkOf(item),

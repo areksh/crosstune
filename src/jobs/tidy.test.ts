@@ -49,6 +49,21 @@ describe("findTidyFindings", () => {
     expect(result.checked?.map((entry) => entry.trackId)).toEqual([qid(3), qid(1), qid(5)]);
   });
 
+  // Spotify says whether a song plays (seen live) but claims no playability:
+  // nothing unattended acts on it.
+  it("repairs nothing on a service that does not claim to know what plays", async () => {
+    const account = richAccount();
+    const id = account.seedPlaylist("Mix", [qid(1), qid(3)]);
+    const tracks = await account.getPlaylistTracks(id);
+    const unsure = Object.assign(Object.create(account), { capabilities: { playability: { ok: false, reason: "not claimed" } } });
+    const result = await findTidyFindings(unsure, all, ["repair"], { type: "playlist", playlistId: id }, tracks, {
+      now: NOW,
+      state: {},
+      favouriteDates: new Map(),
+    });
+    expect(result.findings).toEqual([]);
+  });
+
   it("does not search again for tracks checked recently", async () => {
     const account = richAccount();
     const id = account.seedPlaylist("Mix", [qid(1)]);

@@ -11,6 +11,7 @@
  * - a playlist read names the snapshot of its last change of name or
  *   description, not of its items (seen live): it cannot be written against;
  * - an empty description is ignored (seen live);
+ * - a read says every playlist is public (seen live, of a private one);
  * - adding names a position but no snapshot, and keeps repeats;
  * - local files can be neither added nor removed, only moved;
  * - search and an artist's albums give 10 at most, the library takes 40 URIs;
@@ -350,7 +351,7 @@ export class FakeSpotify {
       id,
       name: playlist.name,
       description: playlist.description,
-      public: playlist.isPublic,
+      public: true,
       collaborative: playlist.collaborative,
       owner: { id: playlist.owner },
       snapshot_id: playlist.shown ?? [...playlist.snapshots.keys()][0],

@@ -49,6 +49,8 @@ describe("parseTrack", () => {
       trackNumber: 8,
       duration: 305,
       url: "https://open.spotify.com/track/t1",
+      // Given without a market (seen live): whether the user can play it.
+      streamable: false,
     });
   });
 
@@ -225,7 +227,7 @@ describe("parseArtist and parsePlaylist", () => {
       id: "spotify:p1",
       name: "Mix",
       description: "d",
-      isPublic: false,
+      // Not read: live, every read says public, private ones too (2026-11-23).
       isCollaborative: true,
       ownerId: "spotify:me",
       trackCount: 3,

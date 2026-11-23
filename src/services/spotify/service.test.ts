@@ -258,6 +258,14 @@ describe("SpotifyService playlists", () => {
     ]);
   });
 
+  // Live, a playlist made private read back as public, and was private.
+  it("does not take a read's word on whether a playlist is public", async () => {
+    const { service } = world();
+    const { id } = await service.createPlaylist("Mix");
+    expect((await service.getPlaylist(id)).isPublic).toBeUndefined();
+    expect((await service.updatePlaylist(id, { isPublic: false })).isPublic).toBe(false);
+  });
+
   it("changes a playlist's details", async () => {
     const { service, fake } = world();
     fake.seedPlaylist("p", []);

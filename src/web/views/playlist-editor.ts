@@ -1394,9 +1394,10 @@ function renderMore(): void {
           }
         });
       }),
-      menuItem(playlist.isPublic === true ? "Make private" : "Make public", () =>
-        update({ isPublic: playlist.isPublic !== true }, playlist.isPublic === true ? "It is now private." : "It is now public."),
-      ),
+      // Both where the service does not say which it is (Spotify).
+      ...[true, false]
+        .filter((to) => playlist.isPublic === undefined || playlist.isPublic !== to)
+        .map((to) => menuItem(to ? "Make public" : "Make private", () => update({ isPublic: to }, to ? "It is now public." : "It is now private."))),
     );
   }
   items.push(menuItem("Duplicate...", () => void duplicateHere()));

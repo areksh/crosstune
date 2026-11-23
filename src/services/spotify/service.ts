@@ -16,12 +16,14 @@
  *    shows a write straight after it (6); search gives 10 a page (8);
  *    `DELETE /me/library?uris=` takes a playlist out, and with it out of the
  *    user's playlists (9, 10); `isrc:` search finds every copy, with
- *    `external_ids.isrc` (11); `is_playable` comes without a market (12; only
- *    `true` seen, so it is still not read); the library and follows read (14).
+ *    `external_ids.isrc` (11); `is_playable` comes without a market (12): read
+ *    into `streamable`, so a sync takes a removed song that still plays as
+ *    removed, but playability is not claimed, so no tidy-up removes by it;
+ *    the library and follows read (14).
  *  - Found: an empty description is ignored (a space clears it, and is read
- *    back as none); `public: false` on creating is answered as false, but every
- *    read says true -- for Spotify it means "shown on the profile", which reads
- *    are said not to report reliably.
+ *    back as none); `public: false` works (the user saw the playlist kept off
+ *    their profile), but every read says true, so it is not read: a playlist's
+ *    visibility is what was last set here, else unknown.
  *  - Not seen: local files (3); a null item (7); relinking (13); a 429 or
  *    QUOTA_EXCEEDED (15); an added song no longer offered (16); saving songs,
  *    albums or artists to the library (9, not probed: it writes to the user's).
@@ -281,7 +283,8 @@ export class SpotifyService implements MusicService {
         ...(description !== undefined && description !== "" && { description }),
       },
     });
-    return understood(parsePlaylist(answer), "playlist");
+    // What was asked for: Spotify's reads say "public" of every playlist.
+    return { ...understood(parsePlaylist(answer), "playlist"), isPublic };
   }
 
   async updatePlaylist(playlistId: PlaylistId, changes: PlaylistChanges): Promise<Playlist> {
@@ -295,7 +298,8 @@ export class SpotifyService implements MusicService {
       },
       repeatable: true,
     });
-    return this.getPlaylist(playlistId);
+    const playlist = await this.getPlaylist(playlistId);
+    return isPublic === undefined ? playlist : { ...playlist, isPublic };
   }
 
   /** Spotify deletes no playlists: it is taken out of the user's library. */

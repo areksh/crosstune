@@ -12,6 +12,7 @@
 
 import { compareIds, shortId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Track } from "../services/model.js";
+import type { Capabilities } from "../services/service.js";
 import {
   findDuplicateGroups,
   keptIndex,
@@ -171,7 +172,7 @@ export interface FindResult {
 
 /** What the due tidy-ups find in the target's tracks (searches, but writes nothing). */
 export async function findTidyFindings(
-  client: Pick<UpgradeResolverClient, "searchTracks">,
+  client: Pick<UpgradeResolverClient, "searchTracks"> & { readonly capabilities?: Pick<Capabilities, "playability"> },
   tidy: TidySet,
   kinds: readonly TidyKind[],
   target: TidyTarget,
@@ -183,7 +184,9 @@ export async function findTidyFindings(
   let checked: FindResult["checked"];
   let searched: TrackId[] = [];
   const wantsUpgrade = kinds.includes("upgrade") && tidy.upgrade !== undefined;
-  const wantsRepair = kinds.includes("repair") && tidy.repair !== undefined;
+  // Unattended, a song is taken as unplayable only where the service claims
+  // to know (Spotify tells of each song, but that is not trusted to remove).
+  const wantsRepair = kinds.includes("repair") && tidy.repair !== undefined && client.capabilities?.playability.ok !== false;
   if (wantsUpgrade || wantsRepair) {
     const entries: UpgradeEntry[] = tracks.flatMap((track): UpgradeEntry[] =>
       target.type === "favourites"
