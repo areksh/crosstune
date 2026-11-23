@@ -1,3 +1,4 @@
+import * as http from "node:http";
 import * as net from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,13 +19,15 @@ async function freePort(): Promise<number> {
 }
 
 async function visit(port: number, path: string): Promise<number | "refused"> {
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`);
-    await response.text();
-    return response.status;
-  } catch {
-    return "refused";
-  }
+  // Not fetch: that says `Sec-Fetch-Mode: cors`, which is not a page load.
+  return new Promise((resolve) => {
+    http
+      .get({ host: "127.0.0.1", port, path }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode ?? 0));
+      })
+      .on("error", () => resolve("refused"));
+  });
 }
 
 let open: SignInListener | undefined;
@@ -92,5 +95,35 @@ describe("signInListener", () => {
     } finally {
       other.close();
     }
+  });
+
+  describe("requests that are not page loads", () => {
+    const get = (port: number, headers: Record<string, string>): Promise<number> =>
+      new Promise((resolve, reject) => {
+        http
+          .get({ host: "127.0.0.1", port, path: "/?code_autorisation=junk", headers }, (res) => {
+            res.resume();
+            res.on("end", () => resolve(res.statusCode ?? 0));
+          })
+          .on("error", reject);
+      });
+
+    it("refuses an <img> or fetch without using up the sign-in", async () => {
+      const { listener, port } = await setup();
+      await listener.listen();
+      const host = { Host: `localhost:${port}` };
+      expect(await get(port, { ...host, "Sec-Fetch-Dest": "image", "Sec-Fetch-Mode": "no-cors" })).toBe(403);
+      expect(await get(port, { ...host, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors" })).toBe(403);
+      // Still waiting: the real redirect (a cross-site navigation) completes it.
+      expect(
+        await get(port, { ...host, "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "cross-site" }),
+      ).toBe(200);
+    });
+
+    it("lets a request without Fetch Metadata through", async () => {
+      const { listener, port } = await setup();
+      await listener.listen();
+      expect(await get(port, { Host: `localhost:${port}` })).toBe(200);
+    });
   });
 });

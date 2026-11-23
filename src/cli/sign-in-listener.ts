@@ -15,6 +15,19 @@ import { SIGN_IN_MINUTES } from "../accounts/sign-in.js";
 
 export const DEFAULT_SIGN_IN_PORT = 53683;
 
+/**
+ * Whether a request is not a page load. A browser says what it is fetching in
+ * `Sec-Fetch-Dest`/`-Mode`; an `<img src=...>` or `fetch` from another site
+ * must not end a sign-in, though the real redirect back (a cross-site
+ * top-level navigation) must, so `Sec-Fetch-Site` is not looked at. A request
+ * without these headers (curl, an old browser) is let through.
+ */
+export function isSubresourceRequest(headers: http.IncomingHttpHeaders): boolean {
+  const dest = headers["sec-fetch-dest"];
+  const mode = headers["sec-fetch-mode"];
+  return (dest !== undefined && dest !== "document") || (mode !== undefined && mode !== "navigate");
+}
+
 export type Listening = { ok: true } | { ok: false; problem: string };
 
 export interface SignInListener {
@@ -69,6 +82,12 @@ export function signInListener(options: {
       if (req.method !== "GET" || !target.includes("?") || !isOurs(req.headers.host, port)) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("Not found");
+        return;
+      }
+      // A page's <img> or fetch must not use up the sign-in that waits.
+      if (isSubresourceRequest(req.headers)) {
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("Forbidden");
         return;
       }
       void options.complete(target).then(
