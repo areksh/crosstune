@@ -7,7 +7,7 @@
  *   own file, see ./session-store.ts.)
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { AccountRecord, AccountStore } from "../accounts/accounts.js";
@@ -162,4 +162,9 @@ export function fileTokenVault(service: ServiceName, dir: string = configDir(), 
 
 export function removeTokens(service: ServiceName, dir: string = configDir()): void {
   rmSync(tokensPath(service, dir), { force: true });
+}
+
+/** Whether a sign-in to `service` is saved (not whether it still works). */
+export function hasSavedSignIn(service: ServiceName, dir: string = configDir()): boolean {
+  return existsSync(service === "qobuz" ? join(dir, "session.json") : tokensPath(service, dir));
 }

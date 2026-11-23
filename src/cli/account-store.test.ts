@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { tagId, type UserId } from "../services/ids.js";
 import type { Tokens } from "../services/oauth.js";
-import { fileAccountStore, fileTokenVault, removeTokens } from "./account-store.js";
+import { fileAccountStore, fileTokenVault, hasSavedSignIn, removeTokens } from "./account-store.js";
 
 let dir: string;
 beforeEach(() => {
@@ -105,5 +105,16 @@ describe("fileTokenVault", () => {
     });
     release();
     await held;
+  });
+});
+
+describe("hasSavedSignIn", () => {
+  it("says whether a sign-in is saved, Qobuz's in its own file", () => {
+    expect(hasSavedSignIn("qobuz", dir)).toBe(false);
+    writeFileSync(join(dir, "session.json"), "{}");
+    expect(hasSavedSignIn("qobuz", dir)).toBe(true);
+    expect(hasSavedSignIn("tidal", dir)).toBe(false);
+    fileTokenVault("tidal", dir).save(tokens);
+    expect(hasSavedSignIn("tidal", dir)).toBe(true);
   });
 });

@@ -379,7 +379,7 @@ import { SpotifyService } from "./services/spotify/service.js";
 import { TidalClient } from "./services/tidal/client.js";
 import { TIDAL_AUTHORIZE_URL, TIDAL_SCOPES, TIDAL_TOKEN_URL } from "./services/tidal/oauth-config.js";
 import { TidalService } from "./services/tidal/service.js";
-import { fileAccountStore, fileTokenVault, removeTokens } from "./cli/account-store.js";
+import { fileAccountStore, fileTokenVault, hasSavedSignIn, removeTokens } from "./cli/account-store.js";
 import { fileLinkStateStore, fileLinkStore } from "./cli/link-store.js";
 import { fileMatches } from "./cli/match-store.js";
 import type { LinkConnect } from "./sync/runner.js";
@@ -1425,11 +1425,18 @@ function showAccounts(): void {
   const store = fileAccountStore();
   const list = SERVICES.map((service) => {
     const account = store.account(service);
-    return { service, label: labelOf(service), ...(account !== undefined && { displayName: account.displayName }) };
+    return {
+      service,
+      label: labelOf(service),
+      ...(account !== undefined && { displayName: account.displayName }),
+      signedIn: hasSavedSignIn(service),
+    };
   });
   output.set("accounts", list);
-  for (const { label, displayName } of list) {
-    logger.info(`${label}: ${displayName ?? "not connected"}`);
+  for (const { label, displayName, signedIn } of list) {
+    // A sign-in saved before accounts were recorded is known by its first use.
+    const who = displayName ?? (signedIn ? "signed in (the account is recorded on the next ui, serve or run-due)" : undefined);
+    logger.info(`${label}: ${who === undefined ? "not connected" : signedIn ? who : `${who}, signed out`}`);
   }
 }
 
