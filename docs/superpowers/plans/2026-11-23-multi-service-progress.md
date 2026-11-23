@@ -7,11 +7,13 @@ stopping for TIDAL and Spotify details. Skip mockup approval; show the result.
 | Phase | State |
 |---|---|
 | 1 Common layer | Done, reviewed, fixed; live read-only checks matched byte for byte |
-| 2 Accounts | Core, routes, listener, CLI wiring, Accounts view, jobs per service done. Left: `login <service>`, register TIDAL/Spotify connectors, forget (data), capability reasons in tools, README, ADR-0011, review |
-| 3 TIDAL | Adapter being built by an agent in a worktree (branch from multi-service). Left: merge, register, probes with the user's app |
-| 4 Crossing | `features/match.ts` done. Left: matches file, transfer (resolve/commit), routes, destinations in the editor and tools, combined views, compare, CLI, ADR-0012 |
-| 5 Spotify | Adapter being built by an agent in a worktree. Left: merge, register, gap filling, probes |
-| 6 Sync | Not started: pure engine first (three-way merge, conflicts, write-ahead record), then job kind, UI, ADR-0013 |
+| 2 Accounts | Done: sign-in from the UI and `login <service>`, Accounts view, jobs per service, forget (matches, links, jobs, History), ADR-0011 |
+| 3 TIDAL | Adapter merged and registered. Left: probes with the user's app |
+| 4 Crossing | Done: matching, matches file, transfer resolve/commit, routes, "All services" views, send-to-service in the editor, `copy`, ADR-0012. Destination choice in the other tools: agent branch, merge pending |
+| 5 Spotify | Adapter merged and registered; top tracks and similar artists from another service. Left: probes |
+| 6 Sync | Engine, links store, runner with the jobs, routes, `sync`, undo pauses, ADR-0013 done. Web UI (links, conflicts, notices): agent branch, merge pending |
+
+Left before stopping: merge both web branches, whole-branch review and fixes.
 
 Needs the user: TIDAL client id, Spotify client id (Premium owner), one real
 sign-in to each, and leave to run probes with scratch playlists.
