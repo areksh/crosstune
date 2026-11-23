@@ -23,11 +23,14 @@ export interface ExtractedJsonFlag {
 /**
  * Pull the global `--json` flag out of an argument list. Like `--loglevel` it
  * may appear anywhere, before or after the command, so it is stripped before
- * per-command parsing.
+ * per-command parsing. It is not looked for after a bare `--`.
  */
 export function extractJsonFlag(argv: readonly string[]): ExtractedJsonFlag {
-  const rest = argv.filter((arg) => arg !== "--json");
-  return { json: rest.length !== argv.length, rest };
+  // A bare `--` ends the options: what follows is a value, even if it says --json.
+  const end = argv.indexOf("--");
+  const head = end === -1 ? argv : argv.slice(0, end);
+  const kept = head.filter((arg) => arg !== "--json");
+  return { json: kept.length !== head.length, rest: [...kept, ...(end === -1 ? [] : argv.slice(end))] };
 }
 
 /** Serialise a value as one pretty-printed JSON document, ending in a newline. */

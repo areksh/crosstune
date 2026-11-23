@@ -1348,3 +1348,46 @@ describe("parseCopyArgs", () => {
     expect(() => parseCopyArgs(argv)).toThrow();
   });
 });
+
+describe("unknown options in commands with positional arguments", () => {
+  it("playlist-from-artists rejects a mistyped or unsupported option instead of taking it as an artist", () => {
+    expect(() => parsePlaylistArgs(["--name", "X", "--publc", "Abba"])).toThrow('Unknown option "--publc"');
+    expect(() => parsePlaylistArgs(["--name", "X", "--apply", "Abba"])).toThrow('Unknown option "--apply"');
+    expect(() => parsePlaylistArgs(["--name", "X", "--tracks=5", "Abba"])).toThrow('Unknown option "--tracks=5"');
+  });
+
+  it("keeps single-dash and plain values as artists", () => {
+    expect(parsePlaylistArgs(["--name", "X", "-M-", "Abba"]).artists).toEqual(["-M-", "Abba"]);
+  });
+
+  it("a bare -- makes everything after it positional", () => {
+    expect(parsePlaylistArgs(["--name", "X", "--", "--weird", "--public"])).toMatchObject({
+      artists: ["--weird", "--public"],
+      isPublic: false,
+    });
+  });
+
+  it("a value-taking option does not swallow the next option", () => {
+    expect(() => parsePlaylistArgs(["--name", "--public", "Abba"])).toThrow("--name requires a value");
+    expect(() => parsePlaylistArgs(["--name"])).toThrow("--name requires a value");
+    expect(() => parsePlaylistArgs(["--name", "X", "--tracks", "--public"])).toThrow("--tracks requires a value");
+  });
+
+  it("playlist-from-albums and import apply the same rule", () => {
+    expect(() => parseAlbumArgs(["--name", "X", "--prefr", "a"])).toThrow('Unknown option "--prefr"');
+    expect(() => parseAlbumArgs(["--name", "--public", "A - B"])).toThrow("--name requires a value");
+    expect(parseAlbumArgs(["--name", "X", "--", "--A - B"]).entries).toEqual(["--A - B"]);
+    expect(() => parseImportArgs(["--favourites", "--aply", "f.csv"])).toThrow('Unknown option "--aply"');
+    expect(parseImportArgs(["--favourites", "--", "--f.csv"]).file).toBe("--f.csv");
+  });
+});
+
+describe("global flags stop at --", () => {
+  it("--loglevel after -- is a value, not the option", () => {
+    expect(extractLogLevel(["x", "--", "--loglevel=debug"])).toEqual({
+      level: "info",
+      rest: ["x", "--", "--loglevel=debug"],
+    });
+    expect(extractLogLevel(["--loglevel=debug", "--", "a"]).level).toBe("debug");
+  });
+});
