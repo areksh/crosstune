@@ -250,6 +250,42 @@ describe("resolveArtistTracks", () => {
     expect(result.resolvedArtists).toHaveLength(1);
   });
 
+  it("reports an artist whose search or tracks fail, and carries on", async () => {
+    const client = stubClient({
+      artistsByQuery: { A: [{ id: 1, name: "A" }], C: [{ id: 3, name: "C" }] },
+      tracksByArtist: { 1: [{ id: 100, title: "a" }], 3: [{ id: 300, title: "c" }] },
+    });
+    const search = client.searchArtists as ReturnType<typeof vi.fn>;
+    const searchArtists = search.getMockImplementation()!;
+    search.mockImplementation(async (query: string) => {
+      if (query === "B") throw new ServiceError("qobuz", "api-response", "HTTP 500");
+      return searchArtists(query);
+    });
+    client.getArtistTopTracks.mockImplementation(async (artistId: number) => {
+      if (artistId === 3) throw new ServiceError("qobuz", "network", "timed out");
+      return [{ id: 100, title: "a" }];
+    });
+
+    const result = await resolveArtistTracks(client, { artists: ["A", "B", "C"] });
+
+    expect(result.resolvedArtists.map((r) => r.query)).toEqual(["A"]);
+    expect(result.unresolvedArtists).toEqual([
+      "B (could not be looked up)",
+      "C (its songs could not be fetched)",
+    ]);
+  });
+
+  it.each(["authentication", "rate-limited", "quota"])(
+    "stops on a %s error, which every artist would run into",
+    async (kind) => {
+      const client = stubClient({ artistsByQuery: { A: [{ id: 1, name: "A" }] } });
+      (client.searchArtists as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new ServiceError("qobuz", kind, "no"),
+      );
+      await expect(resolveArtistTracks(client, { artists: ["A", "B"] })).rejects.toThrow("no");
+    },
+  );
+
   it("flags a matched artist with no tracks and drops it from the list", async () => {
     const client = stubClient({
       artistsByQuery: {

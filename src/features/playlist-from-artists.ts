@@ -32,6 +32,7 @@ import {
 import type { Artist, Playlist, Track } from "../services/model.js";
 import { findArtistByName } from "./artist-match.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
+import { stopsEverySong } from "./match.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
@@ -233,19 +234,25 @@ export async function resolveArtistTracks(
 
   // Look up and fetch with a bounded pool. Results come back in input order
   // (see mapWithConcurrency), so the grouped-by-artist preview keeps the order
-  // the user typed regardless of which lookups finished first.
+  // the user typed regardless of which lookups finished first. A lookup or
+  // fetch that fails is that artist's problem alone (reported unresolved);
+  // one every artist would run into (signed out, rate-limited) ends the run.
   const lookups = await mapWithConcurrency(
     options.artists,
     DEFAULT_CONCURRENCY,
     async (query): Promise<(ArtistMatch & { pool: Track[] }) | { problem: string }> => {
-      const match = await lookUpArtist(client, query);
+      const match = await failsAlone(
+        () => lookUpArtist(client, query),
+        `${query} (could not be looked up)`,
+      );
       if ("problem" in match || tracksPerArtist === 0) {
         return { ...match, pool: [] };
       }
-      return {
-        ...match,
-        pool: await fetchTopTrackPool(client, match.artist.id, tracksPerArtist, deep),
-      };
+      const pool = await failsAlone(
+        () => fetchTopTrackPool(client, match.artist.id, tracksPerArtist, deep),
+        `${query} (its songs could not be fetched)`,
+      );
+      return "problem" in pool ? pool : { ...match, pool };
     },
   );
   // Then take each artist's tracks in input order: the picker's "first copy"
@@ -299,6 +306,25 @@ export async function resolveArtistTracks(
   });
 
   return { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists };
+}
+
+/**
+ * Run one artist's request, turning a failure into a `problem` to report
+ * against that artist alone; an error every artist would run into (see
+ * {@link stopsEverySong}) is rethrown.
+ */
+async function failsAlone<T>(
+  request: () => Promise<T>,
+  problem: string,
+): Promise<T | { problem: string }> {
+  try {
+    return await request();
+  } catch (error) {
+    if (stopsEverySong(error)) {
+      throw error;
+    }
+    return { problem };
+  }
 }
 
 /**
