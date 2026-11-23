@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
+
 import type { Artist, Playlist, Track } from "../services/model.js";
 import {
   addTracksToExistingPlaylist,
@@ -592,6 +594,18 @@ describe("resolveArtistTracks with Qobuz links", () => {
       `${missing} (no Qobuz artist has this id)`,
     ]);
     expect(client.searchArtists).not.toHaveBeenCalled();
+  });
+
+  it("gives the reason a link to another service's artist was not found here", async () => {
+    const client = stubClient({});
+    client.getArtist = vi.fn(async () => {
+      throw new ServiceError("qobuz", "not-connected", "That is a Spotify link. Connect Spotify to find it on Qobuz.");
+    });
+    const link = "https://open.spotify.com/artist/4uLU6hMCjMI75M1A2tKUQC";
+
+    const result = await resolveArtistTracks(client, { artists: [link] });
+
+    expect(result.unresolvedArtists).toEqual([`${link} (That is a Spotify link. Connect Spotify to find it on Qobuz.)`]);
   });
 });
 

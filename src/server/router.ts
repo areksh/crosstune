@@ -97,7 +97,7 @@ import {
   type MatchedItem,
 } from "../features/import-export.js";
 import { createZip } from "../features/zip.js";
-import { parsePlaylistId } from "../features/qobuz-links.js";
+import { parsePlaylistId } from "../features/music-links.js";
 import {
   createSongPicker,
   parseSongPickerState,

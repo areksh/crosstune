@@ -3,13 +3,17 @@
  * no artist top tracks and no similar artists, so they come from Qobuz or TIDAL
  * and are found again on Spotify. Only exact matches by the same artist are
  * given, as managed playlists write them without review (ADR-0012).
+ *
+ * Likewise an artist or album id of another service -- a pasted Spotify link
+ * in a tool running on Qobuz -- is read there and found again here: an artist
+ * by its exact name, an album by its barcode, else its exact title and artist.
  */
 
 import { matchTracks, type MatchMemory } from "../features/match.js";
 import { normaliseArtistName } from "../features/track-filter.js";
 import { labelOf, ServiceError } from "./errors.js";
-import type { ArtistId } from "./ids.js";
-import type { Artist, Track } from "./model.js";
+import { serviceOf, type AlbumId, type AnyId, type ArtistId } from "./ids.js";
+import type { Album, Artist, Track } from "./model.js";
 import type { Capabilities, Capability, MusicService } from "./service.js";
 
 /** The capabilities this fills, and how a service is asked for them. */
@@ -20,9 +24,19 @@ const FILLED = ["topTracks", "similarArtists"] as const;
  * asked in order). A service without gaps is returned as it is.
  */
 export function fillGaps(service: MusicService, donors: () => readonly MusicService[], matches: MatchMemory): MusicService {
-  if (FILLED.every((name) => service.capabilities[name]?.ok !== false)) {
-    return service;
-  }
+  const label = labelOf(service.name);
+  /** The connected service an id of another is on. */
+  const owner = (id: AnyId): MusicService => {
+    const name = serviceOf(id);
+    const found = donors().find((donor) => donor.name === name);
+    if (found === undefined) {
+      const theirs = labelOf(name);
+      throw new ServiceError(service.name, "not-connected", `That is a ${theirs} link. Connect ${theirs} to find it on ${label}.`);
+    }
+    return found;
+  };
+  const notHere = (what: string): ServiceError => new ServiceError(service.name, "not-found", `${what} is not on ${label}`);
+
   const helping = (capability: (typeof FILLED)[number]): MusicService[] =>
     donors().filter((donor) => donor.name !== service.name && donor.capabilities[capability]?.ok === true);
   const none = (what: string): ServiceError =>
@@ -40,6 +54,33 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
   };
 
   const overrides: Partial<MusicService> = {
+    getArtist: async (artistId: ArtistId): Promise<Artist> => {
+      if (serviceOf(artistId) === service.name) {
+        return service.getArtist(artistId);
+      }
+      const { name } = await owner(artistId).getArtist(artistId);
+      const wanted = normaliseArtistName(name);
+      const found = (await service.searchArtists(name, 10)).find((artist) => normaliseArtistName(artist.name) === wanted);
+      if (found === undefined) {
+        throw notHere(name);
+      }
+      return found;
+    },
+    getAlbum: async (albumId: AlbumId): Promise<Album> => {
+      if (serviceOf(albumId) === service.name) {
+        return service.getAlbum(albumId);
+      }
+      const theirs = await owner(albumId).getAlbum(albumId);
+      const candidates = await service.searchAlbums(`${theirs.artist} ${theirs.title}`, 20);
+      const barcode = barcodeOf(theirs);
+      const found =
+        (barcode === undefined ? undefined : candidates.find((album) => barcodeOf(album) === barcode)) ??
+        candidates.find((album) => sameText(album.title, theirs.title) && sameText(album.artist, theirs.artist));
+      if (found === undefined) {
+        throw notHere(`${theirs.artist} - ${theirs.title}`);
+      }
+      return found;
+    },
     getArtistTopTracks: async (artistId: ArtistId, limit = 10): Promise<Track[]> => {
       if (service.capabilities.topTracks.ok) {
         return service.getArtistTopTracks(artistId, limit);
@@ -85,6 +126,7 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
     },
   };
 
+  const gaps = FILLED.some((name) => service.capabilities[name]?.ok === false);
   const capabilities = (): Capabilities => {
     const out = { ...service.capabilities };
     for (const name of FILLED) {
@@ -99,7 +141,7 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
   return new Proxy(service, {
     get(target, property, receiver) {
       if (property === "capabilities") {
-        return capabilities();
+        return gaps ? capabilities() : target.capabilities;
       }
       if (typeof property === "string" && property in overrides) {
         return overrides[property as keyof typeof overrides];
@@ -110,3 +152,13 @@ export function fillGaps(service: MusicService, donors: () => readonly MusicServ
   });
 }
 
+
+/** A UPC and the EAN-13 it becomes compare equal; undefined when there is none. */
+function barcodeOf(album: Album): string | undefined {
+  const digits = album.upc?.replace(/\D/g, "").replace(/^0+/, "");
+  return digits === undefined || digits.length === 0 ? undefined : digits;
+}
+
+function sameText(a: string, b: string): boolean {
+  return normaliseArtistName(a) === normaliseArtistName(b);
+}

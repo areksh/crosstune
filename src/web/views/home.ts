@@ -8,7 +8,7 @@
  * and opens it. Nothing is sent to the server until the tool runs.
  */
 
-import { classifyPaste, type PasteSummary } from "../../features/qobuz-links.js";
+import { classifyPaste, type PasteSummary } from "../../features/music-links.js";
 import { el } from "../dom.js";
 import { storePrefill, type Prefill } from "../prefill.js";
 

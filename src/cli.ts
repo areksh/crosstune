@@ -23,7 +23,7 @@
  *       [--exclude-artist <name>]... [--order by-artist|take-turns|shuffle] \
  *       [--skip-favourites] [--one-copy] [--fit <minutes>] "Artist One" ...
  *       Build a playlist from the given artists' top tracks. Artist names (or
- *       Qobuz artist links) may also be piped on stdin, one per line. Tracks whose title, album's
+ *       artist links) may also be piped on stdin, one per line. Tracks whose title, album's
  *       title or performer matches an exclude term -- or, with
  *       --skip-favourites, already in your favourites, or with --one-copy, a
  *       later copy of a song already in the playlist -- are replaced by the
@@ -36,7 +36,7 @@
  *       [--exclude-album <term>]... [--exclude-artist <name>]... \
  *       "Artist One - Album One" ...
  *       Build a playlist from whole albums. Each entry is "Artist - Album" or
- *       a Qobuz album link (that exact release); entries may also be piped on
+ *       an album link (that exact release); entries may also be piped on
  *       stdin, one per line. When an album has
  *       several versions, --prefer picks one: highest-quality (default), newest,
  *       or oldest. Releases matching --exclude-album are never picked; tracks
@@ -66,7 +66,7 @@
  *
  *   qobuz-helper remove-artists (--playlist <id>... | --all-playlists)
  *                               [--include-guests] [--apply] <artist>...
- *       Report the songs by these artists (names, Qobuz artist links or
+ *       Report the songs by these artists (names, artist links or
  *       /patterns/, also on stdin) in your playlists; with --apply, remove
  *       them. Songs where they are only a guest are kept unless
  *       --include-guests is given.
@@ -2678,7 +2678,7 @@ function printUsage(): void {
       "",
       "The session is saved after first sign-in and resumed automatically; use logout to clear it.",
       "Artist names (playlist-from-artists) and 'Artist - Album' lines (playlist-from-albums) may also be piped on stdin, one per line.",
-      "Qobuz links work wherever a list is typed: artist links for artists (also --discography), album links for albums (that exact release), and a playlist link wherever --playlist (or --add-to) takes an id.",
+      "Qobuz, Spotify and TIDAL links work wherever a list is typed: artist links for artists (also --discography), album links for albums (that exact release), and a playlist link wherever --playlist (or --add-to) takes an id. A link to another service than the one used is found again there by name (an album by its barcode first).",
       "Album version preferences: highest-quality (default), newest, oldest.",
       "--discography takes an artist's studio albums, oldest first, one version of each (per --prefer); --include widens the kinds (albums, eps, live, compilations), --all-versions keeps every edition.",
       "Exclude terms match whole words, ignoring case (\"live\" skips \"Live at Leeds\", not \"Alive\"); write /pattern/ for a regex. Repeat the flag for more terms.",
@@ -2688,7 +2688,7 @@ function printUsage(): void {
       "similar-artists defaults: --similar 3, --depth 1, --max-artists 100 (no upper limits), --tracks 3 (1-30), --seed-tracks 5 (0-100), --seeds 10 (1-50); --playlist adds only with --apply; very large runs need --yes.",
       "Keep strategies: first-added (default), last-added, highest-quality, oldest, newest; join several with commas to break ties (e.g. highest-quality,oldest).",
       "deduplicate reports only unless --apply is given; songs held in other versions (live, acoustic, remixes) are listed and kept, unless --include-versions counts them as duplicates.",
-      "remove-artists reports only unless --apply is given; it takes names, Qobuz artist links and /patterns/, also on stdin. Songs where they are only a guest are kept unless --include-guests is given.",
+      "remove-artists reports only unless --apply is given; it takes names, artist links and /patterns/, also on stdin. Songs where they are only a guest are kept unless --include-guests is given.",
       "new-releases defaults: the last 30 days, albums and eps, your favourite artists; it reports only unless --apply is given with --name or --favourite-albums.",
       "upgrade reports only unless --apply is given; it matches by ISRC unless --allow-signature-match is given.",
       "export writes to stdout unless --out is given; --account writes a full JSON backup; --all-playlists writes one file per playlist into --out-dir.",

@@ -223,19 +223,29 @@ at most 500 releases are read per artist. Qobuz labels live albums as plain
 albums, so a title or version saying "Live" makes a release a live album (and
 a greatest-hits title a compilation).
 
-#### Qobuz links
+#### Links
 
-Wherever a list is typed, a Qobuz link works too: an artist link in place of an
+Wherever a list is typed, a link works too: an artist link in place of an
 artist's name (looked up by its id, so no name search can pick the wrong
 artist), an album link in place of an "Artist - Album" line (that exact
 release, as the only version), and a playlist link wherever `--playlist` (or
-word-play's `--add-to`) takes an id. The player links
-(`https://play.qobuz.com/artist/41259`, `https://open.qobuz.com/album/<id>`,
-`.../playlist/<id>`, `.../track/<id>`) and the store's
-(`https://www.qobuz.com/gb-en/album/<slug>/<id>`,
-`https://www.qobuz.com/us-en/interpreter/<slug>/<id>`) are all recognised,
-with or without `https://`, query strings or a trailing slash. A link of the
-wrong kind -- an album link among artists -- is reported with the reason.
+word-play's `--add-to`) takes an id. Recognised, with or without `https://`,
+query strings or a trailing slash:
+
+- Qobuz: the player links (`https://play.qobuz.com/artist/41259`,
+  `https://open.qobuz.com/album/<id>`, `.../playlist/<id>`, `.../track/<id>`)
+  and the store's (`https://www.qobuz.com/gb-en/album/<slug>/<id>`,
+  `https://www.qobuz.com/us-en/interpreter/<slug>/<id>`);
+- Spotify: `https://open.spotify.com/artist/<id>` (also album, playlist and
+  track, with or without `intl-xx/`) and `spotify:artist:<id>`;
+- TIDAL: `https://tidal.com/browse/artist/<id>`, `https://tidal.com/album/<id>`,
+  `https://listen.tidal.com/playlist/<id>` and the like.
+
+A link to another service than the one a tool runs on is read there (so that
+service must be connected) and found again: an artist by its exact name, an
+album by its barcode, else by its exact title and artist. What is not found is
+reported with the reason, as is a link of the wrong kind -- an album link
+among artists.
 
 ```sh
 # Artists by link and by name, mixed
@@ -957,14 +967,14 @@ window. Track rows show a quality badge such as "24/96" (bit depth / sampling
 rate in kHz), lit up for hi-res.
 
 The home page opens with a paste box, *Start with a link or a list*: paste
-Qobuz links, artist names or "Artist - Album" lines, one per line. It says what
+links (Qobuz, Spotify or TIDAL), artist names or "Artist - Album" lines, one per line. It says what
 it found ("Found 1 playlist, 1 album and 1 artist.") and offers the tools that
 fit -- build a playlist from the artists or the albums, find similar artists,
 and for a playlist link: similar artists from it, upgrade & repair, library
 stats or the deduplicator (the last three when the playlist is yours). A
 button opens the tool with the list filled in. Nothing is looked up until the
 tool runs. The artists, albums and similar-artists lists take links as well as
-names (see [Qobuz links](#qobuz-links)), and *Similar artists* can start from a
+names (see [Links](#links)), and *Similar artists* can start from a
 pasted playlist link, not only from one of your playlists.
 
 Album covers are off by default. Tick *Show artwork* at the bottom of the

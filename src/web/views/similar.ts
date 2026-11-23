@@ -17,7 +17,7 @@
 import type { ArtistId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, type Artist, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
-import { parsePlaylistId } from "../../features/qobuz-links.js";
+import { parsePlaylistId } from "../../features/music-links.js";
 import { PlanControls } from "../plan.js";
 import { Destination } from "../transfer.js";
 import { keepUpdated } from "./managed.js";
@@ -33,7 +33,7 @@ import {
 interface SeedGroup {
   query: string;
   artist: Artist;
-  /** The line was a Qobuz artist link. */
+  /** The line was an artist link. */
   fromLink?: boolean;
   tracks: Track[];
   excluded: ExcludedTrack[];
@@ -224,7 +224,7 @@ function settingsBody(): { body: Record<string, unknown> } | { missing: string }
     const playlistId = sourcePlaylistId();
     if (playlistId === undefined) {
       const pasted = el<HTMLInputElement>("similar-source-link").value.trim().length > 0;
-      return { missing: pasted ? "That is not a Qobuz playlist link." : "Choose a playlist." };
+      return { missing: pasted ? "That is not a playlist link." : "Choose a playlist." };
     }
     source = {
       type: "playlist",

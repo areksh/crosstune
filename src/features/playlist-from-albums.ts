@@ -31,7 +31,7 @@ import type { AlbumId } from "../services/ids.js";
 import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
-import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";
+import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
   createPlaylistWithTracks,
   type PlaylistWriterClient,
@@ -83,7 +83,7 @@ export function parseAlbumEntry(line: string): AlbumEntry | undefined {
   return { artist, album };
 }
 
-/** A pasted Qobuz album link: one release, resolved by its id. */
+/** A pasted album link: one release, resolved by its id (found here if on another service). */
 export interface AlbumLinkEntry {
   /** The line as typed, for reporting. */
   link: string;
@@ -98,7 +98,7 @@ export interface AlbumLinkEntry {
 export function parseAlbumLine(
   line: string,
 ): { entry: AlbumEntry | AlbumLinkEntry } | { problem: string } {
-  const link = parseQobuzLink(line);
+  const link = parseMusicLink(line);
   if (link?.kind === "album") {
     return { entry: { link: line.trim(), albumId: link.id } };
   }
@@ -202,8 +202,8 @@ export async function resolveAlbumVersions(
           versions: [album],
           fromLink: true,
         };
-      } catch {
-        return `${input.link} (no Qobuz album has this id)`;
+      } catch (error) {
+        return `${input.link} (${linkNotFound({ kind: "album", id: input.albumId }, error)})`;
       }
     },
   );

@@ -32,7 +32,7 @@ import {
 import type { Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
-import { describeLinkMismatch, parseQobuzLink } from "./qobuz-links.js";
+import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
   createSongPicker,
   type FavouriteTracksClient,
@@ -517,7 +517,7 @@ export interface ArtistMatch {
 }
 
 /**
- * Find the artist a typed line names: a Qobuz artist link by its id, anything
+ * Find the artist a typed line names: an artist link by its id, anything
  * else by a name search ({@link pickArtist}). A link to something else (an
  * album, a playlist...) or to no artist is a problem, given as the line with
  * the reason; so is a name that matches nothing (the line alone).
@@ -526,7 +526,7 @@ export async function lookUpArtist(
   client: ArtistLookupClient,
   query: string,
 ): Promise<ArtistMatch | { problem: string }> {
-  const link = parseQobuzLink(query);
+  const link = parseMusicLink(query);
   if (link === undefined) {
     const artist = pickArtist(await client.searchArtists(query, ARTIST_SEARCH_LIMIT), query);
     return artist === undefined ? { problem: query } : { artist, fromLink: false };
@@ -536,8 +536,8 @@ export async function lookUpArtist(
   }
   try {
     return { artist: await client.getArtist(link.id), fromLink: true };
-  } catch {
-    return { problem: `${query} (no Qobuz artist has this id)` };
+  } catch (error) {
+    return { problem: `${query} (${linkNotFound(link, error)})` };
   }
 }
 

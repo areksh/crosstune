@@ -14,7 +14,7 @@ import { api, type ExcludedTrack, type Playlist, type Track } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
 import { PlanControls } from "../plan.js";
 import { Destination } from "../transfer.js";
-import { parseQobuzLink } from "../../features/qobuz-links.js";
+import { parseMusicLink } from "../../features/music-links.js";
 import {
   groupHead,
   inRankOrder,
@@ -32,7 +32,7 @@ interface Artist {
 interface ResolvedArtist {
   query: string;
   artist: Artist;
-  /** The line was a Qobuz artist link. */
+  /** The line was an artist link. */
   fromLink?: boolean;
   tracks: Track[];
   excluded: ExcludedTrack[];
@@ -322,7 +322,7 @@ function showResult(
   }
 }
 
-/** True when a typed line is a Qobuz link (shown by name, not as typed). */
+/** True when a typed line is a link (shown by name, not as typed). */
 function isLink(query: string): boolean {
-  return parseQobuzLink(query) !== undefined;
+  return parseMusicLink(query) !== undefined;
 }

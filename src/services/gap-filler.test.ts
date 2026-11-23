@@ -4,7 +4,8 @@ import { MemoryMatches } from "../features/match.js";
 import { ServiceError } from "./errors.js";
 import { fillGaps } from "./gap-filler.js";
 import { tagId, type ArtistId, type ServiceName, type TrackId } from "./ids.js";
-import type { Artist, Track } from "./model.js";
+import type { AlbumId } from "./ids.js";
+import type { Album, Artist, Track } from "./model.js";
 import { CAN, cannot, type MusicService } from "./service.js";
 
 const song = (service: ServiceName, n: number, over: Partial<Track> = {}): Track => ({
@@ -63,9 +64,9 @@ function qobuz(): MusicService {
 const artist = tagId<ArtistId>("spotify", 7);
 
 describe("fillGaps", () => {
-  it("leaves a service that has the capability as it is", () => {
+  it("leaves the capabilities of a service that has them as they are", () => {
     const full = qobuz();
-    expect(fillGaps(full, () => [], new MemoryMatches())).toBe(full);
+    expect(fillGaps(full, () => [], new MemoryMatches()).capabilities).toEqual(full.capabilities);
   });
 
   it("takes top tracks from another service, in its order, as the service's own songs", async () => {
@@ -119,5 +120,85 @@ describe("fillGaps", () => {
     await filled.searchArtists("x");
     expect(base.searchArtists).toHaveBeenCalledWith("x");
     expect(filled.name).toBe("spotify");
+  });
+});
+
+describe("fillGaps: another service's ids", () => {
+  const album = (service: ServiceName, n: number | string, over: Partial<Album> = {}): Album => ({
+    id: tagId<AlbumId>(service, n),
+    title: "Dummy",
+    artist: "Portishead",
+    ...over,
+  });
+
+  function here(over: Partial<MusicService> = {}): MusicService {
+    return {
+      name: "qobuz",
+      capabilities: { topTracks: CAN, similarArtists: CAN },
+      getArtist: vi.fn(async (id: ArtistId) => ({ id, name: "Own" })),
+      searchArtists: vi.fn(async () => [
+        { id: tagId<ArtistId>("qobuz", 1), name: "Portishead Tribute" },
+        { id: tagId<ArtistId>("qobuz", 2), name: "portishead" },
+      ]),
+      getAlbum: vi.fn(async (id: AlbumId) => album("qobuz", "own", { id })),
+      searchAlbums: vi.fn(async () => [
+        album("qobuz", "a", { title: "Dummy (Live)" }),
+        album("qobuz", "b"),
+        album("qobuz", "c", { upc: "0042282855329" }),
+      ]),
+      ...over,
+    } as unknown as MusicService;
+  }
+
+  const there = (over: Partial<MusicService> = {}) =>
+    spotify({ getAlbum: vi.fn(async (id: AlbumId) => album("spotify", "x", { id })), ...over } as Partial<MusicService>);
+
+  it("finds an artist linked on another service here, by its exact name", async () => {
+    const filled = fillGaps(here(), () => [there()], new MemoryMatches());
+    expect(await filled.getArtist(tagId<ArtistId>("spotify", 7))).toEqual({ id: "qobuz:2", name: "portishead" });
+  });
+
+  it("passes its own ids through", async () => {
+    const base = here();
+    const filled = fillGaps(base, () => [there()], new MemoryMatches());
+    await filled.getArtist(tagId<ArtistId>("qobuz", 5));
+    await filled.getAlbum(tagId<AlbumId>("qobuz", "z"));
+    expect(base.getArtist).toHaveBeenCalledWith("qobuz:5");
+    expect(base.getAlbum).toHaveBeenCalledWith("qobuz:z");
+  });
+
+  it("says when the artist is not here", async () => {
+    const filled = fillGaps(here({ searchArtists: vi.fn(async () => []) } as Partial<MusicService>), () => [there()], new MemoryMatches());
+    await expect(filled.getArtist(tagId<ArtistId>("spotify", 7))).rejects.toMatchObject({
+      kind: "not-found",
+      message: expect.stringMatching(/Portishead.*not on Qobuz/),
+    });
+  });
+
+  it("says to connect the service a link is to", async () => {
+    const filled = fillGaps(here(), () => [], new MemoryMatches());
+    await expect(filled.getArtist(tagId<ArtistId>("spotify", 7))).rejects.toMatchObject({
+      kind: "not-connected",
+      message: expect.stringMatching(/Spotify link.*[Cc]onnect Spotify/),
+    });
+  });
+
+  it("finds an album by its barcode first", async () => {
+    const theirs = there({ getAlbum: vi.fn(async () => album("spotify", "x", { upc: "042282855329" })) } as Partial<MusicService>);
+    const filled = fillGaps(here(), () => [theirs], new MemoryMatches());
+    expect((await filled.getAlbum(tagId<AlbumId>("spotify", "x"))).id).toBe("qobuz:c");
+  });
+
+  it("else by its exact title and artist", async () => {
+    const filled = fillGaps(here(), () => [there()], new MemoryMatches());
+    expect((await filled.getAlbum(tagId<AlbumId>("spotify", "x"))).id).toBe("qobuz:b");
+  });
+
+  it("says when the album is not here", async () => {
+    const filled = fillGaps(here({ searchAlbums: vi.fn(async () => []) } as Partial<MusicService>), () => [there()], new MemoryMatches());
+    await expect(filled.getAlbum(tagId<AlbumId>("spotify", "x"))).rejects.toMatchObject({
+      kind: "not-found",
+      message: expect.stringMatching(/Dummy.*not on Qobuz/),
+    });
   });
 });

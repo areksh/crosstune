@@ -4,10 +4,10 @@ import {
   classifyPaste,
   describeLinkMismatch,
   parsePlaylistId,
-  parseQobuzLink,
-} from "./qobuz-links.js";
+  parseMusicLink,
+} from "./music-links.js";
 
-describe("parseQobuzLink", () => {
+describe("parseMusicLink", () => {
   it.each([
     ["https://play.qobuz.com/artist/41259", { kind: "artist", id: "qobuz:41259" }],
     ["https://open.qobuz.com/artist/41259", { kind: "artist", id: "qobuz:41259" }],
@@ -40,7 +40,7 @@ describe("parseQobuzLink", () => {
       { kind: "label", id: "64873" },
     ],
   ])("parses %s", (url, expected) => {
-    expect(parseQobuzLink(url)).toEqual(expected);
+    expect(parseMusicLink(url)).toEqual(expected);
   });
 
   it("tolerates a missing scheme, http, case, spaces, trailing slashes, queries and fragments", () => {
@@ -53,7 +53,7 @@ describe("parseQobuzLink", () => {
       "<https://play.qobuz.com/artist/41259>",
       "qobuz.com/us-en/interpreter/portishead/41259",
     ]) {
-      expect(parseQobuzLink(url)).toEqual(expected);
+      expect(parseMusicLink(url)).toEqual(expected);
     }
   });
 
@@ -73,8 +73,61 @@ describe("parseQobuzLink", () => {
       "ftp://play.qobuz.com/artist/41259",
       "https://play.qobuz.com/artist/41259/extra/bits",
     ]) {
-      expect(parseQobuzLink(text)).toBeUndefined();
+      expect(parseMusicLink(text)).toBeUndefined();
     }
+  });
+});
+
+describe("parseMusicLink: Spotify", () => {
+  const id = "4uLU6hMCjMI75M1A2tKUQC";
+  it.each([
+    [`https://open.spotify.com/track/${id}`, { kind: "track", id: `spotify:${id}` }],
+    [`https://open.spotify.com/album/${id}?si=abc123`, { kind: "album", id: `spotify:${id}` }],
+    [`open.spotify.com/artist/${id}`, { kind: "artist", id: `spotify:${id}` }],
+    [`https://open.spotify.com/playlist/${id}`, { kind: "playlist", id: `spotify:${id}` }],
+    [`https://open.spotify.com/intl-de/track/${id}`, { kind: "track", id: `spotify:${id}` }],
+    [`https://open.spotify.com/embed/playlist/${id}`, { kind: "playlist", id: `spotify:${id}` }],
+    [`https://open.spotify.com/user/someone/playlist/${id}`, { kind: "playlist", id: `spotify:${id}` }],
+    [`spotify:album:${id}`, { kind: "album", id: `spotify:${id}` }],
+    [` <spotify:artist:${id}> `, { kind: "artist", id: `spotify:${id}` }],
+  ])("reads %s", (url, expected) => {
+    expect(parseMusicLink(url)).toEqual(expected);
+  });
+
+  it.each([
+    "https://open.spotify.com/track/short",
+    `https://open.spotify.com/show/${id}`,
+    `https://open.spotify.com.evil.example/track/${id}`,
+    `spotify:show:${id}`,
+    `spotify:track:${id}:extra`,
+    "https://open.spotify.com/",
+  ])("does not read %s", (text) => {
+    expect(parseMusicLink(text)).toBeUndefined();
+  });
+});
+
+describe("parseMusicLink: TIDAL", () => {
+  const uuid = "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d";
+  it.each([
+    ["https://tidal.com/browse/track/77646169", { kind: "track", id: "tidal:77646169" }],
+    ["https://tidal.com/track/77646169/u", { kind: "track", id: "tidal:77646169" }],
+    ["https://listen.tidal.com/album/77646164", { kind: "album", id: "tidal:77646164" }],
+    ["https://listen.tidal.com/album/77646164/track/77646169", { kind: "track", id: "tidal:77646169" }],
+    ["tidal.com/browse/artist/3995", { kind: "artist", id: "tidal:3995" }],
+    [`https://tidal.com/browse/playlist/${uuid}`, { kind: "playlist", id: `tidal:${uuid}` }],
+    [`https://listen.tidal.com/playlist/${uuid}?play=true`, { kind: "playlist", id: `tidal:${uuid}` }],
+  ])("reads %s", (url, expected) => {
+    expect(parseMusicLink(url)).toEqual(expected);
+  });
+
+  it.each([
+    "https://tidal.com/browse/track/abc",
+    "https://tidal.com/browse/playlist/77646169",
+    "https://tidal.com/browse/mix/0123abc",
+    "https://tidal.com.evil.example/browse/track/1",
+    "https://tidal.com/",
+  ])("does not read %s", (text) => {
+    expect(parseMusicLink(text)).toBeUndefined();
   });
 });
 
@@ -82,6 +135,12 @@ describe("parsePlaylistId", () => {
   it("accepts a positive id or a playlist link", () => {
     expect(parsePlaylistId("72685925")).toBe("qobuz:72685925");
     expect(parsePlaylistId(" https://play.qobuz.com/playlist/72685925 ")).toBe("qobuz:72685925");
+  });
+
+  it("accepts another service's playlist link", () => {
+    expect(parsePlaylistId("https://open.spotify.com/playlist/4uLU6hMCjMI75M1A2tKUQC")).toBe(
+      "spotify:4uLU6hMCjMI75M1A2tKUQC",
+    );
   });
 
   it("rejects anything else", () => {
@@ -141,9 +200,18 @@ describe("classifyPaste", () => {
     expect(classifyPaste(" \n").summary).toBe("Paste links or a list to begin.");
   });
 
-  it("keeps other Qobuz links apart", () => {
+  it("keeps other links apart", () => {
     const result = classifyPaste("https://play.qobuz.com/label/64873");
     expect(result.other).toEqual(["https://play.qobuz.com/label/64873"]);
-    expect(result.summary).toBe("Found 1 other Qobuz link.");
+    expect(result.summary).toBe("Found 1 other link.");
+  });
+
+  it("sorts Spotify and TIDAL links with Qobuz's", () => {
+    const result = classifyPaste(
+      "https://open.spotify.com/artist/4uLU6hMCjMI75M1A2tKUQC\nhttps://tidal.com/browse/album/77646164\nhttps://tidal.com/browse/playlist/0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+    );
+    expect(result.artists).toHaveLength(1);
+    expect(result.albums).toHaveLength(1);
+    expect(result.playlists.map((p) => p.id)).toEqual(["tidal:0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"]);
   });
 });

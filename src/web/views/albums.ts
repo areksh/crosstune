@@ -35,7 +35,7 @@ interface ResolvedAlbum {
   artist: string;
   album: string;
   versions: Album[];
-  /** The line was a Qobuz album link: the one release it names. */
+  /** The line was an album link: the one release it names. */
   fromLink?: boolean;
 }
 

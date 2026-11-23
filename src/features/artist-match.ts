@@ -14,7 +14,7 @@
 
 import type { ArtistId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
-import { parseQobuzLink } from "./qobuz-links.js";
+import { parseMusicLink } from "./music-links.js";
 import { compileArtistTerm, normaliseArtistName } from "./track-filter.js";
 
 /** One usable line: what it matches. */
@@ -37,7 +37,7 @@ export interface ParsedArtistTerms {
 
 /** The lines that are Qobuz links, which need looking up before matching. */
 export function linkLines(lines: readonly string[]): string[] {
-  return cleanLines(lines).filter((line) => parseQobuzLink(line) !== undefined);
+  return cleanLines(lines).filter((line) => parseMusicLink(line) !== undefined);
 }
 
 function cleanLines(lines: readonly string[]): string[] {
@@ -55,7 +55,7 @@ export function parseArtistTerms(
   const terms: ArtistTerm[] = [];
   const problems: ParsedArtistTerms["problems"] = [];
   for (const line of cleanLines(lines)) {
-    if (parseQobuzLink(line) !== undefined) {
+    if (parseMusicLink(line) !== undefined) {
       const found = links.get(line);
       if (found === undefined || "problem" in found) {
         problems.push({ line, reason: found?.problem ?? "this link has not been looked up" });

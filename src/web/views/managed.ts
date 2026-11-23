@@ -23,7 +23,7 @@ import type { AcceptOutcome, RunSummary } from "../../jobs/run-due.js";
 import type { JobView } from "../../jobs/service.js";
 import { signInFlags, type GlobalFlags, type RunRecord } from "../../jobs/stores.js";
 import { labelOf } from "../../services/errors.js";
-import { parsePlaylistId } from "../../features/qobuz-links.js";
+import { parsePlaylistId } from "../../features/music-links.js";
 import { api, type Playlist } from "../api.js";
 import { el, showError } from "../dom.js";
 import { storePrefill } from "../prefill.js";
@@ -866,7 +866,7 @@ async function readSource(kind: Kind): Promise<Record<string, unknown> | undefin
       const raw = el<HTMLInputElement>("managed-follow").value.trim();
       const playlistId = parsePlaylistId(raw);
       if (playlistId === undefined) {
-        throw new Error("Paste a Qobuz playlist link or id to follow.");
+        throw new Error("Paste a playlist link or id to follow.");
       }
       return { type: "follow", playlistId, keepRemoved: el<HTMLInputElement>("managed-follow-archive").checked };
     }

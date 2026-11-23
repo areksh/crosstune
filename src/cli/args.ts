@@ -41,7 +41,7 @@ import {
   type AlbumOrder,
   type PlaylistOrder,
 } from "../features/playlist-shape.js";
-import { parsePlaylistId } from "../features/qobuz-links.js";
+import { parsePlaylistId } from "../features/music-links.js";
 import { SIMILAR_SETTINGS, type SettingBounds } from "../features/similar-artists.js";
 import type { StatsSource } from "../features/stats.js";
 import type { UpgradeSource } from "../features/upgrade.js";

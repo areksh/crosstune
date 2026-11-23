@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
+
 import type { Album, Playlist, Track } from "../services/model.js";
 import {
   buildPlaylistFromAlbums,
@@ -444,7 +446,7 @@ describe("album links", () => {
   it("reports a link to no album, and an excluded linked release", async () => {
     const client = stubClient({});
     client.getAlbum = vi.fn(async (id: string) => {
-      if (id === "live") {
+      if (id === "qobuz:live") {
         return album({ id, title: "Live at Roseland", artist: "Portishead" });
       }
       throw new Error("album/get failed with HTTP 404");
@@ -452,8 +454,8 @@ describe("album links", () => {
 
     const result = await resolveAlbumVersions(client, {
       entries: [
-        { link: "https://play.qobuz.com/album/zzz", albumId: "zzz" },
-        { link: "https://play.qobuz.com/album/live", albumId: "live" },
+        { link: "https://play.qobuz.com/album/zzz", albumId: "qobuz:zzz" },
+        { link: "https://play.qobuz.com/album/live", albumId: "qobuz:live" },
       ],
       filter: compileTrackFilter({ excludeAlbums: ["live"] }),
     });
@@ -462,6 +464,19 @@ describe("album links", () => {
       "https://play.qobuz.com/album/zzz (no Qobuz album has this id)",
     ]);
     expect(result.excludedAlbums).toEqual(["Portishead - Live at Roseland"]);
+  });
+
+  it("gives the reason a link to another service's album was not found here", async () => {
+    const client = stubClient({});
+    client.getAlbum = vi.fn(async () => {
+      throw new ServiceError("qobuz", "not-found", "Portishead - Dummy is not on Qobuz");
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ link: "https://tidal.com/browse/album/1", albumId: "tidal:1" }],
+    });
+
+    expect(result.unresolvedAlbums).toEqual(["https://tidal.com/browse/album/1 (Portishead - Dummy is not on Qobuz)"]);
   });
 });
 
