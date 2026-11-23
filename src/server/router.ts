@@ -27,7 +27,9 @@ import {
   type TrackId,
   type UserId,
 } from "../services/ids.js";
-import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes } from "./playlist-routes.js";
+import type { MatchMemory } from "../features/match.js";
+import { MANAGER_PREFIX, MANAGER_WRITES, playlistRoutes, withWriteLock } from "./playlist-routes.js";
+import { TRANSFER_COMMIT, TRANSFER_PREFIX, transferRoutes } from "./transfer-routes.js";
 import {
   RELEASE_TYPES,
   ServiceError,
@@ -236,6 +238,10 @@ export interface ApiDeps {
    * the page chose, and `service`, `session` and `ownerId` are set from that.
    */
   accounts?: AccountDeps;
+  /** Remembered matches; with `accounts`, songs can be copied between services. */
+  matches?: MatchMemory;
+  /** The signed-in user's id on each service (with `accounts`). */
+  ownerIds?: ReadonlySet<UserId>;
   nonce: string;
   port: number;
   /** The change history; without it the history routes answer 404. */
@@ -305,7 +311,8 @@ export async function handleApi(
     if (deps.accounts !== undefined && req.path.startsWith(ACCOUNTS_PREFIX)) {
       return await accountRoutes(req, deps.accounts);
     }
-    return await dispatch(req, onChosenService(req, deps));
+    const refused = oneServiceOnly(req, deps);
+    return refused ?? (await dispatch(req, onChosenService(req, deps)));
   } catch (error) {
     if (error instanceof ServiceError) {
       if (error.kind === "authentication" && error.service !== undefined) {
@@ -336,6 +343,29 @@ export async function handleApi(
  */
 const STATUS_BY_KIND: Record<string, number> = { "bad-id": 400, unsupported: 400, "not-connected": 409, conflict: 409 };
 
+/** Where the page asks for every service at once. */
+const ALL_SERVICES = "all";
+
+/** The routes that can work on every service at once; the rest take one. */
+const FOR_ALL = [
+  "/api/session",
+  "/api/playlists",
+  "/api/stats",
+  "/api/combine/resolve",
+  "/api/export",
+  "/api/history",
+  "/api/jobs",
+  MANAGER_PREFIX,
+  TRANSFER_PREFIX,
+];
+
+function oneServiceOnly(req: ApiRequest, deps: ApiDeps): ApiResponse | undefined {
+  const all = req.headers.service === ALL_SERVICES && deps.accounts !== undefined;
+  return all && !FOR_ALL.some((path) => req.path.startsWith(path))
+    ? { status: 409, body: { error: "Choose one music service for this.", kind: "choose-service" } }
+    : undefined;
+}
+
 /** `deps` on the service the page chose, or the first that is connected. */
 function onChosenService(req: ApiRequest, deps: ApiDeps): ApiDeps {
   if (deps.accounts === undefined) {
@@ -344,11 +374,13 @@ function onChosenService(req: ApiRequest, deps: ApiDeps): ApiDeps {
   const { hub } = deps.accounts;
   const { service } = req.headers;
   const name = isServiceName(service) ? service : (hub.connected()[0] ?? "qobuz");
-  const chosen = hub.scoped(name);
+  const chosen = service === ALL_SERVICES ? hub.all(name) : hub.scoped(name);
   const account = chosen.account();
+  const ownerIds = new Set(hub.connected().flatMap((one) => hub.service(one).account()?.id ?? []));
   return {
     ...deps,
     service: chosen,
+    ownerIds,
     ...(account !== undefined && {
       session: { displayName: account.displayName, subscriptionLabel: account.plan ?? "", service: name },
       ownerId: account.id,
@@ -369,6 +401,7 @@ const WRITE_ROUTES: Record<string, string> = {
   "/api/import/commit": "import",
   "/api/restore": "restore",
   "/api/word-play/commit": "word-play",
+  [TRANSFER_COMMIT]: "transfer",
   ...Object.fromEntries(MANAGER_WRITES.map((path) => [path, "playlist-manager"])),
 };
 
@@ -391,6 +424,12 @@ async function dispatch(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
 async function route(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (req.path === "/api/jobs" || req.path.startsWith("/api/jobs/")) {
     return jobsRoute(req, deps);
+  }
+  if (req.path.startsWith(TRANSFER_PREFIX) && deps.accounts !== undefined && deps.matches !== undefined) {
+    const transfer = { hub: deps.accounts.hub, matches: deps.matches };
+    return req.path === TRANSFER_COMMIT
+      ? withWriteLock(deps, () => transferRoutes(req, transfer))
+      : transferRoutes(req, transfer);
   }
   if (req.path.startsWith(MANAGER_PREFIX)) {
     return playlistRoutes(req, deps);

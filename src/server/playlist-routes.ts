@@ -17,6 +17,7 @@ import {
   type TrackId,
 } from "../services/ids.js";
 import { managedKey, readKeys } from "../jobs/dependencies.js";
+import { unavailableIn } from "../services/hub.js";
 import { addConfirmed } from "../features/playlist-add.js";
 import type { Destination } from "../features/playlist-draft.js";
 import {
@@ -77,7 +78,7 @@ export async function playlistRoutes(req: ApiRequest, deps: ApiDeps): Promise<Ap
   }
 }
 
-async function withWriteLock(deps: ApiDeps, fn: () => Promise<ApiResponse>): Promise<ApiResponse> {
+export async function withWriteLock(deps: ApiDeps, fn: () => Promise<ApiResponse>): Promise<ApiResponse> {
   if (deps.acquireWriteLock === undefined) {
     return fn();
   }
@@ -99,7 +100,14 @@ async function read(req: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
     case "GET playlists": {
       const playlists = await service.getUserPlaylists();
       const jobs = jobInfo(deps);
-      return { status: 200, body: { playlists: playlists.map((playlist) => describe(playlist, deps, jobs)) } };
+      const unavailable = unavailableIn(service);
+      return {
+        status: 200,
+        body: {
+          playlists: playlists.map((playlist) => describe(playlist, deps, jobs)),
+          ...(unavailable.length > 0 && { unavailable }),
+        },
+      };
     }
     case "POST open": {
       const { playlist, entries } = await openPlaylist(service, playlistId(record(req.body)));
@@ -256,6 +264,9 @@ function jobInfo(deps: ApiDeps): JobInfo {
 }
 
 function isOwned(playlist: Playlist, deps: ApiDeps): boolean {
+  if (deps.ownerIds !== undefined) {
+    return playlist.ownerId === undefined || deps.ownerIds.has(playlist.ownerId);
+  }
   return deps.ownerId === undefined || playlist.ownerId === undefined || playlist.ownerId === deps.ownerId;
 }
 

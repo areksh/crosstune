@@ -699,6 +699,7 @@ export function toSummary(item: HistoryItem): HistorySummary {
 }
 
 const TOOL_NAMES: Record<string, string> = {
+  transfer: "Copy to another service",
   "playlist-from-artists": "Playlist from artists",
   "playlist-from-albums": "Playlist from albums",
   "similar-artists": "Similar artists",

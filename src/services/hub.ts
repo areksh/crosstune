@@ -58,6 +58,16 @@ export class ServiceHub implements Routed {
     return new ScopedService(this, name);
   }
 
+  /**
+   * The hub as every connected service at once: the user's own lists are all of
+   * theirs; a search or a new playlist goes to `name`. Listing the playlists
+   * leaves out a service that fails (see {@link unavailableIn}); the favourites
+   * are whole or an error, as what is missing from them would count as absent.
+   */
+  all(name: ServiceName): MusicService {
+    return new AllServices(this, name);
+  }
+
   #of(id: AnyId): MusicService {
     return this.service(serviceOf(id));
   }
@@ -212,6 +222,10 @@ class ScopedService extends ServiceHub implements MusicService {
     return this.#hub.scoped(name);
   }
 
+  override all(name: ServiceName): MusicService {
+    return this.#hub.all(name);
+  }
+
   get capabilities(): Capabilities {
     return this.service(this.name).capabilities;
   }
@@ -255,4 +269,54 @@ class ScopedService extends ServiceHub implements MusicService {
   async createPlaylist(name: string, options?: PlaylistOptions) {
     return this.service(this.name).createPlaylist(name, ...optional(options));
   }
+}
+
+/** A service left out of a list, and why. */
+export interface Unavailable {
+  service: ServiceName;
+  error: string;
+}
+
+/** See {@link ServiceHub.all}. */
+class AllServices extends ScopedService {
+  #unavailable: Unavailable[] = [];
+
+  get unavailable(): readonly Unavailable[] {
+    return this.#unavailable;
+  }
+
+  override async getUserPlaylists() {
+    const names = this.connected();
+    const lists = await Promise.allSettled(names.map((name) => this.service(name).getUserPlaylists()));
+    this.#unavailable = lists.flatMap((list, index) =>
+      list.status === "fulfilled"
+        ? []
+        : [{ service: names[index]!, error: list.reason instanceof Error ? list.reason.message : String(list.reason) }],
+    );
+    if (names.length > 0 && this.#unavailable.length === names.length) {
+      throw (lists[0] as PromiseRejectedResult).reason;
+    }
+    return lists.flatMap((list) => (list.status === "fulfilled" ? list.value : []));
+  }
+
+  override async getFavoriteTracks() {
+    return this.#every((service) => service.getFavoriteTracks());
+  }
+
+  override async getFavoriteAlbums() {
+    return this.#every((service) => service.getFavoriteAlbums());
+  }
+
+  override async getFavoriteArtists() {
+    return this.#every((service) => service.getFavoriteArtists());
+  }
+
+  async #every<T>(read: (service: MusicService) => Promise<T[]>): Promise<T[]> {
+    return (await Promise.all(this.connected().map((name) => read(this.service(name))))).flat();
+  }
+}
+
+/** The services the last playlist list of {@link ServiceHub.all} left out. */
+export function unavailableIn(service: unknown): readonly Unavailable[] {
+  return service instanceof AllServices ? service.unavailable : [];
 }

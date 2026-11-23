@@ -246,6 +246,7 @@ describe("recordingClient", () => {
       "connected",
       "service",
       "scoped",
+      "all",
     ]);
     const view = new ServiceHub().scoped("qobuz");
     for (const prototype of [QobuzService.prototype, ServiceHub.prototype, Object.getPrototypeOf(view)]) {

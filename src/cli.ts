@@ -378,6 +378,7 @@ import { TidalClient } from "./services/tidal/client.js";
 import { TIDAL_AUTHORIZE_URL, TIDAL_SCOPES, TIDAL_TOKEN_URL } from "./services/tidal/oauth-config.js";
 import { TidalService } from "./services/tidal/service.js";
 import { fileAccountStore, fileTokenVault, removeTokens } from "./cli/account-store.js";
+import { fileMatches } from "./cli/match-store.js";
 import { qobuzConnector } from "./cli/qobuz-connector.js";
 import { DEFAULT_SIGN_IN_PORT, signInListener, type SignInListener } from "./cli/sign-in-listener.js";
 import { homeService } from "./jobs/model.js";
@@ -846,6 +847,7 @@ async function startUi(
   return startServer({
     accounts: { accounts, hub, listen: () => listener.listen(), forget: (service) => forgetService(service) },
     history: { journal },
+    matches: fileMatches(),
     jobs: jobsApi(jobs, hub),
     acquireWriteLock: () => acquireLockWithin(jobsLockPath(), WRITE_LOCK_WAIT_MS),
     ...(options.port !== undefined && { port: options.port }),
