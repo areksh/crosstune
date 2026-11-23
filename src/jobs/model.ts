@@ -268,7 +268,8 @@ export interface OwnedEntry {
 
 export interface RunResultSummary {
   at: string;
-  status: "ok" | "partial" | "failed" | "paused";
+  /** `conflict`: a linked playlist whose copies disagree (src/sync). */
+  status: "ok" | "partial" | "failed" | "paused" | "conflict";
   added: number;
   removed: number;
   dismissed: number;
@@ -1029,7 +1030,7 @@ function resultSummary(raw: unknown): RunResultSummary {
   const suggested = optionalCount("suggested");
   return {
     at: optionalString(value["at"], "at") ?? "",
-    status: oneOf(value["status"], "status", ["ok", "partial", "failed", "paused"] as const),
+    status: oneOf(value["status"], "status", ["ok", "partial", "failed", "paused", "conflict"] as const),
     added: count("added"),
     removed: count("removed"),
     dismissed: count("dismissed"),

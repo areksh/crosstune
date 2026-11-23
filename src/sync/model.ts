@@ -83,6 +83,10 @@ export interface LinkState {
   /** When songs a service did not have were last looked for again. */
   gapsCheckedAt?: string;
   paused?: { since: string; reason: "undone" | "account-forgotten" };
+  nextRunAt?: string;
+  consecutiveFailures?: number;
+  /** The history entries of its recent syncs: undoing one pauses the link. */
+  entries?: string[];
 }
 
 export type LinkCopies = Partial<Record<ServiceName, PlaylistId>>;

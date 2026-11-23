@@ -44,7 +44,9 @@ export class SyncAccount implements SyncClient {
   }
 
   seed(name: string, songs: readonly number[]): PlaylistId {
-    const id = tagId<PlaylistId>(this.name, `pl${this.#next++}`);
+    // Qobuz names playlists by number.
+    const n = this.#next++;
+    const id = tagId<PlaylistId>(this.name, this.name === "qobuz" ? 9000 + n : `pl${n}`);
     this.#playlists.set(id, { name, owned: true, entries: songs.map((n) => this.#entry(n)) });
     return id;
   }
