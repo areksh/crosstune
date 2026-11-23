@@ -23,6 +23,7 @@ import { knownPlaylist, LIBRARY_LOADED } from "./library.js";
 import { applyPrefill, storePrefill } from "./prefill.js";
 import { chosenService, connectedServices, rememberService } from "./service.js";
 import { currentTab } from "./shell.js";
+import { editorHasUnsaved } from "./views/playlist-editor.js";
 
 /**
  * For each view, the address it was opened at as a hosted tool on this page
@@ -115,6 +116,10 @@ function unsavedPreviews(): string[] {
       ? [document.getElementById("ie-import-content")!]
       : []),
   ];
+  // The editor's own draft: unasked, its native prompt could be cancelled after the reload's side effects had run.
+  if (editorHasUnsaved()) {
+    titles.add("the playlist");
+  }
   for (const node of pending) {
     const view = node.closest<HTMLElement>(".view");
     titles.add(view?.querySelector("h1")?.textContent?.trim() || "a tool");

@@ -12,7 +12,7 @@ const STORAGE_KEY = "crosstune:service";
 /** A service, or every connected one at once. */
 export type Choice = ServiceName | "all";
 
-export function chosenService(): Choice | undefined {
+function readStored(): Choice | undefined {
   try {
     const value = localStorage.getItem(STORAGE_KEY);
     return isServiceName(value) || value === "all" ? value : undefined;
@@ -21,7 +21,15 @@ export function chosenService(): Choice | undefined {
   }
 }
 
-/** Remember the choice; undefined for the first that is connected. */
+/** The choice as this page loaded it; another tab's later choice does not reach it. */
+let chosen: Choice | undefined = readStored();
+
+/** The service this page works on: read once per page load. */
+export function chosenService(): Choice | undefined {
+  return chosen;
+}
+
+/** Remember the choice (for this page and the next load); undefined for the first that is connected. */
 export function rememberService(choice: Choice | undefined): void {
   try {
     if (choice === undefined) {
@@ -32,6 +40,8 @@ export function rememberService(choice: Choice | undefined): void {
   } catch {
     // Storage unavailable: the server's default is used.
   }
+  // Read back, so that with no storage the choice does not stick (callers check for that).
+  chosen = readStored();
 }
 
 let connected: readonly ServiceName[] = [];

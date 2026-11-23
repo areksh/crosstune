@@ -84,6 +84,8 @@ let activeFilter: FilterInput = { excludeTracks: [], excludeAlbums: [], excludeA
  */
 let activePlanOptions = { skipFavourites: false, oneCopy: false };
 let pickerState: unknown;
+/** Counts the previews: a fetch begun for an earlier one must not touch the new one's picker state. */
+let runId = 0;
 
 let controls: PlanControls;
 
@@ -207,6 +209,7 @@ async function onResolve(): Promise<void> {
       skipFavourites: el<HTMLInputElement>("album-skip-favourites").checked,
       oneCopy: el<HTMLInputElement>("album-one-copy").checked,
     };
+    runId += 1;
     pickerState = undefined;
     renderPreview(result);
   } catch (error) {
@@ -498,11 +501,16 @@ async function fetchPending(button: HTMLButtonElement, resultNode: HTMLElement):
 
   button.textContent = "Fetching...";
   fetchAttempted = true;
+  const run = runId;
   const result = await api<FetchResponse>("POST", "/api/album-tracks", {
     albumIds: toFetch.map((item) => item.id),
     filter: activeFilter,
     ...(pickerState === undefined ? activePlanOptions : { picker: pickerState }),
   });
+  if (run !== runId) {
+    // A newer preview replaced the one this was fetched for.
+    return;
+  }
   if (result.picker !== undefined) {
     pickerState = result.picker;
   }

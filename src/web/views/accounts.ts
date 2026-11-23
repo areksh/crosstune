@@ -13,6 +13,7 @@ import type { ServiceName } from "../../services/names.js";
 import { api } from "../api.js";
 import { openDialog } from "../dialog.js";
 import { el, showError } from "../dom.js";
+import { reloadHere } from "../hosting.js";
 import { chosenService, rememberService } from "../service.js";
 import { SETUP } from "./account-setup.js";
 import { isViewShown } from "../route-state.js";
@@ -264,10 +265,12 @@ async function poll(): Promise<void> {
 /** A service was connected: the rest of the page is loaded for it afresh. */
 async function connected(service: ServiceName): Promise<void> {
   waiting.delete(service);
-  if (chosenService() === undefined) {
-    rememberService(service);
-  }
-  location.reload();
+  // Asks first about unsaved previews in the other tools; staying keeps this page, which lists the account as connected.
+  await reloadHere(() => {
+    if (chosenService() === undefined) {
+      rememberService(service);
+    }
+  }, () => void load());
 }
 
 async function act(account: AccountView, action: "sign-out" | "retry" | "client-id" | "forget", extra: object = {}): Promise<void> {
@@ -276,10 +279,13 @@ async function act(account: AccountView, action: "sign-out" | "retry" | "client-
     await load();
     return;
   }
-  if (action !== "retry" && chosenService() === account.service) {
-    rememberService(undefined);
-  }
-  location.reload();
+  // Done on the server already, so the page must be loaded afresh to match; if the user would rather
+  // save something first, this page shows the new state of the accounts and the rest follows on the next load.
+  await reloadHere(() => {
+    if (action !== "retry" && chosenService() === account.service) {
+      rememberService(undefined);
+    }
+  }, () => void load());
 }
 
 async function forget(account: AccountView): Promise<void> {

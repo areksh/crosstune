@@ -293,15 +293,22 @@ async function deleteTicked(chosen: readonly ManagerPlaylist[]): Promise<void> {
     return;
   }
   const failed: string[] = [];
-  for (const playlist of chosen) {
-    try {
-      await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
-      ticked.delete(playlist.id);
-    } catch (error) {
-      failed.push(`${playlist.name}: ${(error as Error).message}`);
+  // The group's actions would act on the same ticks while the deletes run.
+  const actions = el("lib-group-actions");
+  actions.inert = true;
+  try {
+    for (const playlist of chosen) {
+      try {
+        await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
+        ticked.delete(playlist.id);
+      } catch (error) {
+        failed.push(`${playlist.name}: ${(error as Error).message}`);
+      }
     }
+    await refreshLibrary();
+  } finally {
+    actions.inert = false;
   }
-  await refreshLibrary();
   // The page showed one of them (its page, or a tool on it): go to its service's list.
   const here = parseRoute(location.hash);
   const gone = here.kind === "playlist" ? chosen.find((playlist) => playlist.id === here.id && !ticked.has(playlist.id)) : undefined;
