@@ -389,6 +389,7 @@ import { parseHistory, serializeRecords } from "./features/history.js";
 import { homeService, jobServices } from "./jobs/model.js";
 import { unflag } from "./jobs/stores.js";
 import { labelOf, ServiceError } from "./services/errors.js";
+import { fillGaps } from "./services/gap-filler.js";
 import { ServiceHub } from "./services/hub.js";
 import { isServiceName, SERVICES, type ServiceName } from "./services/names.js";
 import { QobuzService } from "./services/qobuz/service.js";
@@ -755,11 +756,17 @@ interface Connections {
 function openConnections(journal: Journal): Connections {
   const hub = new ServiceHub();
   const store = fileAccountStore();
+  const matches = fileMatches();
   const accounts = new Accounts({
     hub,
     store,
     connectors: connectors(store),
-    wrap: (service) => recordingClient<MusicService>(service, journal),
+    // What a service cannot say is asked of the others; every write is recorded.
+    wrap: (service) =>
+      recordingClient<MusicService>(
+        fillGaps(service, () => hub.connected().map((name) => hub.service(name)), matches),
+        journal,
+      ),
     onChange: (service) => {
       // A service that works again lets the jobs it stopped run.
       if (hub.connected().includes(service)) {

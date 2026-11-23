@@ -23,7 +23,8 @@ import type {
 } from "./model.js";
 
 /** Whether a service can do something, and if not, why (shown to the user). */
-export type Capability = { ok: true } | { ok: false; reason: string };
+/** `from`: the service that answers for it (see ./gap-filler.ts). */
+export type Capability = { ok: true; from?: ServiceName } | { ok: false; reason: string };
 
 export const CAN: Capability = { ok: true };
 
