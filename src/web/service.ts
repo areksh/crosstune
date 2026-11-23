@@ -6,7 +6,7 @@
 
 import { isServiceName, type ServiceName } from "../services/names.js";
 
-const STORAGE_KEY = "qobuz-helper:service";
+const STORAGE_KEY = "crosstune:service";
 
 /** A service, or every connected one at once. */
 export type Choice = ServiceName | "all";

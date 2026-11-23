@@ -364,7 +364,7 @@ describe("buildBackup and restoreBackup", () => {
   });
 
   it("rejects content that is not a backup", () => {
-    expect(() => parseBackup('{"tracks":[]}')).toThrow(/not a qobuz-helper backup/);
+    expect(() => parseBackup('{"tracks":[]}')).toThrow(/not a crosstune backup/);
   });
 });
 

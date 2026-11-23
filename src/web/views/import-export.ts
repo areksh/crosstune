@@ -295,7 +295,7 @@ function renderRestorePreview(content: string, errorNode: HTMLElement): void {
       `${data.favourites.artists?.length ?? 0} artists, ` +
       `${data.playlists?.length ?? 0} playlists`;
   } catch {
-    showError(errorNode, "This does not look like a qobuz-helper backup.");
+    showError(errorNode, "This does not look like a crosstune backup.");
     return;
   }
   currentPlan = undefined;

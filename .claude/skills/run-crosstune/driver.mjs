@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-// Drive the qobuz-helper web UI in headless Chromium over the DevTools protocol.
+// Drive the crosstune web UI in headless Chromium over the DevTools protocol.
 // No dependencies: Node 22's fetch and WebSocket, and the system's chromium-browser.
 //
-//   node .claude/skills/run-qobuz-helper/driver.mjs [--url http://127.0.0.1:4567] < steps.json
+//   node .claude/skills/run-crosstune/driver.mjs [--url http://127.0.0.1:4567] < steps.json
 //
 // steps.json is an array of steps, run in order:
 //   {"service": "all"|"qobuz"|"tidal"|"spotify"}  choose the music service (as the sidebar does)
-//   {"nav": "#/playlists"}       go to a view (a hash, or a whole URL)
+//   {"nav": "#/playlists"}       go to a view (a hash, or a whole URL); a hash alone does not reload
+//   {"reload": true}             load the page again (modules re-read their settings)
 //   {"waitFor": "<js expr>"}     poll until it is true (500 ms apart; "tries", default 120)
 //   {"click": "Button text"}     click the first visible button or link with exactly this text
 //   {"dialog": "Write it"}       click a button in the open <dialog>
 //   {"eval": "<js expr>"}        print its value (awaited, as JSON)
-//   {"shot": "name"}             screenshot to $TMPDIR/qobuz-helper-shots/name.png (never in the repo:
+//   {"shot": "name"}             screenshot to $TMPDIR/crosstune-shots/name.png (never in the repo:
 //                                a signed-in page shows account names and emails)
 //   {"sleep": 1000}
 // Page exceptions and console errors are printed at the end; the exit code is 1 if a
@@ -22,14 +23,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Outside the repo: a signed-in page shows account names and emails.
-const SHOTS = process.env.QOBUZ_HELPER_SHOTS ?? join(tmpdir(), "qobuz-helper-shots");
+const SHOTS = process.env.CROSSTUNE_SHOTS ?? join(tmpdir(), "crosstune-shots");
 const urlAt = process.argv.indexOf("--url");
 const BASE = urlAt === -1 ? "http://127.0.0.1:4567" : process.argv[urlAt + 1];
 const PORT = 9333 + Math.floor(Math.random() * 500);
 const steps = JSON.parse(readFileSync(0, "utf8"));
 
 mkdirSync(SHOTS, { recursive: true });
-const profile = mkdtempSync(join(tmpdir(), "qobuz-helper-chromium-"));
+const profile = mkdtempSync(join(tmpdir(), "crosstune-chromium-"));
 const browser = spawn(
   "chromium-browser",
   ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, "--window-size=1400,1000",
@@ -103,9 +104,14 @@ try {
 
   for (const step of steps) {
     if (step.service !== undefined) {
-      await evaluate(`localStorage.setItem("qobuz-helper:service", ${JSON.stringify(step.service)})`);
+      await evaluate(`localStorage.setItem("crosstune:service", ${JSON.stringify(step.service)})`);
       await go("");
       console.log(`service: ${step.service}`);
+    }
+    if (step.reload === true) {
+      await send("Page.reload");
+      await new Promise((r) => setTimeout(r, 1500));
+      console.log("reload");
     }
     if (step.nav !== undefined) {
       await go(step.nav);

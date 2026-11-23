@@ -1,4 +1,4 @@
-/** The music services qobuz-helper knows. */
+/** The music services crosstune knows. */
 
 export const SERVICES = ["qobuz", "tidal", "spotify"] as const;
 export type ServiceName = (typeof SERVICES)[number];

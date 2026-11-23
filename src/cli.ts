@@ -6,19 +6,19 @@
  * locally; later runs resume that session automatically until it expires or you
  * sign out. Commands:
  *
- *   qobuz-helper login
+ *   crosstune login
  *       Sign in (or resume a saved session) and persist it.
  *
- *   qobuz-helper logout
+ *   crosstune logout
  *       Discard the saved session.
  *
- *   qobuz-helper ui
+ *   crosstune ui
  *       Serve the local web UI and open it in the browser.
  *
- *   qobuz-helper check
+ *   crosstune check
  *       Vertical-slice smoke test (extraction -> sign-in -> one API call).
  *
- *   qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] \
+ *   crosstune playlist-from-artists --name "<name>" [--tracks N] [--public] \
  *       [--exclude-track <term>]... [--exclude-album <term>]... \
  *       [--exclude-artist <name>]... [--order by-artist|take-turns|shuffle] \
  *       [--skip-favourites] [--one-copy] [--fit <minutes>] "Artist One" ...
@@ -31,7 +31,7 @@
  *       about that many minutes, from the end of each artist's tracks in turn;
  *       --order chooses how it plays (default by-artist).
  *
- *   qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] \
+ *   crosstune playlist-from-albums --name "<name>" [--prefer <preference>] \
  *       [--public] [--discs <list>] [--exclude-track <term>]... \
  *       [--exclude-album <term>]... [--exclude-artist <name>]... \
  *       "Artist One - Album One" ...
@@ -45,14 +45,14 @@
  *       (trimming the end of the list) and --order as-listed|shuffle work as
  *       for playlist-from-artists, without replacements.
  *
- *   qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" \
+ *   crosstune playlist-from-albums --name "<name>" --discography "<artist>" \
  *       [--include albums,eps,live,compilations] [--all-versions] \
  *       [--prefer <preference>] [--public] [filters]
  *       The same, from an artist's releases (oldest first) instead of album
  *       lines: studio albums unless --include names other kinds, and one
  *       version of each album (chosen by --prefer) unless --all-versions.
  *
- *   qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists)
+ *   crosstune deduplicate (--playlist <id> | --favourites | --all-playlists)
  *                            [--keep <strategy>[,<strategy>...]]
  *                            [--include-versions] [--apply]
  *       Report duplicate tracks (including remasters and same-song-different-
@@ -64,14 +64,14 @@
  *       --apply it only reports; with --apply it removes the tracks marked
  *       "drop".
  *
- *   qobuz-helper remove-artists (--playlist <id>... | --all-playlists)
+ *   crosstune remove-artists (--playlist <id>... | --all-playlists)
  *                               [--include-guests] [--apply] <artist>...
  *       Report the songs by these artists (names, artist links or
  *       /patterns/, also on stdin) in your playlists; with --apply, remove
  *       them. Songs where they are only a guest are kept unless
  *       --include-guests is given.
  *
- *   qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists)
+ *   crosstune upgrade (--favourites | --playlist <id> | --all-playlists)
  *                        [--allow-signature-match] [--remove-unplayable] [--apply]
  *       Find tracks with a better-quality release of the same recording (same
  *       ISRC), and tracks Qobuz no longer streams, proposing a streamable
@@ -80,18 +80,18 @@
  *       --remove-unplayable removes unplayable tracks with no replacement.
  *       Without --apply it only reports.
  *
- *   qobuz-helper export (--favourites | --favourite-albums | --favourite-artists
+ *   crosstune export (--favourites | --favourite-albums | --favourite-artists
  *       | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]
  *       Export favourites or a playlist (or the whole account, with --account)
  *       to a file or stdout. --account always writes a lossless JSON backup;
  *       otherwise --format chooses the format (inferred from --out's extension
  *       when omitted, else JSON).
  *
- *   qobuz-helper export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]
+ *   crosstune export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]
  *       Export every playlist to its own file in <dir> (JSON unless --format),
  *       named after the playlist (made safe and unique).
  *
- *   qobuz-helper import (--favourites | --favourite-albums | --favourite-artists
+ *   crosstune import (--favourites | --favourite-albums | --favourite-artists
  *       | --playlist <id> | --new-playlist <name> | --account)
  *       [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>
  *       Import a file into favourites or a playlist, resolving each entry to a
@@ -101,10 +101,10 @@
  *       omitted, and a CSV exported from Spotify by Exportify is recognised
  *       from its header.
  *
- *   qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] \
+ *   crosstune similar-artists --name "<name>" [--similar N] [--depth D] \
  *       [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] \
  *       [--replace-repeats] [filters] "Artist" ...
- *   qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] \
+ *   crosstune similar-artists --playlist <id> [--seeds S] [--similar N] \
  *       [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] \
  *       [filters] [--apply]
  *       Add the top tracks of Qobuz's similar artists, walked to depth D from
@@ -122,7 +122,7 @@
  *       playlist's own; --order, --skip-favourites, --one-copy and --fit work
  *       as for playlist-from-artists.
  *
- *   qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] \
+ *   crosstune combine --playlist <id> --playlist <id> [...] [--favourites] \
  *       [--mode merge|only-first|common] [--order sequential|interleave|shuffle] \
  *       [--keep highest-quality|first] [--exact-ids-only] [--name <name>] \
  *       [--public] [--apply]
@@ -131,13 +131,13 @@
  *       others lack, or only the songs all of them share. Remasters count as
  *       the same song unless --exact-ids-only. Without --apply it only reports.
  *
- *   qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json]
+ *   crosstune stats (--favourites | --playlist <id> | --everything) [--json]
  *       [--decade-playlist <decade> [--name <name>] [--public] [--apply]]
  *       Report track and artist counts, total length, quality split, tracks
  *       by decade and the most-saved artists and albums. --decade-playlist
  *       (e.g. 1990s) makes a playlist of one decade's tracks (with --apply).
  *
- *   qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] \
+ *   crosstune word-play (--sentence "<text>" [--split fewest|words|any] \
  *       [--max-span K] | --contains <word> [--count N] | --exact <word> \
  *       [--count N] | --acrostic <word> (--favourites | --playlist <id>) \
  *       | --a-to-z (--favourites | --playlist <id>)) [--close-forms] \
@@ -149,7 +149,7 @@
  *       a playlist) titles whose first letters spell a word or run A to Z.
  *       Reports the plan only unless --apply is given.
  *
- *   qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] \
+ *   crosstune new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] \
  *       [--include albums,eps,live,compilations] [filters] \
  *       [--name "<name>" [--public] --apply | --favourite-albums --apply]
  *       List what your favourite artists (or a playlist's artists) released
@@ -158,16 +158,16 @@
  *       albums. With --apply, put them in a new playlist (--name) or add them
  *       to your favourite albums; otherwise it only reports.
  *
- *   qobuz-helper history [--limit N]
- *       List the changes qobuz-helper made to your account (newest first):
+ *   crosstune history [--limit N]
+ *       List the changes crosstune made to your account (newest first):
  *       each entry's id, time, what it did, and how much it added/removed.
  *
- *   qobuz-helper undo [<id>] [--apply]
+ *   crosstune undo [<id>] [--apply]
  *       Show how an entry (by default the latest change not yet undone) would
  *       be reversed; with --apply, reverse it. The undo is recorded too.
  *
  * With no command, `check` runs. The session is stored at
- * $XDG_CONFIG_HOME/qobuz-helper/session.json (owner-only), and every change a
+ * $XDG_CONFIG_HOME/crosstune/session.json (owner-only), and every change a
  * command makes is recorded in history.jsonl beside it (see
  * src/features/journal.ts).
  *
@@ -221,7 +221,7 @@ import { fileCredentialStore, initClientWithCache } from "./cli/init.js";
 import { count } from "./cli/text.js";
 import { createLogger, DEFAULT_LOG_LEVEL, defaultSinks, type Logger } from "./cli/logger.js";
 import { authenticateByPaste, authenticateViaBrowser } from "./cli/oauth-login.js";
-import { configDir } from "./cli/config-dir.js";
+import { configDir, moveOldConfigDir } from "./cli/config-dir.js";
 import { acquireLockWithin, tryAcquireLock } from "./cli/file-lock.js";
 import {
   fileGlobalStore,
@@ -424,6 +424,10 @@ async function main(): Promise<void> {
   logger = createLogger(level, logSinksFor(json, defaultSinks));
   const command = args[0] ?? "check";
   output = createOutput(json, command);
+  // The app was called qobuz-helper (ADR-0014): its folder moves, once.
+  if (moveOldConfigDir()) {
+    logger.info(`Moved your settings from the qobuz-helper folder to ${configDir()}.`);
+  }
   if (command === "--help" || command === "-h") {
     printUsage();
     return;
@@ -450,7 +454,7 @@ async function main(): Promise<void> {
     output.set("entries", items.map(toSummary));
     logger.info(formatHistoryList(items));
     if (items.length > 0) {
-      logger.info("\nSee how one would be undone with: qobuz-helper undo <id>");
+      logger.info("\nSee how one would be undone with: crosstune undo <id>");
     }
     output.flush();
     return;
@@ -468,7 +472,7 @@ async function main(): Promise<void> {
     logger.info(text);
     if (/[\\/]_npx[\\/]/.test(realpathSync(process.argv[1] ?? "."))) {
       logger.warn(
-        "\nThis points into npx's temporary cache, which npm may clear; install qobuz-helper (npm install -g) and run schedule print from there.",
+        "\nThis points into npx's temporary cache, which npm may clear; install crosstune (npm install -g) and run schedule print from there.",
       );
     }
     if (/\.[cm]?ts$/.test(process.argv[1] ?? "")) {
@@ -674,7 +678,7 @@ async function main(): Promise<void> {
       const known = fileAccountStore().account("qobuz");
       if (known !== undefined && known.id !== tagId<UserId>("qobuz", session.userId)) {
         throw new Error(
-          `qobuz-helper knows ${known.displayName} on Qobuz, and this is ${session.displayName}. Run \`qobuz-helper forget qobuz\` to use another account.`,
+          `crosstune knows ${known.displayName} on Qobuz, and this is ${session.displayName}. Run \`crosstune forget qobuz\` to use another account.`,
         );
       }
     },
@@ -713,7 +717,7 @@ function openJournal(source: HistorySource): Journal {
     source,
     onWriteError: (error) =>
       logger.warn(
-        `could not write the history file (${error instanceof Error ? error.message : String(error)}); this change cannot be undone with qobuz-helper`,
+        `could not write the history file (${error instanceof Error ? error.message : String(error)}); this change cannot be undone with crosstune`,
       ),
   });
 }
@@ -727,7 +731,7 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
   const item = selectEntry(items, args.id);
   if (item === undefined) {
     if (args.id !== undefined) {
-      throw new Error(`No history entry ${args.id} (see qobuz-helper history).`);
+      throw new Error(`No history entry ${args.id} (see crosstune history).`);
     }
     output.assign({ entry: null, applied: false });
     logger.info("Nothing to undo.");
@@ -750,7 +754,7 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
     return;
   }
   if (!args.apply) {
-    logger.info(`\n(dry run -- pass --apply to undo it: qobuz-helper undo ${item.id} --apply)`);
+    logger.info(`\n(dry run -- pass --apply to undo it: crosstune undo ${item.id} --apply)`);
     return;
   }
   // Paused first, so that no sync reads the undo half-done as the user's edits.
@@ -891,7 +895,7 @@ async function signIn(login: LoginArgs, journal: Journal): Promise<void> {
     await accounts.complete(await io.readLine("Address: "));
   }
   if (!hub.connected().includes(service)) {
-    throw new Error(`${labelOf(service)} was not connected; run qobuz-helper login ${service} again.`);
+    throw new Error(`${labelOf(service)} was not connected; run crosstune login ${service} again.`);
   }
   logConnected(accounts);
 }
@@ -1091,7 +1095,7 @@ function connectThrough({ hub, accounts }: Connections): RunDueDeps["connect"] {
         throw new ServiceError(service, view.problemKind ?? "network", view.problem ?? `${labelOf(service)} could not be reached`);
       }
       if (view?.status !== "connected") {
-        const message = view?.problem ?? `${labelOf(service)} is not signed in; run qobuz-helper login${service === "qobuz" ? "" : ` ${service}`}`;
+        const message = view?.problem ?? `${labelOf(service)} is not signed in; run crosstune login${service === "qobuz" ? "" : ` ${service}`}`;
         return { ok: false, reason: "needs-sign-in", message, service };
       }
     }
@@ -1133,7 +1137,7 @@ function runJobsOffline(args: JobsArgs): boolean {
     case "show": {
       const view = service.get(args.id);
       if (view === undefined) {
-        throw new Error(`No job ${args.id} (see qobuz-helper jobs list)`);
+        throw new Error(`No job ${args.id} (see crosstune jobs list)`);
       }
       output.assign({ ...view });
       logger.info(formatJobList({ jobs: [view], invalid: [], flags: {} }));
@@ -1157,7 +1161,7 @@ function runJobsOffline(args: JobsArgs): boolean {
     case "suggestions": {
       const view = service.get(args.id);
       if (view === undefined) {
-        throw new Error(`No job ${args.id} (see qobuz-helper jobs list)`);
+        throw new Error(`No job ${args.id} (see crosstune jobs list)`);
       }
       output.set("suggestions", view.state.suggestions);
       logger.info(formatSuggestions(view));
@@ -1271,7 +1275,7 @@ async function runJobsOnline(client: MusicService, journal: Journal, args: JobsA
   );
   output.assign({ job, summary });
   logger.info(`\nSaved job ${job.id}. ${formatRunSummary(summary)}`);
-  logger.info("It refreshes on its schedule whenever run-due or serve runs (see qobuz-helper schedule print).");
+  logger.info("It refreshes on its schedule whenever run-due or serve runs (see crosstune schedule print).");
 }
 
 /** The web UI's job routes, run with the UI's (recording) client. */
@@ -2005,7 +2009,7 @@ async function runRemoveArtists(
         logger.warn(`Playlist ${shortId(playlistId)}: ${error}`);
       }
     }
-    logger.info(`\nRemoved ${count(removed, "song")}. (qobuz-helper undo puts them back)`);
+    logger.info(`\nRemoved ${count(removed, "song")}. (crosstune undo puts them back)`);
     if (reports.some((report) => report.error !== undefined)) {
       process.exitCode = 1;
     }
@@ -2632,45 +2636,45 @@ function printUsage(): void {
   logger.info(
     [
       "Usage:",
-      "  qobuz-helper login",
-      "  qobuz-helper logout",
-      "  qobuz-helper login [tidal|spotify] [--client-id <id>] [--print-url]",
-      "  qobuz-helper accounts",
-      "  qobuz-helper forget <qobuz|tidal|spotify>",
-      "  qobuz-helper copy (--playlist <id> | --favourites --from <service>) --to <service> [--name <name>] [--apply] [--accept-likely]",
-      "  qobuz-helper sync",
-      "  qobuz-helper ui",
-      "  qobuz-helper check",
-      '  qobuz-helper playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist - Album" ...',
-      '  qobuz-helper playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options]',
-      '  qobuz-helper similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
-      "  qobuz-helper similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] [--apply]",
-      "  qobuz-helper deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--include-versions] [--apply]",
-      '  qobuz-helper new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
-      "  qobuz-helper remove-artists (--playlist <id>... | --all-playlists) [--include-guests] [--apply] <artist>...",
-      "  qobuz-helper upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
-      "  qobuz-helper export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
-      "  qobuz-helper export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]",
-      "  qobuz-helper import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>",
-      "  qobuz-helper combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
-      "  qobuz-helper stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
-      "  qobuz-helper history [--limit N]",
-      "  qobuz-helper undo [<id>] [--apply]",
-      "  qobuz-helper jobs [list | show <id> | pause <id> | resume <id> | run <id> [--dry-run] | remove <id> [--delete-playlist]]",
-      "  qobuz-helper jobs [suggestions <id> | accept <id> <key...>|--all | ignore <id> <key...>|--all]",
-      '  qobuz-helper jobs create new-releases ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--window last-days:N|since:YYYY-MM-DD|latest:N] [--include albums,eps,live,compilations] [--max-releases N] [--hide-favourites] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [shared options]',
-      '  qobuz-helper jobs create combined <playlist|favourites>... --name "<name>" [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [shared options]',
-      '  qobuz-helper jobs create follow <playlist> --name "<name>" [--archive] [shared options]',
-      '  qobuz-helper jobs create smart <playlist|favourites>... --name "<name>" [--hires|--cd] [--decades 1990s,2000s] [--genres jazz,soul] [--favourited-within DAYS] [--min-length M:SS] [--max-length M:SS] [--order as-listed|newest-favourited|newest-release|by-artist|shuffle] [shared options]',
-      '  qobuz-helper jobs create discovery ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--artists-per-rotation M] [--tracks-per-artist K] [--rotation day|week] [--avoid-repeats N] [--keep-favourite-tracks] [shared options]',
-      "  qobuz-helper jobs create tidy <playlist|favourites> (--dedupe | --upgrade | --repair)... [shared options]",
+      "  crosstune login",
+      "  crosstune logout",
+      "  crosstune login [tidal|spotify] [--client-id <id>] [--print-url]",
+      "  crosstune accounts",
+      "  crosstune forget <qobuz|tidal|spotify>",
+      "  crosstune copy (--playlist <id> | --favourites --from <service>) --to <service> [--name <name>] [--apply] [--accept-likely]",
+      "  crosstune sync",
+      "  crosstune ui",
+      "  crosstune check",
+      '  crosstune playlist-from-artists --name "<name>" [--tracks N] [--public] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
+      '  crosstune playlist-from-albums --name "<name>" [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist - Album" ...',
+      '  crosstune playlist-from-albums --name "<name>" --discography "<artist>" [--include albums,eps,live,compilations] [--all-versions] [--prefer <preference>] [--public] [--discs <list>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options]',
+      '  crosstune similar-artists --name "<name>" [--similar N] [--depth D] [--tracks M] [--max-artists A] [--seed-tracks K] [--public] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] "Artist" ...',
+      "  crosstune similar-artists --playlist <id> [--seeds S] [--similar N] [--depth D] [--tracks M] [--max-artists A] [--yes] [--replace-repeats] [--skip-favourite-artists] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [plan options] [--apply]",
+      "  crosstune deduplicate (--playlist <id> | --favourites | --all-playlists) [--keep <strategy>[,<strategy>...]] [--include-versions] [--apply]",
+      '  crosstune new-releases [--since YYYY-MM-DD | --days N] [--playlist <id>] [--include albums,eps,live,compilations] [--exclude-artist <name>]... [--exclude-album <term>]... [--exclude-track <term>]... [--name "<name>" [--public] --apply | --favourite-albums --apply]',
+      "  crosstune remove-artists (--playlist <id>... | --all-playlists) [--include-guests] [--apply] <artist>...",
+      "  crosstune upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
+      "  crosstune export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
+      "  crosstune export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]",
+      "  crosstune import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>",
+      "  crosstune combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
+      "  crosstune stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
+      "  crosstune history [--limit N]",
+      "  crosstune undo [<id>] [--apply]",
+      "  crosstune jobs [list | show <id> | pause <id> | resume <id> | run <id> [--dry-run] | remove <id> [--delete-playlist]]",
+      "  crosstune jobs [suggestions <id> | accept <id> <key...>|--all | ignore <id> <key...>|--all]",
+      '  crosstune jobs create new-releases ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--window last-days:N|since:YYYY-MM-DD|latest:N] [--include albums,eps,live,compilations] [--max-releases N] [--hide-favourites] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [shared options]',
+      '  crosstune jobs create combined <playlist|favourites>... --name "<name>" [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [shared options]',
+      '  crosstune jobs create follow <playlist> --name "<name>" [--archive] [shared options]',
+      '  crosstune jobs create smart <playlist|favourites>... --name "<name>" [--hires|--cd] [--decades 1990s,2000s] [--genres jazz,soul] [--favourited-within DAYS] [--min-length M:SS] [--max-length M:SS] [--order as-listed|newest-favourited|newest-release|by-artist|shuffle] [shared options]',
+      '  crosstune jobs create discovery ("Artist" ... | --favourites | --playlist <id>) --name "<name>" [--similar N] [--artists-per-rotation M] [--tracks-per-artist K] [--rotation day|week] [--avoid-repeats N] [--keep-favourite-tracks] [shared options]',
+      "  crosstune jobs create tidy <playlist|favourites> (--dedupe | --upgrade | --repair)... [shared options]",
       "    shared options: [--into <playlist>] [--edits respect|mirror] [--every hour|day|week] [--at HH:MM] [--weekday mon..sun] [--dedupe[=every-pass|weekly|monthly]] [--upgrade[=...]] [--repair[=...]] [--repair-remove] [--dedupe-keep <chain>] [--suggest] [--max-tracks N] [--fit <minutes>] [--public] [--apply]",
-      "  qobuz-helper run-due [--dry-run]",
-      "  qobuz-helper serve [--no-open] [--port N]",
-      "  qobuz-helper schedule print (--cron | --systemd | --launchd | --windows)",
-      "  qobuz-helper login --print-url",
-      '  qobuz-helper word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
+      "  crosstune run-due [--dry-run]",
+      "  crosstune serve [--no-open] [--port N]",
+      "  crosstune schedule print (--cron | --systemd | --launchd | --windows)",
+      "  crosstune login --print-url",
+      '  crosstune word-play (--sentence "<text>" [--split fewest|words|any] [--max-span K] | --contains <word> [--count N] | --exact <word> [--count N] | --acrostic <word> (--favourites | --playlist <id>) | --a-to-z (--favourites | --playlist <id>)) [--close-forms] [--keep-punctuation] [--keep-versions] [--allow-repeat-artists] [--prefer-hires] [--name <name>] [--public] [--add-to <id>] [--exclude-track <term>]... [--exclude-album <term>]... [--exclude-artist <name>]... [--apply]',
       "",
       "Global options:",
       "  --loglevel <silent|error|warn|info|debug>   how much to log (default info)",

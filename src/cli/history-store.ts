@@ -1,7 +1,7 @@
 /**
- * The history file: `$XDG_CONFIG_HOME/qobuz-helper/history.jsonl`.
+ * The history file: `$XDG_CONFIG_HOME/crosstune/history.jsonl`.
  *
- * It lists what qobuz-helper changed in the account (playlist and track ids,
+ * It lists what crosstune changed in the account (playlist and track ids,
  * playlist names), so like the session it is written owner-only and kept on
  * this machine. Records are appended; compaction (see ../features/journal.ts)
  * rewrites the file through a temporary file and a rename, so a crash never
@@ -9,22 +9,18 @@
  */
 
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { HistoryStore } from "../features/journal.js";
 import { tryAcquireLock } from "./file-lock.js";
+import { configDir } from "./config-dir.js";
 
 /** A compaction takes well under this; an older history lock is a leftover. */
 const HISTORY_LOCK_STALE_MS = 60_000;
 
 /** The default history path, honouring `XDG_CONFIG_HOME`. */
 export function defaultHistoryPath(env: NodeJS.ProcessEnv = process.env): string {
-  const configHome =
-    env["XDG_CONFIG_HOME"] && env["XDG_CONFIG_HOME"].length > 0
-      ? env["XDG_CONFIG_HOME"]
-      : join(homedir(), ".config");
-  return join(configHome, "qobuz-helper", "history.jsonl");
+  return join(configDir(env), "history.jsonl");
 }
 
 /** A history store backed by the local history file. */

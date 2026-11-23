@@ -6,7 +6,7 @@
 //   console.log(await music.searchTracks("Portishead Roads", 3));
 //
 // Run the script with `npx tsx <file>.mts` from the repo root. Requests are logged to
-// $TMPDIR/qobuz-helper-live-<service>.jsonl (method, path, status, rate-limit headers, body start).
+// $TMPDIR/crosstune-live-<service>.jsonl (method, path, status, rate-limit headers, body start).
 import { appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ const SRC = new URL("../../../src/", import.meta.url).pathname;
 const from = (path: string) => import(join(SRC, path));
 
 export function loggingFetch(service: string): typeof fetch {
-  const log = join(tmpdir(), `qobuz-helper-live-${service}.jsonl`);
+  const log = join(tmpdir(), `crosstune-live-${service}.jsonl`);
   return async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const response = await fetch(input, init);

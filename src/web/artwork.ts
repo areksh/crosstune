@@ -10,7 +10,7 @@
 
 import { el } from "./dom.js";
 
-const STORAGE_KEY = "qobuz-helper:show-artwork";
+const STORAGE_KEY = "crosstune:show-artwork";
 
 let enabled = readSetting();
 

@@ -36,7 +36,7 @@ export interface LinksList {
 }
 
 /** Dispatched on window with the list as `detail` whenever it is loaded. */
-export const LINKS_CHANGED = "qobuz-helper:links";
+export const LINKS_CHANGED = "crosstune:links";
 
 const label = (service: ServiceName): string => SERVICE_LABELS[service];
 

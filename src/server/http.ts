@@ -29,7 +29,7 @@ import {
 } from "./router.js";
 
 /** Placeholder in index.html replaced with the per-run nonce at serve time. */
-const NONCE_PLACEHOLDER = "__QOBUZ_NONCE__";
+const NONCE_PLACEHOLDER = "__CROSSTUNE_NONCE__";
 
 /** Static files the server is willing to serve, mapped to content types. */
 const STATIC_FILES: Record<string, string> = {
@@ -95,7 +95,7 @@ export function extractHeaders(headers: http.IncomingHttpHeaders): {
   return {
     host: single(headers.host),
     origin: single(headers.origin),
-    nonce: single(headers["x-qobuz-nonce"]),
+    nonce: single(headers["x-crosstune-nonce"]),
     service: single(headers["x-music-service"]),
   };
 }

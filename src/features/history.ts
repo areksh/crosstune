@@ -1,5 +1,5 @@
 /**
- * History: the record of every change qobuz-helper makes to the account.
+ * History: the record of every change crosstune makes to the account.
  *
  * Each user action (a CLI command, or one commit in the web UI) is one
  * {@link HistoryEntry} holding the {@link Operation}s it made, with exactly

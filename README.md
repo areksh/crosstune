@@ -1,10 +1,17 @@
-# qobuz-helper
+# crosstune
 
-A collection of local-first utilities for [Qobuz](https://www.qobuz.com/).
+Local-first tools for your music on [Qobuz](https://www.qobuz.com/), TIDAL and
+Spotify: build and tidy playlists, copy them between services, and keep linked
+playlists the same on all of them.
 
-`qobuz-helper` runs entirely on your own machine. You sign in with your Qobuz
-account, use the tools, and nothing about you is stored on any server -- the
-session is saved locally and never leaves your machine.
+`crosstune` runs entirely on your own machine. You sign in to each service,
+use the tools, and nothing about you is stored on any server -- the sign-ins
+are saved locally and never leave your machine.
+
+It was called `qobuz-helper` until it worked with more than Qobuz. The
+`qobuz-helper` command still works, and its settings folder
+(`~/.config/qobuz-helper`) is moved to `~/.config/crosstune` the first time
+`crosstune` runs (ADR-0014).
 
 ## Why this exists
 
@@ -15,9 +22,9 @@ unofficial and subject to breakage when Qobuz changes their web bundle. See
 
 ## Several services
 
-qobuz-helper also works with **TIDAL** and **Spotify**, through their official
+crosstune also works with **TIDAL** and **Spotify**, through their official
 APIs. Connect each on the **Accounts** page of the web UI, or with
-`qobuz-helper login tidal` / `login spotify`:
+`crosstune login tidal` / `login spotify`:
 
 - TIDAL and Spotify each ask you to register a free app of your own and paste
   its **client id**; the Accounts page shows the steps and the redirect address
@@ -37,9 +44,9 @@ APIs. Connect each on the **Accounts** page of the web UI, or with
   you to choose; your choices are remembered (`matches.json`).
 - **Linked playlists** (Managed playlists) keep one playlist the same on several
   services, both ways. On a conflict nothing is written, and every page says so
-  until you settle it. `qobuz-helper sync` syncs them now; `run-due` exits with
+  until you settle it. `crosstune sync` syncs them now; `run-due` exits with
   3 while any is in conflict.
-- **Disconnect and forget** (or `forget <service>`) deletes what qobuz-helper
+- **Disconnect and forget** (or `forget <service>`) deletes what crosstune
   keeps about a service, its History entries included.
 
 Spotify's and TIDAL's terms limit combining their content with other services';
@@ -98,12 +105,12 @@ each item labelled with its service.
   -- including a Spotify playlist exported with Exportify -- matching each entry
   to Qobuz by its id, its ISRC, or by search. Available on the CLI and in the
   web UI.
-- **History & undo** -- every change qobuz-helper makes to your account is
+- **History & undo** -- every change crosstune makes to your account is
   recorded on your machine, one entry per action, and any entry can be undone:
   what it added is taken out, what it removed is put back in its old place, and
   a playlist it created is deleted. Available on the CLI and in the web UI (see
   [History and undo](#history-and-undo)).
-- **Managed playlists** -- playlists qobuz-helper looks after on a schedule.
+- **Managed playlists** -- playlists crosstune looks after on a schedule.
   A *source* keeps one filled: the new releases of artists you choose (with
   their similar artists if you like), a live **combination** of other
   playlists, a copy that **follows or archives** another playlist, a **smart**
@@ -119,7 +126,7 @@ The playlist tools can **exclude** tracks whose title, album's title or artist
 matches a term (see [Filters](#filters)), and the album tool can keep only
 chosen discs. Similar artists also never suggests an excluded artist.
 
-There is also a **local web UI** (`qobuz-helper ui`) hosting these tools, each
+There is also a **local web UI** (`crosstune ui`) hosting these tools, each
 with a preview-and-edit step before anything is changed. More to follow.
 
 ## Requirements
@@ -151,13 +158,13 @@ npm run dev -- login    # sign in (or resume) and save the session
 npm run dev -- logout   # discard the saved session
 ```
 
-The token is stored at `$XDG_CONFIG_HOME/qobuz-helper/session.json` (falling back
+The token is stored at `$XDG_CONFIG_HOME/crosstune/session.json` (falling back
 to `~/.config`), written owner-only. It stays on your machine -- nothing is sent
 to any server other than Qobuz itself.
 
 To start up quickly, the API credentials scraped from the Qobuz web player (the
 app id and app secret) are also cached next to the session, at
-`$XDG_CONFIG_HOME/qobuz-helper/bundle.json`. This lets later runs skip
+`$XDG_CONFIG_HOME/crosstune/bundle.json`. This lets later runs skip
 re-downloading and re-validating the web bundle. The cache expires after a week,
 and is discarded automatically if Qobuz rotates its credentials and a run fails
 because of it, so it heals on the next run.
@@ -705,8 +712,8 @@ before tracks are removed from it (to keep each removed track and its
 position). A removal or deletion whose playlist cannot be read first is not
 made.
 
-**Where, and for how long.** In `$XDG_CONFIG_HOME/qobuz-helper/history.jsonl`
-(usually `~/.config/qobuz-helper/`), beside the session, readable by you only.
+**Where, and for how long.** In `$XDG_CONFIG_HOME/crosstune/history.jsonl`
+(usually `~/.config/crosstune/`), beside the session, readable by you only.
 It is a JSON Lines file, one record per line, only ever appended to; undoing
 appends a marker rather than editing the entry. The last 200 entries, up to 90
 days old, are kept; older ones are dropped the next time something is written.
@@ -731,7 +738,7 @@ restore exactly what it found.
 
 **What undo cannot restore.**
 
-- Anything done outside qobuz-helper: edits in the Qobuz apps are not recorded,
+- Anything done outside crosstune: edits in the Qobuz apps are not recorded,
   and a playlist's name or description changed elsewhere stays changed.
 - Tracks already gone: added tracks you have since removed are skipped (and
   listed), and a playlist deleted since cannot have its changes undone.
@@ -743,7 +750,7 @@ restore exactly what it found.
   other changes, tracks go back at the same index, which may now be a different
   spot. If a move fails, the tracks stay at the end of the playlist (and undo
   says so).
-- Reorderings recorded before qobuz-helper kept what reversing them needs are
+- Reorderings recorded before crosstune kept what reversing them needs are
   reported, not reversed.
 - A deleted playlist (undoing an undo) comes back as a new playlist, with a new
   id and link.
@@ -759,7 +766,7 @@ If the browser does not open automatically, the CLI prints the URL to visit.
 
 #### Managed playlists
 
-A managed playlist is a *job*: a saved recipe qobuz-helper refreshes on a
+A managed playlist is a *job*: a saved recipe crosstune refreshes on a
 schedule. Its recipe is the new releases of some artists -- listed by name or
 link, your favourite artists, or a playlist's artists -- optionally with each
 one's top similar artists (a list kept for 30 days, then looked up again), and
@@ -794,7 +801,7 @@ again, and a track you add yourself is never removed. With `--edits mirror`
 every refresh resets the playlist to exactly the recipe. Each refresh is one
 [history](#history-and-undo) entry; undoing one counts as removing its tracks.
 
-**Running on a schedule.** Refreshes happen whenever qobuz-helper runs the jobs
+**Running on a schedule.** Refreshes happen whenever crosstune runs the jobs
 that are due -- either from your system's scheduler, every 15 minutes:
 
 ```sh
@@ -802,12 +809,12 @@ npm run build
 node dist/cli.js schedule print --systemd   # or --cron, --launchd, --windows
 ```
 
-prints a ready-to-install snippet that calls `qobuz-helper run-due` (which only
-does something when a job is due); or from `qobuz-helper serve`, the web UI
+prints a ready-to-install snippet that calls `crosstune run-due` (which only
+does something when a job is due); or from `crosstune serve`, the web UI
 plus a ticker, for a machine that stays on (`serve --no-open --port 8080` on a
 server). A refresh missed while the computer was off or asleep runs once when
 it is back. `run-due` never opens a browser: if the session has expired, jobs
-stop until you run `qobuz-helper login` again (on a machine without a browser,
+stop until you run `crosstune login` again (on a machine without a browser,
 `login --print-url` prints a link to open on any device; paste back the address
 you end up on). On a headless server, reach the web UI through an SSH tunnel:
 `ssh -L 8080:127.0.0.1:8080 server`, then open `http://127.0.0.1:8080`.
@@ -852,7 +859,7 @@ through others, read back its own playlist.
 **Your own playlists.** `--into <playlist>` gives a source to one of your
 playlists instead of making a new one. Tracks already in it count as yours, so
 nothing you put there is ever removed; strict mirror is only for playlists
-qobuz-helper made. Removing such a job never deletes the playlist.
+crosstune made. Removing such a job never deletes the playlist.
 
 **Tidy-ups.** Any managed playlist -- and any of your playlists, and your
 favourites -- can be tidied on a schedule:
@@ -887,14 +894,14 @@ npm run dev -- jobs ignore <id> --all            # never suggested again
 
 Qobuz cannot swap a favourite in place: an upgraded or repaired favourite is
 added anew and the old one removed, so the Qobuz app lists it as recently
-added. qobuz-helper keeps the original date, and its smart playlists and
+added. crosstune keeps the original date, and its smart playlists and
 first/last-added duplicate checks use that one.
 
 In the web UI, *Managed playlists* shows a card per playlist -- made by
-qobuz-helper, yours, or your favourites -- then what manages it: its source,
+crosstune, yours, or your favourites -- then what manages it: its source,
 its tidy-ups, its schedule, its last and next pass, and any suggestions to
 accept or ignore (Run now, Preview, Pause, Edit, Delete -- optionally with a
-playlist qobuz-helper made). *Manage a playlist* sets one up with a preview;
+playlist crosstune made). *Manage a playlist* sets one up with a preview;
 *New releases*, *Similar artists* and *Combine playlists* have a *Keep this
 updated...* button that opens the form filled in.
 
@@ -963,7 +970,7 @@ empty, the error goes to stderr, and the exit status is non-zero.
 npm run ui            # build the frontend, then serve it and open the browser
 ```
 
-`qobuz-helper ui` starts a small web server on `127.0.0.1`, opens your browser
+`crosstune ui` starts a small web server on `127.0.0.1`, opens your browser
 at it, and runs until you stop it with Ctrl-C. A sidebar switches between the
 tools, grouped as *Build*, *Tidy up*, *Explore* and *Your data*; a home page introduces
 each. Multi-step tools show the step you are on at the top, and while you review

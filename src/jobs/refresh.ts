@@ -99,7 +99,7 @@ export interface PassOptions {
   favouriteDates?: ReadonlyMap<TrackId, string>;
 }
 
-export const MANAGED_DESCRIPTION = "Managed by qobuz-helper";
+export const MANAGED_DESCRIPTION = "Managed by crosstune";
 
 /**
  * A pass failed after it may have changed the playlist. `state` is what to

@@ -19,7 +19,7 @@ export interface Prefill {
   radios?: Record<string, string>;
 }
 
-const STORAGE_KEY = "qobuz-helper:prefill";
+const STORAGE_KEY = "crosstune:prefill";
 /** How long to wait for a select's option to load before giving up. */
 const OPTION_WAIT_MS = 15_000;
 

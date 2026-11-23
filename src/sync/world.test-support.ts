@@ -58,7 +58,7 @@ export class SyncAccount implements SyncClient {
     return this.#get(id).entries.map((entry) => numberOf(entry.track));
   }
 
-  /** An edit made by the user, outside qobuz-helper. */
+  /** An edit made by the user, outside crosstune. */
   edit(id: PlaylistId, change: (songs: number[]) => number[]): void {
     const playlist = this.#get(id);
     const spare = [...playlist.entries];

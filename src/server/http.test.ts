@@ -24,7 +24,7 @@ describe("contentTypeFor", () => {
 
 describe("injectNonce", () => {
   it("replaces every placeholder with the nonce", () => {
-    expect(injectNonce("a __QOBUZ_NONCE__ b __QOBUZ_NONCE__", "xyz")).toBe(
+    expect(injectNonce("a __CROSSTUNE_NONCE__ b __CROSSTUNE_NONCE__", "xyz")).toBe(
       "a xyz b xyz",
     );
   });
@@ -36,7 +36,7 @@ describe("extractHeaders", () => {
       extractHeaders({
         host: "127.0.0.1:4747",
         origin: "http://127.0.0.1:4747",
-        "x-qobuz-nonce": "n",
+        "x-crosstune-nonce": "n",
       }),
     ).toEqual({
       host: "127.0.0.1:4747",

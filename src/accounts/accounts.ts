@@ -237,7 +237,7 @@ export class Accounts {
       throw new ServiceError(
         service,
         "authentication",
-        `qobuz-helper knows ${known.displayName} on ${labelOf(service)}, and this is ${account.displayName}. Forget the first account to use another.`,
+        `crosstune knows ${known.displayName} on ${labelOf(service)}, and this is ${account.displayName}. Forget the first account to use another.`,
       );
     }
     keep();

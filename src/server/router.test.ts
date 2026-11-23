@@ -2051,7 +2051,7 @@ describe("Qobuz links in lists", () => {
   });
 });
 
-/** A web journal over an in-memory account, as `qobuz-helper ui` wires it. */
+/** A web journal over an in-memory account, as `crosstune ui` wires it. */
 function historyDeps() {
   const store = new MemoryStore();
   let n = 0;

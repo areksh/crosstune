@@ -128,7 +128,7 @@ export async function authenticateByPaste(
   const pasted = (await io.readLine("Address: ")).trim();
   const code = parseRedirectCode(pasted);
   if (code === undefined) {
-    throw new Error("That address has no sign-in code in it; run qobuz-helper login --print-url again.");
+    throw new Error("That address has no sign-in code in it; run crosstune login --print-url again.");
   }
   return client.loginWithOAuthCode(code);
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { scheduleSnippet } from "./schedule-print.js";
 
-const paths = { node: "/usr/bin/node", script: "/opt/qh/dist/cli.js", logFile: "/home/me/.config/qobuz-helper/run-due.log" };
+const paths = { node: "/usr/bin/node", script: "/opt/qh/dist/cli.js", logFile: "/home/me/.config/crosstune/run-due.log" };
 
 describe("scheduleSnippet", () => {
   it.each([

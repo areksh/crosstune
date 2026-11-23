@@ -1,5 +1,5 @@
 /**
- * Forgetting a service: what qobuz-helper keeps about it goes (Spotify's terms
+ * Forgetting a service: what crosstune keeps about it goes (Spotify's terms
  * ask for it on disconnecting; it is done alike for every service). History is
  * edited here, and only here (ADR-0011): a service's entries are dropped, and an
  * entry that also changed another service keeps its label but cannot be undone.

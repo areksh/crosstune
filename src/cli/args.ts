@@ -1779,7 +1779,7 @@ export function parseUndoArgs(argv: readonly string[]): UndoArgs {
     } else if (id !== undefined) {
       throw new Error("Give only one entry id to undo");
     } else if (!/^[A-Za-z0-9]{1,40}$/.test(arg)) {
-      throw new Error(`"${arg}" is not an entry id (see qobuz-helper history)`);
+      throw new Error(`"${arg}" is not an entry id (see crosstune history)`);
     } else {
       id = arg;
     }
@@ -2406,7 +2406,7 @@ export function parseServeArgs(argv: readonly string[]): { open: boolean; port?:
 export function parseScheduleArgs(argv: readonly string[]): { target: ScheduleTarget } {
   const [action, ...flags] = argv;
   if (action !== "print") {
-    throw new Error("Use: qobuz-helper schedule print --cron|--systemd|--launchd|--windows");
+    throw new Error("Use: crosstune schedule print --cron|--systemd|--launchd|--windows");
   }
   const targets = flags.map((flag) => {
     const target = flag.replace(/^--/, "");

@@ -14,8 +14,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { configDir } from "./config-dir.js";
 
 interface StoredSession {
   userAuthToken: string;
@@ -23,11 +23,7 @@ interface StoredSession {
 
 /** The default session file path, honouring `XDG_CONFIG_HOME`. */
 export function defaultSessionPath(env: NodeJS.ProcessEnv = process.env): string {
-  const configHome =
-    env["XDG_CONFIG_HOME"] && env["XDG_CONFIG_HOME"].length > 0
-      ? env["XDG_CONFIG_HOME"]
-      : join(homedir(), ".config");
-  return join(configHome, "qobuz-helper", "session.json");
+  return join(configDir(env), "session.json");
 }
 
 /** Save the user auth token, creating the directory and restricting permissions. */

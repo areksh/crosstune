@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="qobuz-nonce" content="__QOBUZ_NONCE__" />
-    <title>qobuz-helper</title>
+    <meta name="crosstune-nonce" content="__CROSSTUNE_NONCE__" />
+    <title>crosstune</title>
     <link
       rel="preload"
       href="fonts/archivo-latin-wdth.woff2"
@@ -18,7 +18,7 @@
     <div class="layout">
       <aside class="sidebar">
         <a class="brand" href="#/home">
-          <span class="brand-dot" aria-hidden="true"></span>qobuz-helper
+          <span class="brand-dot" aria-hidden="true"></span>crosstune
         </a>
         <!-- Each tool is one nav-link line in its group (plus a VIEWS entry in main.ts). -->
         <nav class="nav" aria-label="Tools">
@@ -76,7 +76,7 @@
           <section class="paste-hero" aria-labelledby="home-title">
             <h1 id="home-title">Start with a link or a list</h1>
             <p class="lede">
-              Paste Qobuz, Spotify or TIDAL links, or artists or albums one per line. qobuz-helper
+              Paste Qobuz, Spotify or TIDAL links, or artists or albums one per line. crosstune
               works out what they are and suggests a tool. Or pick a tool below.
             </p>
             <div class="paste-box">
@@ -194,7 +194,7 @@
               <a class="tool-link" href="#/history">
                 <span class="tool-name">History</span>
                 <span class="tool-desc">
-                  Every change qobuz-helper made to your account, each one a
+                  Every change crosstune made to your account, each one a
                   click from undone.
                 </span>
               </a>
@@ -1703,7 +1703,7 @@
             <div class="view-title">
               <h1>Managed playlists</h1>
               <p class="lede">
-                Playlists qobuz-helper looks after on a schedule: filled from a
+                Playlists crosstune looks after on a schedule: filled from a
                 source (new releases, other playlists, rules over your library, a
                 discovery radio) and kept tidy (duplicates, better copies,
                 tracks that stopped playing).
@@ -1713,9 +1713,9 @@
 
           <div id="managed-flags" class="warning" hidden></div>
           <p class="hint">
-            Managed playlists run while <code>qobuz-helper serve</code> runs,
-            or whenever <code>qobuz-helper run-due</code> runs from your system's
-            scheduler (<code>qobuz-helper schedule print</code> shows how). A
+            Managed playlists run while <code>crosstune serve</code> runs,
+            or whenever <code>crosstune run-due</code> runs from your system's
+            scheduler (<code>crosstune schedule print</code> shows how). A
             pass missed while the computer was off runs once when it is back.
           </p>
 
@@ -2081,7 +2081,7 @@
                 <p id="managed-tidy-favourites-note" class="hint" hidden>
                   No service can swap a favourite: an upgraded or repaired
                   favourite is added anew and the old one removed, so the
-                  service's app lists it as recently added. qobuz-helper keeps the original
+                  service's app lists it as recently added. crosstune keeps the original
                   date for its own smart playlists and duplicate checks.
                 </p>
                 <p class="hint">
@@ -2299,7 +2299,7 @@
             <div class="view-title">
               <h1>Accounts</h1>
               <p class="lede">
-                The music services qobuz-helper works with. You sign in on each
+                The music services crosstune works with. You sign in on each
                 service's own page; the sign-in is kept on this computer only.
               </p>
             </div>
@@ -2313,7 +2313,7 @@
             <div class="view-title">
               <h1>History</h1>
               <p class="lede">
-                Every change qobuz-helper made to your account, saved on this
+                Every change crosstune made to your account, saved on this
                 computer. Undo takes out what was added and puts back what was
                 removed.
               </p>
@@ -2325,8 +2325,8 @@
           <p id="history-error" class="error" hidden></p>
           <div id="history-days" class="history-days"></div>
           <p class="hint history-cli">
-            From the command line: <code>qobuz-helper history</code> and
-            <code>qobuz-helper undo</code>.
+            From the command line: <code>crosstune history</code> and
+            <code>crosstune undo</code>.
           </p>
         </section>
       </main>

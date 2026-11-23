@@ -1,5 +1,5 @@
 /**
- * The job files under `$XDG_CONFIG_HOME/qobuz-helper/` (see ADR-0007):
+ * The job files under `$XDG_CONFIG_HOME/crosstune/` (see ADR-0007):
  *
  * - `jobs.json` -- definitions, written by the CLI and the web UI;
  * - `jobs-state/<id>.json` -- each job's state, written by the runner;

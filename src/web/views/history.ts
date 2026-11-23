@@ -1,7 +1,7 @@
 /**
  * History view, and the "Last change" strip on the home view.
  *
- * Lists every change qobuz-helper recorded, grouped by day, newest first,
+ * Lists every change crosstune recorded, grouped by day, newest first,
  * with what each added (+) and removed (-). Undo asks the server what undoing
  * would reverse (it reads the account, changing nothing), shows that with any
  * notes and warnings, and only on confirmation undoes it. Undone entries are

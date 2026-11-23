@@ -1,9 +1,10 @@
 {
-  "name": "qobuz-helper",
+  "name": "crosstune",
   "version": "0.0.0",
-  "description": "A collection of local-first utilities for Qobuz.",
+  "description": "Local-first tools for your music on Qobuz, TIDAL and Spotify: playlists, cleanup, and keeping them in step across services.",
   "type": "module",
   "bin": {
+    "crosstune": "dist/cli.js",
     "qobuz-helper": "dist/cli.js"
   },
   "files": [

@@ -280,7 +280,7 @@ async function forget(account: AccountView): Promise<void> {
   const sure = await openDialog({
     title: `Disconnect and forget ${account.label}?`,
     body: [
-      `This signs out and deletes what qobuz-helper keeps about ${account.label} on this computer: its matches, the managed and linked playlists that use it, and its entries in History, which can then no longer be undone.`,
+      `This signs out and deletes what crosstune keeps about ${account.label} on this computer: its matches, the managed and linked playlists that use it, and its entries in History, which can then no longer be undone.`,
       `Your music and playlists on ${account.label} are not touched.`,
     ],
     confirm: "Disconnect and forget",

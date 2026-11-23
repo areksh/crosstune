@@ -206,7 +206,7 @@ function renderFlags(list: JobsList): void {
       ({ service }) => `Managed playlists that use ${labelOf(service)} are stopped: its sign-in expired. Sign in again in Accounts.`,
     ),
     ...(list.flags.bundleBroken !== undefined
-      ? [`Managed playlists are stopped: Qobuz changed its web player (${list.flags.bundleBroken.message}). Update qobuz-helper.`]
+      ? [`Managed playlists are stopped: Qobuz changed its web player (${list.flags.bundleBroken.message}). Update crosstune.`]
       : []),
     ...list.invalid.map(
       (bad) => `A job in jobs.json (${bad.id ?? `#${bad.index + 1}`}) is invalid and skipped: ${bad.error}`,
@@ -245,7 +245,7 @@ function playlistTitle(job: Job, state: JobState): string {
 }
 
 const BADGES: Record<TargetType, string> = {
-  created: "made by qobuz-helper",
+  created: "made by crosstune",
   adopted: "your playlist",
   favourites: "your favourites",
 };
@@ -673,7 +673,7 @@ function syncForm(): void {
   show("managed-exclude-grid", kind === "new-releases" || kind === "combined" || kind === "discovery");
   el("managed-similar-label").textContent =
     kind === "discovery" ? "Similar artists to pick from (per artist)" : "Also similar artists (per artist, 0 for none)";
-  // Strict mirror only for a playlist qobuz-helper made: it removes anything else.
+  // Strict mirror only for a playlist crosstune made: it removes anything else.
   show("managed-mirror-option", target === "created");
   if (target !== "created") {
     setRadio("managed-edits", "respect");

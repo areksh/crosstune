@@ -115,6 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The app is now called crosstune**, as it works with TIDAL and Spotify as
+  well as Qobuz. The `qobuz-helper` command still works (so an installed
+  scheduler keeps running), and the settings folder `~/.config/qobuz-helper`
+  -- sign-ins, jobs, links and History -- is moved to `~/.config/crosstune`
+  the first time it runs; the web UI's settings carry over too (ADR-0014).
 - Groundwork for other music services: every id now names its service. Nothing
   looks different: history, managed playlists and backups made before still work,
   and exports, `--json` and printed ids keep Qobuz's own form. Jobs files are

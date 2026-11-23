@@ -16,7 +16,7 @@ describe("session-store", () => {
   let file: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "qobuz-helper-test-"));
+    dir = mkdtempSync(join(tmpdir(), "crosstune-test-"));
     file = join(dir, "nested", "session.json");
   });
 
@@ -61,12 +61,12 @@ describe("session-store", () => {
 describe("defaultSessionPath", () => {
   it("uses XDG_CONFIG_HOME when set", () => {
     expect(defaultSessionPath({ XDG_CONFIG_HOME: "/cfg" })).toBe(
-      "/cfg/qobuz-helper/session.json",
+      "/cfg/crosstune/session.json",
     );
   });
 
   it("falls back to ~/.config when XDG_CONFIG_HOME is unset", () => {
     const path = defaultSessionPath({});
-    expect(path.endsWith("/.config/qobuz-helper/session.json")).toBe(true);
+    expect(path.endsWith("/.config/crosstune/session.json")).toBe(true);
   });
 });

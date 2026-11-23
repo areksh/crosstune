@@ -154,18 +154,18 @@ export function describeTarget(job: Job, playlistId: PlaylistId | undefined, nam
   if (job.target.type === "adopted") {
     return `your playlist${called} (${shortId(job.target.playlistId)})`;
   }
-  return playlistId === undefined ? "no playlist yet" : `playlist${called} (${shortId(playlistId)}), created by qobuz-helper`;
+  return playlistId === undefined ? "no playlist yet" : `playlist${called} (${shortId(playlistId)}), created by crosstune`;
 }
 
 function describeFlags(flags: GlobalFlags): string[] {
   return [
     ...signInFlags(flags).map(({ service }) =>
       service === "qobuz"
-        ? "! Jobs are stopped: the Qobuz session expired. Sign in again with: qobuz-helper login"
-        : `! Jobs using ${labelOf(service)} are stopped: its sign-in expired. Sign in again with: qobuz-helper login ${service}`,
+        ? "! Jobs are stopped: the Qobuz session expired. Sign in again with: crosstune login"
+        : `! Jobs using ${labelOf(service)} are stopped: its sign-in expired. Sign in again with: crosstune login ${service}`,
     ),
     ...(flags.bundleBroken !== undefined
-      ? [`! Jobs are stopped: Qobuz changed its web player (${flags.bundleBroken.message}). Update qobuz-helper.`]
+      ? [`! Jobs are stopped: Qobuz changed its web player (${flags.bundleBroken.message}). Update crosstune.`]
       : []),
   ];
 }
@@ -173,7 +173,7 @@ function describeFlags(flags: GlobalFlags): string[] {
 export function formatJobList(list: { jobs: JobView[]; invalid: InvalidJob[]; flags: GlobalFlags }): string {
   const lines = describeFlags(list.flags);
   if (list.jobs.length === 0 && list.invalid.length === 0) {
-    lines.push("No jobs yet. Create one with: qobuz-helper jobs create <new-releases|combined|follow|smart|discovery|tidy> ...");
+    lines.push("No jobs yet. Create one with: crosstune jobs create <new-releases|combined|follow|smart|discovery|tidy> ...");
     return lines.join("\n");
   }
   for (const { job, state, stateError } of list.jobs) {
@@ -216,9 +216,9 @@ export function formatRunSummary(summary: RunSummary): string {
     case "jobs-file-error":
       return summary.message ?? summary.status;
     case "needs-sign-in":
-      return `Jobs are stopped: the Qobuz session was rejected (${summary.message ?? ""}). Sign in again with: qobuz-helper login`;
+      return `Jobs are stopped: the Qobuz session was rejected (${summary.message ?? ""}). Sign in again with: crosstune login`;
     case "bundle-broken":
-      return `Jobs are stopped: Qobuz changed its web player (${summary.message ?? ""}). Update qobuz-helper.`;
+      return `Jobs are stopped: Qobuz changed its web player (${summary.message ?? ""}). Update crosstune.`;
     case "ran":
       return summary.reports
         .map((report) => withNotes(`${report.name}: ${describeResult(report.result)}`, report.result.notes))
@@ -261,7 +261,7 @@ export function formatSuggestions(view: JobView): string {
   return [
     `"${view.job.name}" -- ${count(suggestions.length, "suggestion")}:`,
     ...suggestions.map((suggestion) => `  ${suggestion.key}  ${suggestion.summary}`),
-    `Accept with: qobuz-helper jobs accept ${view.job.id} <key...>|--all  (or ignore the same way)`,
+    `Accept with: crosstune jobs accept ${view.job.id} <key...>|--all  (or ignore the same way)`,
   ].join("\n");
 }
 

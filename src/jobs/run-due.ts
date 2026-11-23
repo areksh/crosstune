@@ -87,7 +87,7 @@ export async function runDue(
 ): Promise<RunSummary> {
   const lock = deps.acquireLock();
   if (lock === undefined) {
-    return { status: "busy", reports: [], invalid: [], message: "Another qobuz-helper is running jobs." };
+    return { status: "busy", reports: [], invalid: [], message: "Another crosstune is running jobs." };
   }
   try {
     return await runLocked(deps, now, options);
@@ -288,7 +288,7 @@ export async function acceptNow(
 ): Promise<AcceptOutcome> {
   const lock = deps.acquireLock();
   if (lock === undefined) {
-    return { status: "busy", message: "Another qobuz-helper is running jobs." };
+    return { status: "busy", message: "Another crosstune is running jobs." };
   }
   try {
     const job = deps.jobs.load().file.jobs.find((candidate) => candidate.id === jobId);

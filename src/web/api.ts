@@ -84,13 +84,13 @@ export interface Playlist {
 }
 
 const nonce =
-  document.querySelector('meta[name="qobuz-nonce"]')?.getAttribute("content") ??
+  document.querySelector('meta[name="crosstune-nonce"]')?.getAttribute("content") ??
   "";
 
 /** What every request carries: the page's nonce, and the service it is on. */
 function baseHeaders(on: Choice | undefined = chosenService()): Record<string, string> {
   const service = on;
-  return { "X-Qobuz-Nonce": nonce, ...(service !== undefined && { "X-Music-Service": service }) };
+  return { "X-Crosstune-Nonce": nonce, ...(service !== undefined && { "X-Music-Service": service }) };
 }
 
 /** Call a local API route, returning the parsed JSON or throwing on error. */

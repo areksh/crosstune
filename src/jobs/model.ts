@@ -1,5 +1,5 @@
 /**
- * Jobs: what qobuz-helper runs on a schedule, unattended (see ADR-0007 and
+ * Jobs: what crosstune runs on a schedule, unattended (see ADR-0007 and
  * ADR-0008).
  *
  * A job is *a playlist and what manages it*: its target (a playlist the job
@@ -929,7 +929,7 @@ function checkJob(job: Job): void {
     }
   }
   if (job.edits === "mirror" && job.target.type !== "created") {
-    throw new Error("strict mirror is only for playlists qobuz-helper created; use respect edits");
+    throw new Error("strict mirror is only for playlists crosstune created; use respect edits");
   }
   if (job.shape?.maxReleases !== undefined && job.source?.type !== "new-releases") {
     throw new Error("maxReleases is only for a new releases source");

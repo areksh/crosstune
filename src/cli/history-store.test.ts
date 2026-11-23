@@ -12,7 +12,7 @@ describe("history-store", () => {
   let file: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "qobuz-helper-test-"));
+    dir = mkdtempSync(join(tmpdir(), "crosstune-test-"));
     file = join(dir, "nested", "history.jsonl");
   });
 
@@ -21,7 +21,7 @@ describe("history-store", () => {
   });
 
   it("lives beside the session, honouring XDG_CONFIG_HOME", () => {
-    expect(defaultHistoryPath({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/qobuz-helper/history.jsonl");
+    expect(defaultHistoryPath({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/crosstune/history.jsonl");
   });
 
   it("runs exclusive sections under a lock, refusing while another process holds it", () => {

@@ -23,7 +23,7 @@ describe("bundle-store", () => {
   let file: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "qobuz-helper-bundle-test-"));
+    dir = mkdtempSync(join(tmpdir(), "crosstune-bundle-test-"));
     file = join(dir, "nested", "bundle.json");
   });
 
@@ -102,12 +102,12 @@ describe("bundle-store", () => {
 describe("defaultBundlePath", () => {
   it("uses XDG_CONFIG_HOME when set", () => {
     expect(defaultBundlePath({ XDG_CONFIG_HOME: "/cfg" })).toBe(
-      "/cfg/qobuz-helper/bundle.json",
+      "/cfg/crosstune/bundle.json",
     );
   });
 
   it("falls back to ~/.config when XDG_CONFIG_HOME is unset", () => {
-    expect(defaultBundlePath({}).endsWith("/.config/qobuz-helper/bundle.json")).toBe(
+    expect(defaultBundlePath({}).endsWith("/.config/crosstune/bundle.json")).toBe(
       true,
     );
   });

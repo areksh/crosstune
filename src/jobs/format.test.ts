@@ -88,7 +88,7 @@ describe("formatJobList", () => {
     expect(text).toContain("Fridays at 07:30");
     expect(text).toContain("2 artists + 3 similar each");
     expect(text).toContain("released in the last 30 days");
-    expect(text).toContain("playlist (77), created by qobuz-helper");
+    expect(text).toContain("playlist (77), created by crosstune");
     expect(text).toContain("Upgrade monthly (suggest) · Dedupe every pass");
     expect(text).toContain("ok: +3 tracks");
     expect(text).toContain("next 2026-11-06T07:30:00.000Z");
@@ -124,7 +124,7 @@ describe("formatRunSummary", () => {
     expect(formatRunSummary({ status: "nothing-due", reports: [], invalid: [] })).toBe("Nothing is due.");
     expect(formatRunSummary({ status: "busy", reports: [], invalid: [], message: "Another one" })).toBe("Another one");
     expect(formatRunSummary({ status: "needs-sign-in", reports: [], invalid: [], message: "expired" })).toMatch(
-      /qobuz-helper login/,
+      /crosstune login/,
     );
     expect(
       formatRunSummary({

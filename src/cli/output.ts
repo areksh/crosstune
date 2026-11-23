@@ -5,7 +5,7 @@
  * result it produced, field by field, into one document that is written to
  * stdout once the command has finished -- exactly one JSON document per run --
  * while every log line (progress included) goes to stderr. So
- * `qobuz-helper --json deduplicate --favourites > report.json` captures only
+ * `crosstune --json deduplicate --favourites > report.json` captures only
  * the JSON. In text mode recording is a no-op and the logger works as usual.
  *
  * The document always starts with `"command"`, then the fields in the order a

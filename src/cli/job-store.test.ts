@@ -42,7 +42,7 @@ const job = validateJob({
 
 describe("configDir", () => {
   it("honours XDG_CONFIG_HOME", () => {
-    expect(configDir({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/qobuz-helper");
+    expect(configDir({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/crosstune");
   });
 });
 

@@ -552,7 +552,7 @@ function parseTracksM3u(content: string): ParsedTrack[] {
 export function parseBackup(content: string): LibraryBackup {
   const data: unknown = JSON.parse(content);
   if (!isRecord(data) || !isRecord(data["favourites"])) {
-    throw new Error("not a qobuz-helper backup");
+    throw new Error("not a crosstune backup");
   }
   const favourites = data["favourites"];
   const playlistsRaw = Array.isArray(data["playlists"]) ? data["playlists"] : [];

@@ -7,6 +7,8 @@
  * it drives lives in the tested server modules.
  */
 
+// First: carries this browser's settings over from the old name.
+import "./old-settings.js";
 import type { AccountView } from "../accounts/accounts.js";
 import { isServiceName } from "../services/names.js";
 import { api } from "./api.js";

@@ -16,10 +16,10 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { ResolvedCredentials } from "../services/qobuz/index.js";
+import { configDir } from "./config-dir.js";
 
 /** Bump when the on-disk shape changes, to invalidate older caches. */
 const CACHE_VERSION = 1;
@@ -42,11 +42,7 @@ export interface LoadOptions {
 
 /** The default bundle-cache path, honouring `XDG_CONFIG_HOME`. */
 export function defaultBundlePath(env: NodeJS.ProcessEnv = process.env): string {
-  const configHome =
-    env["XDG_CONFIG_HOME"] && env["XDG_CONFIG_HOME"].length > 0
-      ? env["XDG_CONFIG_HOME"]
-      : join(homedir(), ".config");
-  return join(configHome, "qobuz-helper", "bundle.json");
+  return join(configDir(env), "bundle.json");
 }
 
 /** Cache validated credentials, creating the directory and restricting permissions. */

@@ -1,6 +1,6 @@
 /**
- * Ready-to-install snippets that call `qobuz-helper run-due` every 15 minutes
- * from the OS scheduler (`qobuz-helper schedule print`). Nothing is installed
+ * Ready-to-install snippets that call `crosstune run-due` every 15 minutes
+ * from the OS scheduler (`crosstune schedule print`). Nothing is installed
  * automatically. `run-due` only does something when a job is due, so a short
  * interval costs nothing and catches up soon after a machine wakes.
  */
@@ -23,17 +23,17 @@ export function scheduleSnippet(target: ScheduleTarget, paths: SchedulePaths): s
       ].join("\n");
     case "systemd":
       return [
-        "# ~/.config/systemd/user/qobuz-helper.service",
+        "# ~/.config/systemd/user/crosstune.service",
         "[Unit]",
-        "Description=qobuz-helper: run the jobs that are due",
+        "Description=crosstune: run the jobs that are due",
         "",
         "[Service]",
         "Type=oneshot",
         `ExecStart="${node}" "${script}" run-due`,
         "",
-        "# ~/.config/systemd/user/qobuz-helper.timer",
+        "# ~/.config/systemd/user/crosstune.timer",
         "[Unit]",
-        "Description=Run qobuz-helper jobs every 15 minutes",
+        "Description=Run crosstune jobs every 15 minutes",
         "",
         "[Timer]",
         "OnCalendar=*:0/15",
@@ -42,17 +42,17 @@ export function scheduleSnippet(target: ScheduleTarget, paths: SchedulePaths): s
         "[Install]",
         "WantedBy=timers.target",
         "",
-        "# Then: systemctl --user daemon-reload && systemctl --user enable --now qobuz-helper.timer",
+        "# Then: systemctl --user daemon-reload && systemctl --user enable --now crosstune.timer",
         "# (and `loginctl enable-linger $USER` to run while you are logged out)",
       ].join("\n");
     case "launchd":
       return [
-        "<!-- ~/Library/LaunchAgents/com.qobuz-helper.run-due.plist -->",
+        "<!-- ~/Library/LaunchAgents/com.crosstune.run-due.plist -->",
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
         '<plist version="1.0">',
         "<dict>",
-        "  <key>Label</key><string>com.qobuz-helper.run-due</string>",
+        "  <key>Label</key><string>com.crosstune.run-due</string>",
         "  <key>ProgramArguments</key>",
         `  <array><string>${node}</string><string>${script}</string><string>run-due</string></array>`,
         "  <key>StartInterval</key><integer>900</integer>",
@@ -61,12 +61,12 @@ export function scheduleSnippet(target: ScheduleTarget, paths: SchedulePaths): s
         `  <key>StandardErrorPath</key><string>${logFile}</string>`,
         "</dict>",
         "</plist>",
-        "<!-- Then: launchctl load ~/Library/LaunchAgents/com.qobuz-helper.run-due.plist -->",
+        "<!-- Then: launchctl load ~/Library/LaunchAgents/com.crosstune.run-due.plist -->",
       ].join("\n");
     case "windows":
       return [
         "REM Run once in a command prompt:",
-        `schtasks /Create /SC MINUTE /MO 15 /TN "qobuz-helper run-due" /TR "\\"${node}\\" \\"${script}\\" run-due"`,
+        `schtasks /Create /SC MINUTE /MO 15 /TN "crosstune run-due" /TR "\\"${node}\\" \\"${script}\\" run-due"`,
       ].join("\n");
   }
 }
