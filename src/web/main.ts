@@ -14,13 +14,13 @@ import { api } from "./api.js";
 import { initArtworkToggle } from "./artwork.js";
 import { el } from "./dom.js";
 import { applyPrefill } from "./prefill.js";
-import { parseRoute, redirectFor, type Route } from "../ui/routes.js";
+import { parseRoute, redirectFor, viewOf, type Route } from "../ui/routes.js";
 import { initLibrary, markActive, refreshLibrary } from "./library.js";
 import { initShell } from "./shell.js";
 import { initFavouritesView } from "./playlist-page.js";
 import { attentionBadge, linkAttention } from "../sync/wording.js";
 import { accountNotices, linkNotices, showNotices, type Notice } from "./notices.js";
-import { chosenService, connectedServices, rememberService, setConnectedServices } from "./service.js";
+import { chosenService, connectedServices, rememberService, setConnectedServices, workingService } from "./service.js";
 import { workingNotice } from "../ui/working-service.js";
 import { initAccountsView } from "./views/accounts.js";
 import { initAlbumsView } from "./views/albums.js";
@@ -68,37 +68,26 @@ function isView(value: string): value is View {
 const LIBRARY_VIEWS: readonly View[] = ["home", "playlists", "favourites", "accounts"];
 let shown: View | undefined;
 
-/** The section that shows a route. */
-function viewOf(route: Route): View {
-  switch (route.kind) {
-    case "home":
-      return "home";
-    case "playlist":
-    case "all":
-      return "playlists";
-    case "favourites":
-      return "favourites";
-    case "settings":
-      return "accounts";
-    case "view":
-      return isView(route.view) && route.view !== "playlists" && route.view !== "accounts" ? route.view : "home";
-  }
+/** The section that shows a route, when the page has it. */
+function viewFor(route: Route): View {
+  const view = viewOf(route);
+  return isView(view) ? view : "home";
 }
 
 /** The view the current URL hash shows. */
 function currentView(): View {
-  return viewOf(parseRoute(location.hash));
+  return viewFor(parseRoute(location.hash));
 }
 
 function route(): void {
-  const redirect = redirectFor(location.hash);
+  const redirect = redirectFor(location.hash, workingService());
   if (redirect !== undefined) {
     // Fires hashchange again, which shows the new address.
     location.replace(redirect);
     return;
   }
   const where = parseRoute(location.hash);
-  const active = viewOf(where);
+  const active = viewFor(where);
   // A tool (or History's undo) may have written: read the library again on leaving it.
   if (shown !== undefined && shown !== active && !LIBRARY_VIEWS.includes(shown)) {
     void refreshLibrary();

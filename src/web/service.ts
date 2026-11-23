@@ -45,6 +45,12 @@ export function setConnectedServices(services: readonly ServiceName[]): void {
   connected = services;
 }
 
+/** The one service the page works on: the remembered one if connected, else the first. */
+export function workingService(): ServiceName | undefined {
+  const chosen = chosenService();
+  return connected.find((service) => service === chosen) ?? connected[0];
+}
+
 const TAB_KEY = "crosstune:tab";
 
 /**
