@@ -17,6 +17,7 @@
  */
 
 import { shortId, type AlbumId, type EntryId, type PlaylistId, type TrackId } from "../services/ids.js";
+import { normaliseIsrc } from "../services/isrc.js";
 import type { Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 
@@ -266,7 +267,8 @@ export function findDuplicateGroups(
   };
 
   tracks.forEach((track, index) => {
-    linkOn(track.isrc === undefined ? undefined : `isrc:${track.isrc}`, index);
+    // ISRCs as services write them differ in case and hyphens.
+    linkOn(track.isrc === undefined ? undefined : `isrc:${normaliseIsrc(track.isrc)}`, index);
     linkOn(`sig:${trackSignature(track)}`, index);
     if (options.includeVersions === true) {
       linkOn(songKey(track), index);

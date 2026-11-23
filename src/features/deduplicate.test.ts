@@ -597,6 +597,16 @@ describe("versions", () => {
     expect(ids([by(1, "Love"), by(2, "Love", "Mono")])).toEqual([[1, 2]]);
   });
 
+  it("links copies whose ISRCs are written differently", () => {
+    const ids = (tracks: DedupTrack[]) => findDuplicateGroups(tracks).map((g) => g.map((t) => t.id));
+    expect(
+      ids([
+        { id: 1, title: "A", artist: "X", isrc: "gb-aaa-91-00001" },
+        { id: 2, title: "B", artist: "Y", isrc: "GBAAA9100001" },
+      ]),
+    ).toEqual([[1, 2]]);
+  });
+
   it("does not call duplicates other versions", () => {
     expect(findOtherVersions([song(1), song(2, "2011 Remaster")])).toEqual([]);
     expect(findOtherVersions([song(1, undefined, "X"), song(2, "Live", "X")])).toEqual([]);
