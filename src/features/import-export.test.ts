@@ -24,6 +24,7 @@ import {
   serializeCollection,
   type Collection,
   type ExportClient,
+  type ImportPlan,
   type ImportResolverClient,
   type ImportWriterClient,
   type LibraryBackup,
@@ -209,11 +210,11 @@ describe("resolveImport", () => {
     expect(plan.matched).toEqual([{ label: "Portishead", id: qid(55), via: "search" }]);
   });
 
-  it("does not guess whose song a title-only line is", async () => {
+  it("does not guess whose song a title-only line is: it offers the songs to check", async () => {
     const searchTracks = vi.fn(async (query: string): Promise<Track[]> =>
       query === "GBAYE6300001"
         ? [{ id: qid(81), title: "Yesterday", artist: "The Beatles", isrc: "GBAYE6300001" }]
-        : [{ id: qid(80), title: "Yesterday", artist: "A Cover Band" }],
+        : [{ id: qid(80), title: "Yesterday", artist: "A Cover Band", album: "Covers", releaseDate: "2001-05-01" }],
     );
     const plan = await resolveImport(fakeResolver({ searchTracks }), {
       kind: "tracks",
@@ -221,8 +222,113 @@ describe("resolveImport", () => {
     });
     // By its ISRC a title-only line is still the same recording.
     expect(plan.matched).toEqual([{ label: "Yesterday", id: qid(81), via: "isrc" }]);
+    // Without one, nothing is taken: the user chooses among what has that title.
+    expect(plan.unmatched).toEqual([]);
+    expect(plan.toCheck).toEqual([
+      {
+        label: "Yesterday",
+        position: 0,
+        options: [{ id: qid(80), title: "Yesterday", artist: "A Cover Band", album: "Covers", releaseDate: "2001-05-01" }],
+      },
+    ]);
+    expect(searchTracks.mock.calls.map((call) => call[0])).toEqual(["Yesterday", "GBAYE6300001"]);
+  });
+
+  it("offers only songs with the line's title, at most five, versions counting as other songs", async () => {
+    const song = (id: number, title: string, extra: Partial<Track> = {}): Track => ({
+      id: qid(id),
+      title,
+      artist: `Artist ${id}`,
+      ...extra,
+    });
+    const searchTracks = vi.fn(async (): Promise<Track[]> => [
+      song(1, "Hallelujah"),
+      song(2, "Hallelujah", { version: "Live" }),
+      song(3, "Hallelujah (Live)"),
+      song(4, "Hallelujah", { version: "2011 Remaster" }),
+      song(5, "Hallelujah Remix Party"),
+      song(6, "Hallelujah", { streamable: false }),
+      song(7, "Hallelujah", { other: "video" }),
+      song(8, "Hallelujah"),
+      song(9, "Hallelujah"),
+      song(10, "Hallelujah"),
+      song(11, "Hallelujah"),
+    ]);
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Hallelujah" }],
+    });
+    expect(plan.toCheck?.[0]?.options.map((option) => option.id)).toEqual([qid(1), qid(4), qid(8), qid(9), qid(10)]);
+    expect(plan.toCheck?.[0]?.options[1]).toMatchObject({ title: "Hallelujah", version: "2011 Remaster" });
+
+    const live = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Hallelujah (Live)" }],
+    });
+    expect(live.toCheck?.[0]?.options.map((option) => option.id)).toEqual([qid(2), qid(3)]);
+  });
+
+  it("puts a title-only line's songs first when they are on the line's album", async () => {
+    const searchTracks = vi.fn(async (): Promise<Track[]> => [
+      { id: qid(1), title: "Angel", artist: "Shaggy", album: "Hot Shot" },
+      { id: qid(2), title: "Angel", artist: "Massive Attack", album: "Mezzanine" },
+    ]);
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Angel", album: "Mezzanine" }],
+    });
+    expect(plan.toCheck?.[0]?.options.map((option) => option.id)).toEqual([qid(2), qid(1)]);
+  });
+
+  it("reports a title-only line nothing has the title of as unmatched", async () => {
+    const searchTracks = vi.fn(async (): Promise<Track[]> => [{ id: qid(1), title: "Yesterday Once More", artist: "Carpenters" }]);
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [{ title: "Yesterday" }],
+    });
+    expect(plan.toCheck).toEqual([]);
     expect(plan.unmatched).toEqual(["Yesterday (no artist given)"]);
-    expect(searchTracks.mock.calls.map((call) => call[0])).toEqual(["GBAYE6300001"]);
+  });
+
+  it("keeps where each line to check falls among the matched ones", async () => {
+    const searchTracks = vi.fn(async (query: string): Promise<Track[]> =>
+      query.includes("Roads")
+        ? [{ id: qid(1), title: "Roads", artist: "Portishead" }]
+        : query.includes("Teardrop")
+          ? [{ id: qid(2), title: "Teardrop", artist: "Massive Attack" }]
+          : [{ id: qid(3), title: "Yesterday", artist: "The Beatles" }],
+    );
+    const plan = await resolveImport(fakeResolver({ searchTracks }), {
+      kind: "tracks",
+      items: [
+        { title: "Yesterday" },
+        { title: "Roads", artist: "Portishead" },
+        { title: "Yesterday" },
+        { title: "Nothing", artist: "Nobody" },
+        { title: "Teardrop", artist: "Massive Attack" },
+      ],
+    });
+    expect(plan.matched.map((item) => item.id)).toEqual([qid(1), qid(2)]);
+    expect(plan.toCheck?.map((item) => item.position)).toEqual([0, 1]);
+  });
+
+  it("reports a title-only line whose search failed, and stops on an error every line would hit", async () => {
+    const failing = vi.fn(async (): Promise<Track[]> => {
+      throw new Error("HTTP 500");
+    });
+    const plan = await resolveImport(fakeResolver({ searchTracks: failing }), {
+      kind: "tracks",
+      items: [{ title: "Yesterday" }],
+    });
+    expect(plan.unmatched).toEqual(["Yesterday (could not be looked up)"]);
+    expect(plan.toCheck).toEqual([]);
+
+    const signedOut = vi.fn(async (): Promise<Track[]> => {
+      throw new ServiceError("qobuz", "authentication", "signed out");
+    });
+    await expect(
+      resolveImport(fakeResolver({ searchTracks: signedOut }), { kind: "tracks", items: [{ title: "Yesterday" }] }),
+    ).rejects.toThrow("signed out");
   });
 
   it("takes an artist only by name, never the first search hit", async () => {
@@ -366,6 +472,57 @@ describe("commitImport", () => {
     expect(writer.calls["createPlaylist"]).toEqual([["Imported", { isPublic: true }]]);
     expect(writer.calls["addTracksToPlaylist"]).toEqual([[qid(100), [qid(1)]]]);
     expect(result.playlist).toEqual({ id: qid(100), name: "Imported" });
+  });
+
+  const withLinesToCheck = (): ImportPlan => ({
+    kind: "tracks",
+    matched: [
+      { label: "a", id: qid(1) },
+      { label: "b", id: qid(2) },
+    ],
+    unmatched: [],
+    toCheck: [
+      { label: "first", position: 0, options: [{ id: qid(10), title: "First" }, { id: qid(11), title: "First" }] },
+      { label: "middle", position: 1, options: [{ id: qid(20), title: "Middle" }] },
+      { label: "last", position: 2, options: [{ id: qid(30), title: "Last" }] },
+    ],
+  });
+
+  it("writes the songs picked for lines to check where the lines were", async () => {
+    const writer = fakeWriter();
+    const result = await commitImport(writer, withLinesToCheck(), { type: "playlist-new", name: "Mix" }, [
+      qid(11),
+      null,
+      qid(30),
+    ]);
+    expect(writer.calls["addTracksToPlaylist"]).toEqual([[qid(100), [qid(11), qid(1), qid(2), qid(30)]]]);
+    expect(result).toMatchObject({ written: 4, skipped: 1 });
+  });
+
+  it("writes none of the lines to check without picks, counting them skipped", async () => {
+    const writer = fakeWriter();
+    const result = await commitImport(writer, withLinesToCheck(), { type: "favourites" });
+    expect(writer.calls["addFavoriteTracks"]).toEqual([[[qid(1), qid(2)]]]);
+    expect(result).toEqual({ written: 2, skipped: 3 });
+  });
+
+  it("writes a picked song already matched only once", async () => {
+    const writer = fakeWriter();
+    const plan = withLinesToCheck();
+    plan.toCheck![1]!.options.push({ id: qid(1), title: "a" });
+    await commitImport(writer, plan, { type: "favourites" }, [null, qid(1), null]);
+    expect(writer.calls["addFavoriteTracks"]).toEqual([[[qid(1), qid(2)]]]);
+  });
+
+  it("refuses a pick that is not one of that line's songs, writing nothing", async () => {
+    const writer = fakeWriter();
+    await expect(
+      commitImport(writer, withLinesToCheck(), { type: "favourites" }, [qid(20), null, null]),
+    ).rejects.toThrow(/not one of the songs offered for first/);
+    await expect(
+      commitImport(writer, withLinesToCheck(), { type: "favourites" }, [null, null, null, qid(1)]),
+    ).rejects.toThrow(/more picks than lines to check/);
+    expect(writer.calls).toEqual({});
   });
 
   it("refuses to put a non-track plan into a playlist", async () => {

@@ -410,6 +410,7 @@ describe("parseImportArgs", () => {
       file: "tracks.csv",
       isPublic: false,
       apply: false,
+      acceptLikely: false,
     });
   });
 
@@ -421,6 +422,7 @@ describe("parseImportArgs", () => {
       file: "in.txt",
       isPublic: true,
       apply: true,
+      acceptLikely: false,
     });
   });
 
@@ -430,6 +432,7 @@ describe("parseImportArgs", () => {
       file: "backup.json",
       isPublic: false,
       apply: false,
+      acceptLikely: false,
     });
   });
 
@@ -443,6 +446,16 @@ describe("parseImportArgs", () => {
     expect(() => parseImportArgs(["--favourites", "--account", "f.json"])).toThrow(/only one/);
   });
 
+  it("takes the first song for each line to check only with --accept-likely", () => {
+    expect(parseImportArgs(["--favourites", "--apply", "--accept-likely", "titles.txt"])).toEqual({
+      target: { type: "favourites" },
+      file: "titles.txt",
+      isPublic: false,
+      apply: true,
+      acceptLikely: true,
+    });
+  });
+
   it("accepts the import-only spotify format", () => {
     expect(parseImportArgs(["--new-playlist", "From Spotify", "--format", "spotify", "x.csv"])).toEqual({
       target: { type: "playlist-new", name: "From Spotify" },
@@ -450,6 +463,7 @@ describe("parseImportArgs", () => {
       format: "spotify",
       isPublic: false,
       apply: false,
+      acceptLikely: false,
     });
   });
 });

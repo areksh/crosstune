@@ -14,6 +14,8 @@ import { api, type Playlist, type Track } from "./api.js";
 import { openDialog } from "./dialog.js";
 import { el } from "./dom.js";
 import { chosenService, connectedServices } from "./service.js";
+import { songLine } from "../ui/song-line.js";
+import { choiceList } from "./song-choice.js";
 
 /** Songs to send: as the page holds them, or a whole playlist. */
 export type Songs = { tracks: readonly TransferTrack[] } | { playlistId: PlaylistId };
@@ -238,51 +240,16 @@ function likelyList(
   matches: readonly SongMatch[],
   picks: Map<SongMatch, { track: TrackId | null; decided: boolean }>,
 ): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "transfer-list";
-  const heading = document.createElement("h3");
-  heading.textContent = "Check these";
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.textContent = "Nothing is copied for a song until you choose. Your choice is remembered.";
-  box.append(heading, hint);
-  for (const match of matches) {
-    const row = document.createElement("label");
-    row.className = "transfer-row";
-    const from = document.createElement("span");
-    from.className = "transfer-song";
-    from.textContent = songLine(match.source);
-    const why = document.createElement("span");
-    why.className = "hint";
-    why.textContent = match.reason ?? "";
-    const select = document.createElement("select");
-    select.append(new Option("Choose...", "", true, true), new Option("Leave it out", "none"));
-    for (const option of match.options) {
-      select.append(new Option(optionLine(option), option.id));
-    }
-    select.addEventListener("change", () => {
-      const value = select.value;
-      picks.set(match, value === "" ? { track: null, decided: false } : { track: value === "none" ? null : (value as TrackId), decided: true });
-    });
-    row.append(from, why, select);
-    box.append(row);
-  }
-  const all = document.createElement("button");
-  all.type = "button";
-  all.className = "secondary small";
-  all.textContent = "Take the first suggestion for all";
-  all.addEventListener("click", () => {
-    box.querySelectorAll("select").forEach((select) => {
-      if (select.value === "" && select.options.length > 2) {
-        select.selectedIndex = 2;
-        select.dispatchEvent(new Event("change"));
-      }
-    });
-  });
-  if (matches.length > 1) {
-    hint.after(all);
-  }
-  return box;
+  return choiceList(
+    matches.map((match) => ({
+      song: songLine(match.source),
+      ...(match.reason !== undefined && { why: match.reason }),
+      options: match.options,
+      onChange: (choice) =>
+        picks.set(match, choice === undefined ? { track: null, decided: false } : { track: choice, decided: true }),
+    })),
+    { heading: "Check these", hint: "Nothing is copied for a song until you choose. Your choice is remembered." },
+  );
 }
 
 function missingList(matches: readonly SongMatch[]): HTMLElement {
@@ -303,25 +270,4 @@ function missingList(matches: readonly SongMatch[]): HTMLElement {
   }
   box.append(summary, list);
   return box;
-}
-
-interface Line {
-  title: string;
-  version?: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-  releaseDate?: string;
-}
-
-function songLine(track: Line): string {
-  const title = track.version === undefined ? track.title : `${track.title} (${track.version})`;
-  return track.artist === undefined ? title : `${title} – ${track.artist}`;
-}
-
-function optionLine(track: Line): string {
-  const length = track.duration === undefined ? "" : ` (${Math.floor(track.duration / 60)}:${String(Math.round(track.duration % 60)).padStart(2, "0")})`;
-  const album = track.album === undefined ? "" : `, ${track.album}`;
-  const year = track.releaseDate === undefined ? "" : `, ${track.releaseDate.slice(0, 4)}`;
-  return `${songLine(track)}${album}${year}${length}`;
 }

@@ -1262,6 +1262,22 @@ describe("POST /api/import/resolve", () => {
     });
   });
 
+  it("offers the songs of a title-only line to check", async () => {
+    const svc = service({
+      searchTracks: vi.fn(async () => [{ id: qid(80), title: "Yesterday", artist: "The Beatles", album: "Help!" }]),
+    });
+    const res = await handleApi(
+      request("POST", "/api/import/resolve", { format: "csv", kind: "tracks", content: "title\nYesterday\n" }),
+      deps({ service: svc }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      matched: [],
+      unmatched: [],
+      toCheck: [{ label: "Yesterday", position: 0, options: [{ id: qid(80), title: "Yesterday", artist: "The Beatles", album: "Help!" }] }],
+    });
+  });
+
   it("reads an Exportify CSV as a Spotify export, matching by ISRC", async () => {
     const searchTracks = vi.fn(async (query: string) =>
       query === "GBAAA0000001"
@@ -1356,6 +1372,56 @@ describe("POST /api/import/commit", () => {
       deps(),
     );
     expect(res.status).toBe(400);
+  });
+
+  const planToCheck = {
+    kind: "tracks",
+    matched: [{ label: "a", id: qid(1) }],
+    toCheck: [
+      { label: "Yesterday", position: 0, options: [{ id: qid(80), title: "Yesterday", artist: "A Cover Band" }, { id: qid(81), title: "Yesterday" }] },
+      { label: "Angel", position: 1, options: [{ id: qid(90), title: "Angel" }] },
+    ],
+  };
+
+  it("writes the songs picked for lines to check, where the lines were", async () => {
+    const addFavoriteTracks = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/import/commit", { plan: planToCheck, picks: [qid(81), null], target: { type: "favourites" } }),
+      deps({ service: service({ addFavoriteTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([qid(81), qid(1)]);
+    expect(res.body).toEqual({ written: 2, skipped: 1 });
+  });
+
+  it("takes a plan with nothing matched when a line to check has a pick", async () => {
+    const addFavoriteTracks = vi.fn(async () => {});
+    const res = await handleApi(
+      request("POST", "/api/import/commit", {
+        plan: { ...planToCheck, matched: [], toCheck: [{ ...planToCheck.toCheck[1], position: 0 }] },
+        picks: [qid(90)],
+        target: { type: "favourites" },
+      }),
+      deps({ service: service({ addFavoriteTracks }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(addFavoriteTracks).toHaveBeenCalledWith([qid(90)]);
+  });
+
+  it.each([
+    ["a song the line did not offer", { plan: planToCheck, picks: [qid(90), null] }, /not one of the songs offered for Yesterday/],
+    ["more picks than lines", { plan: planToCheck, picks: [null, null, qid(1)] }, /more picks/],
+    ["picks that are not a list", { plan: planToCheck, picks: qid(81) }, /picks must be/],
+    ["a pick that is not a track id", { plan: planToCheck, picks: ["x y"] }, /picks must be/],
+    ["a line to check without options", { plan: { ...planToCheck, toCheck: [{ label: "x", position: 0, options: [] }] } }, /toCheck/],
+    ["a line to check placed past the matched", { plan: { ...planToCheck, toCheck: [{ ...planToCheck.toCheck[0], position: 2 }] } }, /position/],
+    ["nothing matched and nothing picked", { plan: { ...planToCheck, matched: [], toCheck: [planToCheck.toCheck[0]] }, picks: [null] }, /nothing to import/],
+  ])("refuses %s, writing nothing", async (_, body, error) => {
+    const svc = service();
+    const res = await handleApi(request("POST", "/api/import/commit", { ...body, target: { type: "favourites" } }), deps({ service: svc }));
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: expect.stringMatching(error) });
+    expect(svc.addFavoriteTracks).not.toHaveBeenCalled();
   });
 });
 

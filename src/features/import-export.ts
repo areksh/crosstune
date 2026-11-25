@@ -620,6 +620,37 @@ export interface MatchedItem {
   via?: MatchMethod;
 }
 
+/** A song a line to check may be: what tells it apart from the others offered. */
+export interface ImportOption {
+  id: TrackId;
+  title: string;
+  /** Its version ("Live", "2011 Remaster"), when the service keeps it apart from the title. */
+  version?: string;
+  artist?: string;
+  album?: string;
+  /** YYYY-MM-DD (or as much of it as is known). */
+  releaseDate?: string;
+  /** Length in seconds. */
+  duration?: number;
+}
+
+/**
+ * A track line that gave only a title (no artist, and no ISRC that found it):
+ * the songs with that title, for the user to choose from. Nothing is written
+ * for it unless one is picked (see {@link commitImport}).
+ */
+export interface ImportToCheck {
+  label: string;
+  /**
+   * Where the line falls among the matched items: a song picked for it is
+   * written before `matched[position]` (after all of them when it equals
+   * their number), so it keeps its place in the file.
+   */
+  position: number;
+  /** The songs offered, the service's best first; never empty. */
+  options: ImportOption[];
+}
+
 /** The outcome of resolving a parsed collection to Qobuz ids. */
 export interface ImportPlan {
   kind: CollectionKind;
@@ -630,6 +661,11 @@ export interface ImportPlan {
    * failed ends in "(could not be looked up)".
    */
   unmatched: string[];
+  /**
+   * Title-only track lines, in input order, to be chosen for by the user
+   * (always set by {@link resolveImport}; absent reads as none).
+   */
+  toCheck?: ImportToCheck[];
 }
 
 /** How many matched items each method found, plus how many did not match. */
@@ -662,6 +698,15 @@ export function describeMatchCounts(counts: MatchCounts): string {
 const IMPORT_SEARCH_LIMIT = 10;
 
 /**
+ * Results to weigh for a title-only line: a title is shared by many songs, so
+ * this is wider than an artist and title search.
+ */
+const TITLE_ONLY_SEARCH_LIMIT = 20;
+
+/** How many songs a line to check offers at most. */
+export const MAX_IMPORT_OPTIONS = 5;
+
+/**
  * Results to weigh for an ISRC search. One recording is often on many releases
  * (the album, its remasters, compilations), so this is wider than a name search.
  */
@@ -673,7 +718,8 @@ const ISRC_SEARCH_LIMIT = 20;
  * An item that already carries an id is taken as-is; otherwise it is searched
  * for and best-matched. Items that resolve to no id, or whose search failed,
  * are reported in `unmatched` rather than being fatal, and ids repeated across
- * items are kept once.
+ * items are kept once. A track line with only a title goes in `toCheck` with
+ * the songs of that title, for the user to choose from.
  */
 export async function resolveImport(
   client: ImportResolverClient,
@@ -681,11 +727,16 @@ export async function resolveImport(
 ): Promise<ImportPlan> {
   const matched: MatchedItem[] = [];
   const unmatched: string[] = [];
+  const toCheck: ImportToCheck[] = [];
   const seen = new Set<string>();
 
-  const add = (label: string, match: Match | undefined): void => {
+  const add = (label: string, match: Match | ToCheck | undefined): void => {
     if (match === undefined) {
       unmatched.push(label);
+      return;
+    }
+    if ("options" in match) {
+      toCheck.push({ label, position: matched.length, options: match.options });
       return;
     }
     const key = String(match.id);
@@ -715,7 +766,7 @@ export async function resolveImport(
     );
     for (const { label, match } of resolved) add(label, match);
   }
-  return { kind: parsed.kind, matched, unmatched };
+  return { kind: parsed.kind, matched, unmatched, toCheck };
 }
 
 /**
@@ -728,8 +779,8 @@ export async function resolveImport(
  */
 async function attempt(
   label: string,
-  resolve: () => Promise<Match | NoMatch | undefined>,
-): Promise<{ label: string; match: Match | undefined }> {
+  resolve: () => Promise<Match | ToCheck | NoMatch | undefined>,
+): Promise<{ label: string; match: Match | ToCheck | undefined }> {
   try {
     const result = await resolve();
     return result !== undefined && "note" in result
@@ -754,14 +805,20 @@ interface Match {
   via: MatchMethod;
 }
 
+/** A line for the user to choose a song for. */
+interface ToCheck {
+  options: ImportOption[];
+}
+
 /**
  * Resolve one parsed track: its own id; else a search by its ISRC (the same
- * recording, see {@link pickByIsrc}); else an artist and title search.
+ * recording, see {@link pickByIsrc}); else an artist and title search; else,
+ * with only a title, the songs of that title to choose from.
  */
 async function resolveTrack(
   client: ImportResolverClient,
   item: ParsedTrack,
-): Promise<Match | NoMatch | undefined> {
+): Promise<Match | ToCheck | NoMatch | undefined> {
   if (item.id !== undefined) {
     return { id: item.id, via: "id" };
   }
@@ -777,10 +834,15 @@ async function resolveTrack(
   }
   // A title alone ("Yesterday") names a song by anybody: whichever cover the
   // search ranks first would be taken, unseen. Without an artist to check a
-  // result by (or an ISRC, above), the line is reported rather than guessed.
+  // result by (or an ISRC, above), the user chooses among the songs of that
+  // title; with none, the line is reported rather than guessed.
   const artist = item.artists?.[0] ?? item.artist;
   if (artist === undefined) {
-    return { note: "no artist given" };
+    const options = titleOptions(
+      await client.searchTracks(withoutFeaturing(item.title), TITLE_ONLY_SEARCH_LIMIT),
+      item,
+    );
+    return options.length === 0 ? { note: "no artist given" } : { options };
   }
   // Search by the first credited artist and the title without its "feat." part:
   // Qobuz keeps featured artists in the version or artist, not the title.
@@ -897,6 +959,41 @@ function pickTrack(candidates: readonly Track[], want: ParsedTrack): Track | und
   return matches.find((track) => track.streamable !== false) ?? matches[0];
 }
 
+/**
+ * The songs a title-only line may be: search results with the same title once
+ * normalised, a version included (so "Song" is not "Song" [Live], while a
+ * remaster is the same song), playable and songs at all; those on the line's
+ * album first, else in the service's order; at most {@link MAX_IMPORT_OPTIONS}.
+ */
+function titleOptions(candidates: readonly Track[], want: ParsedTrack): ImportOption[] {
+  const wantTitles = titleKeys(want.title ?? "");
+  const wantAlbum = want.album === undefined ? "" : normalise(want.album);
+  const onAlbum = (track: Track): number =>
+    wantAlbum.length > 0 && track.album !== undefined && normalise(track.album) === wantAlbum ? 1 : 0;
+  const seen = new Set<string>();
+  const same = candidates.filter((track) => {
+    if (track.streamable === false || track.other !== undefined || seen.has(track.id)) return false;
+    const full = track.version === undefined ? track.title : `${track.title} (${track.version})`;
+    if (!titleKeys(full).some((key) => wantTitles.includes(key))) return false;
+    seen.add(track.id);
+    return true;
+  });
+  return [...same]
+    .sort((a, b) => onAlbum(b) - onAlbum(a))
+    .slice(0, MAX_IMPORT_OPTIONS)
+    .map(toImportOption);
+}
+
+function toImportOption(track: Track): ImportOption {
+  const option: ImportOption = { id: track.id, title: track.title };
+  if (track.version !== undefined) option.version = track.version;
+  if (track.artist !== undefined) option.artist = track.artist;
+  if (track.album !== undefined) option.album = track.album;
+  if (track.releaseDate !== undefined) option.releaseDate = track.releaseDate;
+  if (track.duration !== undefined) option.duration = track.duration;
+  return option;
+}
+
 function trackLabel(item: ParsedTrack): string {
   return artistTitleLine({
     title: item.title ?? "(unknown)",
@@ -932,30 +1029,43 @@ export type ImportTarget =
 export interface CommitResult {
   /** How many items were written (favourites added, or playlist tracks added). */
   written: number;
+  /** How many lines to check were left without a song, and so not written. */
+  skipped: number;
   /** The playlist created or added to, when the target was a playlist. */
   playlist?: Playlist;
 }
 
 /**
+ * The song chosen for each of a plan's lines to check, by index into its
+ * `toCheck`; null (or a missing entry) adds nothing for that line.
+ */
+export type ImportPicks = ReadonlyArray<TrackId | null>;
+
+/**
  * Write a resolved plan to its destination (phase two).
  *
  * Favourites accept any kind (tracks, albums or artists route to the matching
- * favourite endpoint); a playlist target only accepts a track plan.
+ * favourite endpoint); a playlist target only accepts a track plan. The songs
+ * picked for lines to check are written where those lines were among the
+ * matched ones; a line without a pick is skipped.
  *
- * @throws {Error} if a playlist target is given a non-track plan.
+ * @throws {Error} if a playlist target is given a non-track plan, or a pick is
+ *   not one of the songs its line offered (nothing is written then).
  */
 export async function commitImport(
   client: ImportWriterClient,
   plan: ImportPlan,
   target: ImportTarget,
+  picks: ImportPicks = [],
 ): Promise<CommitResult> {
+  const { ids, skipped } = idsToWrite(plan, picks);
   if (target.type === "favourites") {
-    return commitToFavourites(client, plan);
+    return { ...(await commitToFavourites(client, plan.kind, ids)), skipped };
   }
   if (plan.kind !== "tracks") {
     throw new Error("only tracks can be added to a playlist");
   }
-  const trackIds = plan.matched.map((m) => m.id as TrackId);
+  const trackIds = ids as TrackId[];
   if (target.type === "playlist-new") {
     const playlist = await createPlaylistWithTracks(client, {
       name: target.name,
@@ -963,31 +1073,67 @@ export async function commitImport(
       isPublic: target.isPublic ?? false,
       ...(target.description !== undefined && { description: target.description }),
     });
-    return { written: trackIds.length, playlist };
+    return { written: trackIds.length, skipped, playlist };
   }
   const { added } = await addTracksToExistingPlaylist(client, {
     playlistId: target.playlistId,
     trackIds,
   });
-  return { written: added.length };
+  return { written: added.length, skipped };
+}
+
+/**
+ * The ids a commit writes, in file order: the matched ones, with each picked
+ * song before the matched item its line came before. A pick must be one of the
+ * songs its line offered -- the client chooses among them, it cannot name any
+ * id it likes. A picked song already written is not written twice.
+ *
+ * @throws {Error} naming the line, for a pick it did not offer.
+ */
+function idsToWrite(plan: ImportPlan, picks: ImportPicks): { ids: AnyId[]; skipped: number } {
+  const toCheck = plan.toCheck ?? [];
+  if (picks.length > toCheck.length) {
+    throw new Error("there are more picks than lines to check");
+  }
+  const chosen: { position: number; id: TrackId }[] = [];
+  toCheck.forEach((line, index) => {
+    const pick = picks[index] ?? null;
+    if (pick === null) return;
+    if (!line.options.some((option) => option.id === pick)) {
+      throw new Error(`${pick} is not one of the songs offered for ${line.label}`);
+    }
+    chosen.push({ position: line.position, id: pick });
+  });
+  // Lines keep their file order; sort by position only in case a plan came back reordered.
+  chosen.sort((a, b) => a.position - b.position);
+  const ids: AnyId[] = [];
+  const seen = new Set<string>();
+  const push = (id: AnyId): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  let next = 0;
+  plan.matched.forEach((item, index) => {
+    for (; next < chosen.length && chosen[next]!.position <= index; next += 1) push(chosen[next]!.id);
+    push(item.id);
+  });
+  for (; next < chosen.length; next += 1) push(chosen[next]!.id);
+  return { ids, skipped: toCheck.length - chosen.length };
 }
 
 async function commitToFavourites(
   client: ImportWriterClient,
-  plan: ImportPlan,
-): Promise<CommitResult> {
-  if (plan.kind === "tracks") {
-    const ids = plan.matched.map((m) => m.id as TrackId);
-    await client.addFavoriteTracks(ids);
-    return { written: ids.length };
+  kind: CollectionKind,
+  ids: readonly AnyId[],
+): Promise<{ written: number }> {
+  if (kind === "tracks") {
+    await client.addFavoriteTracks(ids as TrackId[]);
+  } else if (kind === "albums") {
+    await client.addFavoriteAlbums(ids as AlbumId[]);
+  } else {
+    await client.addFavoriteArtists(ids as ArtistId[]);
   }
-  if (plan.kind === "albums") {
-    const ids = plan.matched.map((m) => m.id as AlbumId);
-    await client.addFavoriteAlbums(ids);
-    return { written: ids.length };
-  }
-  const ids = plan.matched.map((m) => m.id as ArtistId);
-  await client.addFavoriteArtists(ids);
   return { written: ids.length };
 }
 

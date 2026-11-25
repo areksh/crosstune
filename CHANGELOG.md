@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Import offers a choice for title-only lines**: a line with a title but no
+  artist (and no ISRC that finds it) is no longer just unmatched. The preview
+  lists it under "to check" with up to five songs of that title, showing each
+  one's artist, album and year, and adds nothing until you choose one; what
+  you choose is written where the line was. `import` lists these lines with a
+  `?` and their first song, and `--accept-likely` (as for `copy`) takes that
+  song for each.
 - **Shift-click ticks a range**: tick a playlist or song, then Shift-click
   another to tick or untick everything between them, in the library sidebar,
   the Playlists list, Remove artists and the song lists of the tools.
@@ -493,7 +500,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Import: a line with a title but no artist ("Yesterday") was matched to
   whichever song the search ranked first with that title, since the artist
   check was skipped. Such a line is now matched only by its ISRC; otherwise it
-  is listed as unmatched ("no artist given"), without a search.
+  is never written unseen, but offered for you to choose its song (see Added),
+  or listed as unmatched ("no artist given") when nothing has that title.
 - Import: an artist line was favourited as the first search result when no
   result had the same name, so an artist Qobuz does not have became somebody
   else. Only a result with the same name counts now (ignoring case, accents and

@@ -92,8 +92,11 @@ import {
   type ExportSource,
   type Format,
   type ImportFormat,
+  type ImportOption,
+  type ImportPicks,
   type ImportPlan,
   type ImportTarget,
+  type ImportToCheck,
   type MatchedItem,
 } from "../features/import-export.js";
 import { createZip } from "../features/zip.js";
@@ -1018,6 +1021,7 @@ async function importCommit(body: unknown, deps: ApiDeps): Promise<ApiResponse> 
       deps.service,
       input.value.plan,
       input.value.target,
+      input.value.picks,
     );
     return { status: 200, body: result };
   } catch (error) {
@@ -1702,9 +1706,15 @@ function parseImportResolveInput(body: unknown): Parsed<ImportResolveInput> {
 
 interface ImportCommitInput {
   plan: ImportPlan;
+  /** The song chosen for each of the plan's lines to check (see commitImport). */
+  picks: ImportPicks;
   target: ImportTarget;
 }
 
+/**
+ * `{ plan, picks?, target }`. Whether each pick is one of its line's songs is
+ * commitImport's check (a 400 naming the line); this one reads the shapes.
+ */
 function parseImportCommitInput(body: unknown): Parsed<ImportCommitInput> {
   if (!isRecord(body)) {
     return { ok: false, error: "expected a JSON object" };
@@ -1713,11 +1723,32 @@ function parseImportCommitInput(body: unknown): Parsed<ImportCommitInput> {
   if (!plan.ok) {
     return plan;
   }
+  const picks = parseImportPicks(body["picks"]);
+  if (!picks.ok) {
+    return picks;
+  }
+  if (plan.value.matched.length === 0 && !picks.value.some((pick) => pick !== null)) {
+    return { ok: false, error: "nothing to import: no item matched and no song was picked" };
+  }
   const target = parseImportTarget(body["target"]);
   if (!target.ok) {
     return target;
   }
-  return { ok: true, value: { plan: plan.value, target: target.value } };
+  return { ok: true, value: { plan: plan.value, picks: picks.value, target: target.value } };
+}
+
+/** `picks`: absent (none), or a list of track ids and nulls. */
+function parseImportPicks(value: unknown): Parsed<ImportPicks> {
+  if (value === undefined) {
+    return { ok: true, value: [] };
+  }
+  const picks = Array.isArray(value)
+    ? value.map((pick) => (pick === null ? null : readId<TrackId>(pick)))
+    : undefined;
+  if (picks === undefined || picks.some((pick) => pick === undefined)) {
+    return { ok: false, error: "picks must be a list of track ids, or null for a line to leave out" };
+  }
+  return { ok: true, value: picks as (TrackId | null)[] };
 }
 
 function parseImportPlan(value: unknown): Parsed<ImportPlan> {
@@ -1743,10 +1774,60 @@ function parseImportPlan(value: unknown): Parsed<ImportPlan> {
     const label = typeof item["label"] === "string" ? item["label"] : shortId(id);
     matched.push({ label, id });
   }
-  if (matched.length === 0) {
-    return { ok: false, error: "at least one matched item is required" };
+  const toCheck = parseImportToCheck(value["toCheck"], kind, matched.length);
+  if (!toCheck.ok) {
+    return toCheck;
   }
-  return { ok: true, value: { kind, matched, unmatched: [] } };
+  return { ok: true, value: { kind, matched, unmatched: [], toCheck: toCheck.value } };
+}
+
+/**
+ * A plan's `toCheck`: absent, or its lines to check as resolve gave them -- a
+ * label, a position among the `matched` items, and the songs offered.
+ */
+function parseImportToCheck(value: unknown, kind: CollectionKind, matched: number): Parsed<ImportToCheck[]> {
+  if (value === undefined) {
+    return { ok: true, value: [] };
+  }
+  if (!Array.isArray(value) || (kind !== "tracks" && value.length > 0)) {
+    return { ok: false, error: "plan.toCheck must be a list, and only in a plan of tracks" };
+  }
+  const lines: ImportToCheck[] = [];
+  for (const line of value) {
+    if (!isRecord(line) || typeof line["label"] !== "string") {
+      return { ok: false, error: "each line in plan.toCheck needs a label" };
+    }
+    const position = line["position"];
+    if (typeof position !== "number" || !Number.isSafeInteger(position) || position < 0 || position > matched) {
+      return { ok: false, error: `each line in plan.toCheck needs a position from 0 to ${matched}` };
+    }
+    const options = Array.isArray(line["options"]) ? line["options"].map(parseImportOption) : [];
+    if (options.length === 0 || options.some((option) => option === undefined)) {
+      return { ok: false, error: "each line in plan.toCheck needs its options, each with a track id and a title" };
+    }
+    lines.push({ label: line["label"], position, options: options as ImportOption[] });
+  }
+  return { ok: true, value: lines };
+}
+
+/** One song offered for a line to check; undefined unless it has an id and a title. */
+function parseImportOption(value: unknown): ImportOption | undefined {
+  if (!isRecord(value) || typeof value["title"] !== "string") {
+    return undefined;
+  }
+  const id = readId<TrackId>(value["id"]);
+  if (id === undefined) {
+    return undefined;
+  }
+  const option: ImportOption = { id, title: value["title"] };
+  for (const key of ["version", "artist", "album", "releaseDate"] as const) {
+    const text = value[key];
+    if (typeof text === "string") option[key] = text;
+  }
+  if (typeof value["duration"] === "number" && Number.isFinite(value["duration"])) {
+    option.duration = value["duration"];
+  }
+  return option;
 }
 
 function parseImportTarget(value: unknown): Parsed<ImportTarget> {
