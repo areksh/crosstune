@@ -98,9 +98,9 @@ export interface RecordingScope {
 
 /**
  * What an action can keep on its entry besides its operations: for an undo,
- * the new ids of what it put back.
+ * the new ids of what it put back and the playlists it made again.
  */
-export type EntryExtras = Pick<HistoryEntry, "renamed">;
+export type EntryExtras = Pick<HistoryEntry, "renamed" | "recreated">;
 
 /** The entry being written, as the action running in it sees it. */
 export interface OpenEntry {
@@ -211,6 +211,9 @@ export class Journal {
     }
     if (draft.extras.renamed !== undefined && draft.extras.renamed.length > 0) {
       entry.renamed = draft.extras.renamed;
+    }
+    if (draft.extras.recreated !== undefined && draft.extras.recreated.length > 0) {
+      entry.recreated = draft.extras.recreated;
     }
     this.#append([{ type: "entry", ...entry }], now);
   }

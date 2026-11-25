@@ -40,7 +40,7 @@ export function forgetInHistory(
       dropped.add(record.id);
     } else {
       // What an undo kept about the ids it gave goes with its operations.
-      const { renamed: _renamed, ...rest } = record;
+      const { renamed: _renamed, recreated: _recreated, ...rest } = record;
       kept.push({ ...rest, ops: [], forgotten: service });
     }
   }

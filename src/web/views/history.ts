@@ -284,7 +284,11 @@ function notice(className: string, text: string): HTMLElement {
 /** Say what the undo did, above the list. */
 function showResult(entry: HistorySummary, result: UndoResponse): void {
   const lines = [
-    result.undone ? `Undid "${entry.label}".` : `Could not undo "${entry.label}"; nothing was changed.`,
+    result.undone
+      ? `Undid "${entry.label}".`
+      : result.done.length > 0
+        ? `Undid only part of "${entry.label}". Undo it again to do the rest.`
+        : `Could not undo "${entry.label}". Undo it again to try once more.`,
     ...result.failed.map((f) => `Failed: ${f.step} (${f.reason}).`),
     ...result.notes,
   ];

@@ -93,21 +93,28 @@ describe("serializeRecords / parseHistory", () => {
     expect(parseHistory(serializeRecords(records))).toEqual(records);
   });
 
-  it("keeps what an undo renamed", () => {
+  it("keeps what an undo renamed and made again", () => {
     const records = [
       record(
         entry({
           tool: "undo",
           undoes: "a0",
           renamed: [{ playlistId: qid(1), entries: [[qid(11), qid(21)], [qid(12), qid(22)]] }],
+          recreated: [{ was: qid(2), now: qid(3) }],
         }),
       ),
     ];
     expect(parseHistory(serializeRecords(records))).toEqual(records);
   });
 
-  it("reads an entry whose renamed ids it cannot read, without them", () => {
-    const line = JSON.stringify({ v: 1, type: "entry", ...entry(), renamed: [{ playlistId: "qobuz:1", entries: [["x"]] }] });
+  it("reads an entry whose renamed ids or remade playlists it cannot read, without them", () => {
+    const line = JSON.stringify({
+      v: 1,
+      type: "entry",
+      ...entry(),
+      renamed: [{ playlistId: "qobuz:1", entries: [["x"]] }],
+      recreated: [{ was: "qobuz:2" }],
+    });
     expect(parseHistory(line)).toEqual([record(entry())]);
   });
 

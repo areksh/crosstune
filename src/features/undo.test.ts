@@ -7,6 +7,7 @@ import { FakeTidal } from "../services/tidal/fake-tidal.test-support.js";
 import { TidalService } from "../services/tidal/service.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
 import { createPlaylistWithTracks } from "./playlist-from-artists.js";
+import { selectEntry } from "./history.js";
 import { Journal, recordingClient } from "./journal.js";
 import { commitUpgrades, type UpgradeChange } from "./upgrade.js";
 import {
@@ -467,6 +468,262 @@ describe("undo when moving back fails", () => {
     expect(outcome.failed).toEqual([
       { step: "Put Mix back in its old order", reason: "movePlaylistTracks failed with HTTP 500" },
     ]);
+    // Not all of it went through: it stays to be finished.
+    expect(outcome.undone).toBe(false);
+
+    const again = await undo(journal.items().find((i) => i.tool === "deduplicate")!.id);
+
+    expect(again.plan.steps.map(describeStep)).toEqual(["Put Mix back in its old order"]);
+    expect(again.outcome).toMatchObject({ undone: true, failed: [] });
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2), qid(3)]);
+  });
+});
+
+describe("an undo that went through only in part", () => {
+  /** One entry removes a song from each of two playlists; undoing puts Late back and fails on Early. */
+  async function halfUndone() {
+    const world = setup();
+    const { journal, account, client, undo } = world;
+    const early = account.seedPlaylist("Early", [qid(1), qid(2), qid(3)]);
+    const late = account.seedPlaylist("Late", [qid(4), qid(5), qid(6)]);
+    await journal.run({ tool: "deduplicate" }, async () => {
+      await client.removeTracksFromPlaylist(early, [account.entryIds(early)[1]!]);
+      await client.removeTracksFromPlaylist(late, [account.entryIds(late)[1]!]);
+    });
+    const original = journal.items()[0]!.id;
+    // Late is put back first; the second add, to Early, fails.
+    account.failAfter("addTracksToPlaylist", 1);
+    const first = await undo(original);
+    return { ...world, early, late, original, first };
+  }
+
+  it("is not marked undone, and says what failed", async () => {
+    const { journal, account, early, late, original, first } = await halfUndone();
+    expect(first.outcome.done).toEqual(["Put 1 track back in Late, in its old place"]);
+    expect(first.outcome.failed).toEqual([
+      { step: "Put 1 track back in Early, in its old place", reason: "addTracksToPlaylist failed with HTTP 500" },
+    ]);
+    expect(first.outcome.undone).toBe(false);
+    expect(journal.items().find((i) => i.id === original)?.undone).toBeUndefined();
+    expect(account.trackIds(early)).toEqual([qid(1), qid(3)]);
+    expect(account.trackIds(late)).toEqual([qid(4), qid(5), qid(6)]);
+  });
+
+  it("is finished by undoing it again, which does only what is left", async () => {
+    const { journal, account, client, undo, early, late, original } = await halfUndone();
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.steps.map(describeStep)).toEqual(["Put 1 track back in Early, in its old place"]);
+    expect(plan.notes).toEqual([]);
+    expect(outcome).toMatchObject({ undone: true, failed: [] });
+    expect(account.trackIds(early)).toEqual([qid(1), qid(2), qid(3)]);
+    // Not added a second time.
+    expect(account.trackIds(late)).toEqual([qid(4), qid(5), qid(6)]);
+    const item = journal.items().find((i) => i.id === original)!;
+    expect(item.undone?.by).toBe(outcome.entryId);
+    await expect(planUndo(client, item, journal.items())).resolves.toMatchObject({
+      blocked: expect.stringMatching(/^Already undone/),
+    });
+  });
+
+  it("is what the CLI's plain undo picks up again", async () => {
+    const { journal, original } = await halfUndone();
+    expect(selectEntry(journal.items())?.id).toBe(original);
+  });
+
+  it("puts back only the copies that did not arrive the first time", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1), qid(2), qid(1), qid(3)]);
+    const ids = account.entryIds(id);
+    await journal.run({ tool: "playlist-manager" }, () => client.removeTracksFromPlaylist(id, [ids[0]!, ids[2]!]));
+    const original = journal.items()[0]!.id;
+    // A repeated song goes in two requests; the second fails.
+    account.failAfter("addTracksToPlaylist", 1);
+
+    const first = await undo(original);
+    expect(first.outcome.undone).toBe(false);
+    expect(account.trackIds(id)).toEqual([qid(2), qid(3), qid(1)]);
+
+    const { plan, outcome } = await undo(original);
+    expect(plan.steps.map(describeStep)).toEqual(["Put 1 track back in Mix, in its old place"]);
+    expect(outcome).toMatchObject({ undone: true, failed: [] });
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2), qid(1), qid(3)]);
+  });
+
+  it("does not take out or un-favourite again what the first try did", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1)]);
+    await journal.run({ tool: "x" }, async () => {
+      await client.addTracksToPlaylist(id, [qid(2)]);
+      await client.addFavoriteTracks([qid(5)]);
+      await client.addFavoriteAlbums([qid("a")]);
+    });
+    const original = journal.items()[0]!.id;
+    account.failAfter("removeFavoriteTracks", 0);
+    const first = await undo(original);
+    expect(first.outcome.undone).toBe(false);
+    expect(first.outcome.done).toEqual(["Remove 1 album from Favourites", "Remove 1 track from Mix"]);
+    account.calls.length = 0;
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 1 track from Favourites"]);
+    expect(plan.notes).toEqual([]);
+    expect(outcome.undone).toBe(true);
+    expect(account.calls.filter((call) => /^(remove|add|delete|update|move)/.test(call))).toEqual([
+      "removeFavoriteTracks:5",
+    ]);
+    expect(account.favourites.tracks).toEqual([]);
+  });
+
+  it("does not set details back or delete a playlist a second time", async () => {
+    const { journal, account, client, undo } = setup();
+    const mix = account.seedPlaylist("Mix", [qid(1)]);
+    let made = 0;
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.updatePlaylist!(mix, { name: "Mix 2" });
+      made = (await createPlaylistWithTracks(client, { name: "Split", trackIds: [qid(7)] })).id;
+      await client.addFavoriteTracks([qid(5)]);
+    });
+    const original = journal.items()[0]!.id;
+    account.failAfter("removeFavoriteTracks", 0);
+    await undo(original);
+    expect(account.playlists.has(made)).toBe(false);
+    expect(account.playlists.get(mix)?.name).toBe("Mix");
+
+    const { plan } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 1 track from Favourites"]);
+    expect(plan.notes).toEqual([]);
+  });
+
+  it("fills a playlist it had begun to make again, rather than making another", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Old", [qid(4), qid(4), qid(5), qid(4)]);
+    await journal.run({ tool: "other" }, () => client.deletePlaylist(id));
+    const original = journal.items()[0]!.id;
+    // The repeats go in three requests; the second fails.
+    account.failAfter("addTracksToPlaylist", 1);
+
+    const first = await undo(original);
+    expect(first.outcome.undone).toBe(false);
+    const [[again, begun]] = [...account.playlists.entries()] as [[PlaylistId, { name: string }]];
+    expect(begun.name).toBe("Old");
+    expect(account.trackIds(again)).toEqual([qid(4)]);
+    expect(journal.items()[0]).toMatchObject({ undoes: original, recreated: [{ was: id, now: again }] });
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Put the 3 tracks still missing back in Old"]);
+    expect(outcome).toMatchObject({ undone: true, failed: [] });
+    expect([...account.playlists.keys()]).toEqual([again]);
+    expect(account.trackIds(again)).toEqual([qid(4), qid(4), qid(5), qid(4)]);
+  });
+
+  it("makes the playlist again from nothing when the one it had begun is gone", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Old", [qid(4), qid(4)]);
+    await journal.run({ tool: "other" }, () => client.deletePlaylist(id));
+    const original = journal.items()[0]!.id;
+    account.failAfter("addTracksToPlaylist", 1);
+    await undo(original);
+    account.playlists.clear();
+
+    const { plan } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Recreate the playlist Old with 2 tracks"]);
+    expect([...account.playlists.values()].map((p) => p.entries.map((e) => e.trackId))).toEqual([[qid(4), qid(4)]]);
+  });
+
+  it("starts over after a try that was itself undone", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1)]);
+    await journal.run({ tool: "x" }, async () => {
+      await client.addTracksToPlaylist(id, [qid(2)]);
+      await client.addFavoriteTracks([qid(5)]);
+    });
+    const original = journal.items()[0]!.id;
+    account.failAfter("removeFavoriteTracks", 0);
+    const first = await undo(original);
+    await undo(first.outcome.entryId); // redo the half that went through
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2)]);
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 1 track from Favourites", "Remove 1 track from Mix"]);
+    expect(plan.notes).toEqual([]);
+    expect(outcome.undone).toBe(true);
+    expect(account.trackIds(id)).toEqual([qid(1)]);
+  });
+
+  it("ends where the change began, whichever request fails, with nothing put back twice", async () => {
+    let seed = 29;
+    const random = (n: number): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return Math.floor((seed / 4294967296) * n);
+    };
+    const writes = ["addTracksToPlaylist", "movePlaylistTracks", "removeTracksFromPlaylist", "getPlaylistTracks"];
+    let retried = 0;
+    for (let round = 0; round < 150; round += 1) {
+      const { journal, account, client, undo } = setup();
+      const id = account.seedPlaylist("Mix", Array.from({ length: 4 + random(10) }, () => qid(1 + random(5))));
+      const start = account.trackIds(id);
+      await journal.run({ tool: "playlist-manager" }, async () => {
+        for (let step = 0; step < 2 + random(5); step += 1) {
+          const ids = account.entryIds(id);
+          const picked = ids.filter(() => random(3) === 0);
+          if (random(3) === 0) {
+            await client.addTracksToPlaylist(id, [qid(1 + random(5)), qid(7 + random(3))]);
+          } else if (random(2) === 0) {
+            await client.removeTracksFromPlaylist(id, picked.slice(0, ids.length - 1));
+          } else {
+            await client.movePlaylistTracks!(id, picked, 1 + random(ids.length + 1));
+          }
+        }
+      });
+      const original = journal.items()[0]?.id;
+      if (original === undefined) {
+        continue;
+      }
+      // Some request of the undo fails; each further try may fail once more.
+      let outcome: Awaited<ReturnType<typeof undo>>["outcome"] | undefined;
+      for (let attempt = 0; attempt < 6 && outcome?.undone !== true; attempt += 1) {
+        if (attempt < 2) {
+          account.failAfter(writes[random(writes.length)]!, random(4));
+        }
+        const item = journal.items().find((i) => i.id === original)!;
+        const plan = await planUndo(client, item, journal.items());
+        if (plan.blocked !== undefined) {
+          continue; // the read failed: nothing was done
+        }
+        outcome = await applyUndo(journal, client, item, plan);
+        retried += outcome.undone ? 0 : 1;
+      }
+      for (const method of writes) {
+        account.failAfter(method, Number.MAX_SAFE_INTEGER);
+      }
+      expect(outcome?.undone, `round ${round}`).toBe(true);
+      expect(account.trackIds(id), `round ${round}`).toEqual(start);
+    }
+    // The failures did hit undos in progress.
+    expect(retried).toBeGreaterThan(20);
+  });
+
+  it("counts as undone when all that is left is what cannot be done", async () => {
+    const { journal, account, client, undo } = setup();
+    const from = account.seedPlaylist("From", [qid(1), qid(2)]);
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await createPlaylistWithTracks(client, { name: "Split", trackIds: [qid(2)] });
+      await client.removeTracksFromPlaylist(from, [account.entryIds(from)[1]!]);
+    });
+    account.unplayable.add(qid(2));
+
+    const { outcome } = await undo();
+
+    // The song is no longer offered: trying again would change nothing.
+    expect(outcome.failed.map((f) => f.step)).toEqual(["Delete the playlist Split (1 track)"]);
     expect(outcome.undone).toBe(true);
   });
 });
@@ -551,6 +808,32 @@ describe("commitUndo", () => {
 
     expect(outcome.undone).toBe(false);
     expect(journal.items().find((i) => i.tool === "x")?.undone).toBeUndefined();
+  });
+
+  it("goes on from a failed undo that an earlier version left in the history", async () => {
+    const { journal, account, client, store, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1), qid(2)]);
+    await journal.run({ tool: "deduplicate" }, () => client.removeTracksFromPlaylist(id, [account.entryIds(id)[0]!]));
+    const original = journal.items()[0]!.id;
+    // As an earlier version wrote an undo of which every step failed: an
+    // entry with no operations and nothing else, the original not marked.
+    store.text += `${JSON.stringify({
+      v: 1,
+      type: "entry",
+      id: "old1",
+      at: "2026-11-02T20:30:00.000Z",
+      tool: "undo",
+      source: "web",
+      label: "Undid: Removed 1 duplicate from Mix",
+      ops: [],
+      undoes: original,
+    })}\n`;
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Put 1 track back in Mix, in its old place"]);
+    expect(outcome.undone).toBe(true);
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2)]);
   });
 });
 

@@ -768,7 +768,11 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
   if (outcome.undone) {
     logger.info(`\nUndone; recorded as ${outcome.entryId}.`);
   } else {
-    logger.warn("nothing could be undone; the entry is left as it was so you can try again");
+    logger.warn(
+      outcome.done.length > 0
+        ? `only part of it could be undone (recorded as ${outcome.entryId}); undo it again to do the rest: crosstune undo ${item.id} --apply`
+        : "nothing could be undone; the entry is left as it was so you can try again",
+    );
     process.exitCode = 1;
   }
 }

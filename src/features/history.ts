@@ -120,6 +120,12 @@ export interface RenamedEntries {
   entries: Array<[was: EntryId, now: EntryId]>;
 }
 
+/** A deleted playlist that an undo made again: the id it had, and the new one's. */
+export interface RecreatedPlaylist {
+  was: PlaylistId;
+  now: PlaylistId;
+}
+
 /** One user action and the changes it made. */
 export interface HistoryEntry {
   /** Short unique id, used by `undo <id>`. */
@@ -148,6 +154,13 @@ export interface HistoryEntry {
    * still exist, as it always was.
    */
   renamed?: RenamedEntries[];
+  /**
+   * For an undo: the deleted playlists it made again, whether or not it could
+   * fill them. If it could not, the entry it was undoing is left not undone,
+   * and undoing that again goes on filling the playlist named here rather than
+   * making another. Absent in records made before this was kept.
+   */
+  recreated?: RecreatedPlaylist[];
 }
 
 /** A line of the history file. */
@@ -282,7 +295,28 @@ function toRecord(value: unknown): HistoryRecord | undefined {
   if (renamed !== undefined) {
     entry.renamed = renamed;
   }
+  const recreated = toRecreated(value["recreated"]);
+  if (recreated !== undefined) {
+    entry.recreated = recreated;
+  }
   return entry;
+}
+
+/** The playlists an undo made again; undefined (read without them) when not all are readable. */
+function toRecreated(value: unknown): RecreatedPlaylist[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out: RecreatedPlaylist[] = [];
+  for (const item of value) {
+    const was = isRecord(item) ? readId<PlaylistId>(item["was"]) : undefined;
+    const now = isRecord(item) ? readId<PlaylistId>(item["now"]) : undefined;
+    if (was === undefined || now === undefined) {
+      return undefined;
+    }
+    out.push({ was, now });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
