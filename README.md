@@ -638,6 +638,9 @@ npm run dev -- import --new-playlist "From CSV" songs.csv --apply
 # Import a Spotify playlist exported with Exportify (recognised from its header)
 npm run dev -- import --new-playlist "From Spotify" "My Spotify Playlist.csv"
 
+# A list of titles only: take the first song of each title too, unseen
+npm run dev -- import --new-playlist "Titles" titles.txt --apply --accept-likely
+
 # Restore a whole-account backup
 npm run dev -- import --account qobuz-backup.json --apply
 ```
@@ -650,7 +653,13 @@ Qobuz item by its id when the file carries one (JSON always does; CSV and M3U
 can); else, for a track with an ISRC, by searching Qobuz for that ISRC (the same
 recording); otherwise by searching for the artist and title and best-matching.
 A track line with a title but no artist is never guessed from its title: it is
-matched only by its ISRC, otherwise listed as unmatched ("no artist given"). An
+matched by its ISRC, otherwise it is a line **to check**, offered the songs
+with that title (up to five, those on the line's album first; another version,
+such as a live one, is a different song unless the line names it). The report
+lists each with a `?` and its first song; it is left out unless
+`--accept-likely` (as for `copy`) takes that first song, unseen -- the web UI
+lets you choose among them instead. A title nothing has is listed as unmatched
+("no artist given"). An
 artist line is taken only when a search result has that name (ignoring case,
 accents and spacing, then punctuation). The report says how many matched each
 way; entries that match nothing are listed, and so is one whose search failed
@@ -1030,7 +1039,7 @@ the write's `"result"`.
 | `deduplicate` | `source`, `keep`, `groups`, `versions` (or, with `--all-playlists`, `playlistCount`, `within`, `across`), `toRemove`, `applied`, `removed` |
 | `remove-artists` | `artists`, `problems`, `playlists` (each with its `hits`), `includeGuests`, `toRemove`, `applied`, `removed`, `reports` |
 | `upgrade` | `source`, `plan`, `changes`, `applied`, `result` |
-| `import` | `file`, `target`, `format` (as read: a CSV may be `spotify`), `plan` (each matched item has `via`: `id`, `isrc` or `search`), `counts`, `applied`, `result`; restoring a backup: `file`, `target`, `backup`, `applied`, `result` |
+| `import` | `file`, `target`, `format` (as read: a CSV may be `spotify`), `plan` (each matched item has `via`: `id`, `isrc` or `search`; `toCheck` holds the title-only lines with their `options`), `counts`, `applied`, `result` (`written`, and `skipped`: lines to check left out); restoring a backup: `file`, `target`, `backup`, `applied`, `result` |
 | `export` (needs `--out` or `--out-dir`) | `source`, `format`, then `kind`, `count` and `out`; or a backup's `favourites` and `playlists` counts; or, for `--all-playlists`, `outDir` and `files` |
 | `similar-artists` | `source`, `plan`, `trackIds`, `applied`, `result` |
 | `new-releases` | `plan`, `applied`, `result` |
@@ -1306,8 +1315,11 @@ playlist tells you what its next refresh will do to your edits.
    backup), paste or upload the content (a Spotify CSV from Exportify too), and
    preview: the matched entries are counted, with how they were matched (by
    Qobuz id, ISRC, or artist and title), and any that could not be resolved
-   are listed.
-3. Commit to add the matched items (or restore the backup).
+   are listed. A line with only a title is one *to check*: choose its song from
+   the list beside it (artist, album and year), or leave it on *Don't add*;
+   nothing is chosen for you.
+3. Commit to add the matched items and the songs you chose, in the file's order
+   (or restore the backup).
 
 The browser only ever talks to the local server, which owns every service's
 sign-in; no token is ever sent to the page. The server is reachable only from
