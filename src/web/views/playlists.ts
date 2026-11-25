@@ -23,6 +23,7 @@ import type { ServiceName } from "../../services/names.js";
 import { parseRoute } from "../../ui/routes.js";
 import { knownPlaylist, refreshLibrary } from "../library.js";
 import { showAllActions } from "../playlist-page.js";
+import { wireRangeTick } from "../range-tick.js";
 
 let playlists: ManagerPlaylist[] = [];
 const ticked = new Set<PlaylistId>();
@@ -161,14 +162,13 @@ function renderRow(playlist: ManagerPlaylist): HTMLElement {
   box.checked = ticked.has(playlist.id);
   box.disabled = !playlist.owned;
   box.setAttribute("aria-label", `Tick ${playlist.name}`);
-  box.addEventListener("change", () => {
-    if (box.checked) {
-      ticked.add(playlist.id);
-    } else {
-      ticked.delete(playlist.id);
-    }
-    renderList();
-  });
+  wireRangeTick(
+    box,
+    playlist.id,
+    () => document.getElementById("pl-list"),
+    (key, on) => (on ? ticked.add(key as PlaylistId) : ticked.delete(key as PlaylistId)),
+    renderList,
+  );
 
   const link = document.createElement("a");
   link.className = "pl-item-name";
@@ -433,8 +433,8 @@ function renderHit({ entry, as, names }: ArtistHit, playlistId: PlaylistId): HTM
   box.checked = as === "main";
   box.dataset["playlist"] = String(playlistId);
   box.dataset["entry"] = String(entry.playlistTrackId);
-  box.addEventListener("change", updateRemoveButton);
-  row.append(box, trackText(titleOf(entry), [entry.artist, entry.album].filter(Boolean).join(" · ")));
+  wireRangeTick(box, String(entry.playlistTrackId), () => row.parentElement, () => {}, updateRemoveButton);
+  row.append(box,trackText(titleOf(entry), [entry.artist, entry.album].filter(Boolean).join(" · ")));
   if (as === "guest") {
     const note = document.createElement("span");
     note.className = "reason";
@@ -486,6 +486,9 @@ async function removeArtists(): Promise<void> {
   }
   const panel = el("pl-artists");
   panel.inert = true;
+  const button = el<HTMLButtonElement>("pl-artists-remove");
+  button.disabled = true;
+  button.textContent = `Removing ${songCount(total)}...`;
   try {
     const { reports } = await api<{ reports: RemovalReport[] }>("POST", "/api/manager/remove-artists/commit", { removals }, listService);
     const removed = reports.reduce((n, report) => n + report.removed, 0);
@@ -504,5 +507,6 @@ async function removeArtists(): Promise<void> {
     showError(el("pl-artists-error"), (error as Error).message);
   } finally {
     panel.inert = false;
+    updateRemoveButton();
   }
 }

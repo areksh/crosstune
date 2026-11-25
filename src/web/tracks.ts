@@ -8,6 +8,7 @@
 import type { ExcludedTrack, Exclusion, Track } from "./api.js";
 import { coverSlot } from "./artwork.js";
 import { el } from "./dom.js";
+import { wireRangeTick } from "./range-tick.js";
 
 /** The non-blank lines of a textarea, trimmed: one exclude term per line. */
 export function readTerms(id: string): string[] {
@@ -129,6 +130,8 @@ export function titleOf(track: Pick<Track, "title" | "version">): string {
   return track.version === undefined ? track.title : `${track.title} (${track.version})`;
 }
 
+let rowCounter = 0;
+
 /** A checkbox row for a track; excluded tracks start unticked, with the reason. */
 export function trackRow(
   track: Track,
@@ -153,7 +156,8 @@ export function trackRow(
   if (track.duration !== undefined) {
     checkbox.dataset["duration"] = String(track.duration);
   }
-  checkbox.addEventListener("change", options.onChange);
+  // The row's tick state is the checkbox itself; Shift-click ticks a range.
+  wireRangeTick(checkbox, `row-${rowCounter++}`, () => row.parentElement, () => {}, options.onChange);
   row.appendChild(checkbox);
 
   if (options.noCover !== true) {
