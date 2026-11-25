@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no tool takes, leaves Ctrl+K to other fields, and goes back to one line when
   you leave it. A header's colour follows covers being turned on or off, without
   a flicker after each save; Home's recent playlists follow the tab.
-
 - **TIDAL and Spotify**, beside Qobuz, through their official APIs. Connect
   each from the new **Accounts** page (or `login tidal|spotify`); each needs an
   app you register, and Spotify's must be owned by a Premium account. The UI now
@@ -88,110 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The web UI's *Managed playlists* is organised by playlist: each card is a
   playlist, then its source, tidy-ups and schedule. *Combine playlists* gains
   *Keep this updated...*.
-
-### Fixed
-
-- The Deduplicator (and Combine, and scheduled tidy-ups) could take a live or
-  remixed version for a duplicate of the original and remove it: matching by
-  artist and title ignored the version label Qobuz keeps apart from the title.
-  The label now counts, edition wording ("2011 Remaster") aside.
-- Songs with titles in other scripts (Cyrillic, Japanese, Greek...) could all
-  count as one song: everything outside a-z and 0-9 was dropped before comparing,
-  which left nothing. Letters of every script are kept now, and titles that are
-  only punctuation ("?", "!!!") are compared as written.
-- Undoing a change no longer leaves other songs at the end of the playlist when
-  one of them can no longer be played, and says which could not be put back:
-  Qobuz accepts such an add without an error and adds nothing.
-- A deleted playlist that was public comes back public when the deletion is
-  undone.
-- A change could vanish from the history when two qobuz-helper processes
-  wrote it at the same moment (say the CLI while the web UI was open): trimming
-  the history rewrites the file from what it read, dropping a record the other
-  process appended in between. Every history write now holds a lock file
-  (waiting briefly while another process has it).
-
-- The deduplicator now removes a track that was added to a playlist twice.
-  Both entries carry the same track id, and the plan marked "the track to
-  keep" by id, so every entry of the kept track was kept and nothing was
-  removed; in the web UI, unticking the second entry would have removed the
-  first. The first entry is now the one kept, and the web UI tracks each
-  entry by its position.
-- Playlist from artists no longer counts covers of an artist's songs by other
-  performers towards that artist's top tracks. Qobuz's artist page mixes in
-  covers (e.g. Johnny Cash's take on a Bob Dylan song surfaces on Dylan's page),
-  which could crowd out the artist's own tracks under the requested limit. Tracks
-  whose main artist differs from the requested one are now dropped before the
-  limit is applied; tracks with no artist id are kept.
-- Resolving a large list in the web UI no longer fails with a "NetworkError"
-  while the work actually succeeds. Playlist-from-artists, playlist-from-albums
-  and import all resolved their items strictly one at a time, holding a single
-  request open long enough (100+ items) for the browser to abort the fetch. They
-  now resolve through a small concurrency pool, so the request completes well
-  within the browser's fetch timeout. Results are still returned in input order.
-
-### Changed
-
-- **A new web UI: your library first, in a new look.** The page opens on your
-  playlists from every connected service, in a sidebar with a coloured dot for
-  each service; tabs at the top (All, Qobuz, TIDAL, Spotify) filter it without
-  reloading the page. A playlist's page has its tools as buttons (Find repeats,
-  Upgrade, Copy to..., Link, Stats, Export), and each opens on that playlist's
-  own service. Tools that work on one service say which ("This works on
-  Qobuz"), with a link to switch; the service list at the bottom left is gone.
-  Favourites and All playlists have pages of their own per service; tools that
-  start from scratch are under **+ New**, managed playlists and links under
-  **Jobs**, and Accounts and the artwork setting under **Settings**. The look
-  is new too: near-black, rounded, with each page tinted by its cover. Album
-  artwork is still off until you turn it on; until then covers are drawn from
-  the album's or playlist's name, and nothing is fetched. Old addresses
-  (`#/playlists/...`, `#/accounts`, `#/deduplicate`, `#/managed`, ...) still
-  work.
-- **Tools open inside the playlist they act on.** Find repeats, Upgrade, Stats,
-  Export, Similar artists and Combine open on the playlist (or on Favourites or
-  All playlists) under a bar naming it, with the tool's own source picker out
-  of the way; *Link...* links the playlist from its page. **Favourites** lists
-  its songs. **Tick playlists** in the sidebar to combine them (across services
-  too), remove artists from them, or delete them together (an open page of one
-  of them goes to its service's list). Home drops its list of tools, which are
-  under *+ New* and on each playlist; its paste box became the ask box. When the page has to load afresh (a tool on another service, or on
-  another playlist than it last showed), it asks first if a tool has a preview
-  you have not saved. It no longer asks after a scan that found nothing to
-  save, and does ask about a half-filled managed playlist or an import not yet
-  previewed.
-- On All playlists, *Stats* is now *Library stats*: it always counted your
-  Favourites too. On touch screens, tapping a playlist's cover in the library
-  opens it instead of ticking it.
-- **The app is now called crosstune**, as it works with TIDAL and Spotify as
-  well as Qobuz: the command is `crosstune`, and its settings live in
-  `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that
-  runs `qobuz-helper run-due` must be changed to `crosstune run-due`, and an
-  old `~/.config/qobuz-helper` folder moved by hand (ADR-0014).
-- Groundwork for other music services: every id now names its service. Nothing
-  looks different: history, managed playlists and backups made before still work,
-  and exports, `--json` and printed ids keep Qobuz's own form. Jobs files are
-  rewritten in a newer form when next saved, which earlier versions refuse.
-- A backup's entries without a usable id are left out of a restore; they used to
-  be sent to Qobuz as id 0.
-- Qobuz API requests now retry an HTTP 400 with exponential backoff (up to five
-  times: 500ms, 1s, 2s, 4s, 8s) before failing, so a transient throttle no
-  longer stops a run. The secret-probe step is exempt, as it uses a 400 to
-  reject a candidate secret rather than as a throttle signal.
-- Playlist from albums in the web UI now has a review step: after choosing
-  versions, "Fetch tracks" lists each album's tracks for ticking and unticking,
-  and a second click saves them. Previously the whole of each album was written
-  without a track list. The destination is no longer locked once tracks have
-  been fetched, since nothing is written until you save.
-- The web UI has a new look ("Console"): warm charcoal with a single amber
-  accent, set in Archivo (self-hosted, so the page still makes no third-party
-  requests). The sidebar groups the tools (Build, Tidy up, Your data) and the
-  home page lists them by group. Multi-step tools show which step you are on;
-  while reviewing, the destination and save button stay docked at the bottom of
-  the window with the number of selected tracks. Track rows show the album and
-  year, and a quality badge ("24/96", lit up for hi-res). Buttons and controls
-  are at least 44px tall, focus is always visible, motion respects the
-  reduced-motion setting, and on a phone the sidebar stacks above the content.
-
-### Added
 
 - Managed playlists: playlists qobuz-helper keeps up to date on a schedule --
   the new releases of chosen artists (or favourite artists, or a playlist's),
@@ -490,3 +385,286 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browser only when there is no saved session or it has expired. Adds `login`
   and `logout` commands and a `loginWithToken` client method. The token is
   stored owner-only at `$XDG_CONFIG_HOME/qobuz-helper/session.json`.
+
+### Changed
+
+- **A new web UI: your library first, in a new look.** The page opens on your
+  playlists from every connected service, in a sidebar with a coloured dot for
+  each service; tabs at the top (All, Qobuz, TIDAL, Spotify) filter it without
+  reloading the page. A playlist's page has its tools as buttons (Find repeats,
+  Upgrade, Copy to..., Link, Stats, Export), and each opens on that playlist's
+  own service. Tools that work on one service say which ("This works on
+  Qobuz"), with a link to switch; the service list at the bottom left is gone.
+  Favourites and All playlists have pages of their own per service; tools that
+  start from scratch are under **+ New**, managed playlists and links under
+  **Jobs**, and Accounts and the artwork setting under **Settings**. The look
+  is new too: near-black, rounded, with each page tinted by its cover. Album
+  artwork is still off until you turn it on; until then covers are drawn from
+  the album's or playlist's name, and nothing is fetched. Old addresses
+  (`#/playlists/...`, `#/accounts`, `#/deduplicate`, `#/managed`, ...) still
+  work.
+- **Tools open inside the playlist they act on.** Find repeats, Upgrade, Stats,
+  Export, Similar artists and Combine open on the playlist (or on Favourites or
+  All playlists) under a bar naming it, with the tool's own source picker out
+  of the way; *Link...* links the playlist from its page. **Favourites** lists
+  its songs. **Tick playlists** in the sidebar to combine them (across services
+  too), remove artists from them, or delete them together (an open page of one
+  of them goes to its service's list). Home drops its list of tools, which are
+  under *+ New* and on each playlist; its paste box became the ask box. When the page has to load afresh (a tool on another service, or on
+  another playlist than it last showed), it asks first if a tool has a preview
+  you have not saved. It no longer asks after a scan that found nothing to
+  save, and does ask about a half-filled managed playlist or an import not yet
+  previewed.
+- On All playlists, *Stats* is now *Library stats*: it always counted your
+  Favourites too. On touch screens, tapping a playlist's cover in the library
+  opens it instead of ticking it.
+- **The app is now called crosstune**, as it works with TIDAL and Spotify as
+  well as Qobuz: the command is `crosstune`, and its settings live in
+  `~/.config/crosstune`. Nothing of the old name is kept -- a scheduler that
+  runs `qobuz-helper run-due` must be changed to `crosstune run-due`, and an
+  old `~/.config/qobuz-helper` folder moved by hand (ADR-0014).
+- Groundwork for other music services: every id now names its service. Nothing
+  looks different: history, managed playlists and backups made before still work,
+  and exports, `--json` and printed ids keep Qobuz's own form. Jobs files are
+  rewritten in a newer form when next saved, which earlier versions refuse.
+- A backup's entries without a usable id are left out of a restore; they used to
+  be sent to Qobuz as id 0.
+- Qobuz API requests now retry an HTTP 400 with exponential backoff (up to five
+  times: 500ms, 1s, 2s, 4s, 8s) before failing, so a transient throttle no
+  longer stops a run. The secret-probe step is exempt, as it uses a 400 to
+  reject a candidate secret rather than as a throttle signal.
+- Playlist from albums in the web UI now has a review step: after choosing
+  versions, "Fetch tracks" lists each album's tracks for ticking and unticking,
+  and a second click saves them. Previously the whole of each album was written
+  without a track list. The destination is no longer locked once tracks have
+  been fetched, since nothing is written until you save.
+- The web UI has a new look ("Console"): warm charcoal with a single amber
+  accent, set in Archivo (self-hosted, so the page still makes no third-party
+  requests). The sidebar groups the tools (Build, Tidy up, Your data) and the
+  home page lists them by group. Multi-step tools show which step you are on;
+  while reviewing, the destination and save button stay docked at the bottom of
+  the window with the number of selected tracks. Track rows show the album and
+  year, and a quality badge ("24/96", lit up for hi-res). Buttons and controls
+  are at least 44px tall, focus is always visible, motion respects the
+  reduced-motion setting, and on a phone the sidebar stacks above the content.
+
+### Fixed
+
+- The Deduplicator (and Combine, and scheduled tidy-ups) could take a live or
+  remixed version for a duplicate of the original and remove it: matching by
+  artist and title ignored the version label Qobuz keeps apart from the title.
+  The label now counts, edition wording ("2011 Remaster") aside.
+- Songs with titles in other scripts (Cyrillic, Japanese, Greek...) could all
+  count as one song: everything outside a-z and 0-9 was dropped before comparing,
+  which left nothing. Letters of every script are kept now, and titles that are
+  only punctuation ("?", "!!!") are compared as written.
+- Undoing a change no longer leaves other songs at the end of the playlist when
+  one of them can no longer be played, and says which could not be put back:
+  Qobuz accepts such an add without an error and adds nothing.
+- A deleted playlist that was public comes back public when the deletion is
+  undone.
+- A change could vanish from the history when two qobuz-helper processes
+  wrote it at the same moment (say the CLI while the web UI was open): trimming
+  the history rewrites the file from what it read, dropping a record the other
+  process appended in between. Every history write now holds a lock file
+  (waiting briefly while another process has it).
+
+- The deduplicator now removes a track that was added to a playlist twice.
+  Both entries carry the same track id, and the plan marked "the track to
+  keep" by id, so every entry of the kept track was kept and nothing was
+  removed; in the web UI, unticking the second entry would have removed the
+  first. The first entry is now the one kept, and the web UI tracks each
+  entry by its position.
+- Playlist from artists no longer counts covers of an artist's songs by other
+  performers towards that artist's top tracks. Qobuz's artist page mixes in
+  covers (e.g. Johnny Cash's take on a Bob Dylan song surfaces on Dylan's page),
+  which could crowd out the artist's own tracks under the requested limit. Tracks
+  whose main artist differs from the requested one are now dropped before the
+  limit is applied; tracks with no artist id are kept.
+- Resolving a large list in the web UI no longer fails with a "NetworkError"
+  while the work actually succeeds. Playlist-from-artists, playlist-from-albums
+  and import all resolved their items strictly one at a time, holding a single
+  request open long enough (100+ items) for the browser to abort the fetch. They
+  now resolve through a small concurrency pool, so the request completes well
+  within the browser's fetch timeout. Results are still returned in input order.
+- Import: a line with a title but no artist ("Yesterday") was matched to
+  whichever song the search ranked first with that title, since the artist
+  check was skipped. Such a line is now matched only by its ISRC; otherwise it
+  is listed as unmatched ("no artist given"), without a search.
+- Import: an artist line was favourited as the first search result when no
+  result had the same name, so an artist Qobuz does not have became somebody
+  else. Only a result with the same name counts now (ignoring case, accents and
+  spacing, or failing that punctuation); anything else is listed as unmatched.
+- Import: one failed search (an HTTP 500 or a timeout) on any line rejected the
+  whole resolve, so a 3,000-line import that failed on line 2,999 gave no plan
+  and no list of what was not found. The line is now listed as unmatched ("could
+  not be looked up") and the rest go on. An error every line would meet (signed
+  out, out of quota, rate-limited) still ends the resolve.
+- Import: newer Exportify exports join a song's artists with `;`, and a name can
+  hold a comma ("Tyler, The Creator"), but the column was always split on `,`,
+  so the search used the wrong artist. A field that contains `;` is now split
+  on `;` only; older exports keep the comma split.
+- Import and restore in the web UI: the success message sat inside the preview
+  panel, which is hidden as soon as the import finishes, so it was never seen
+  and you could import twice. The result and any error now stay visible, and are
+  cleared when a new preview starts. A backup restore also committed the text
+  box's current text rather than the text you previewed; it now commits the
+  previewed text, and editing the box or choosing a file resets the preview.
+- Restoring a backup no longer drops songs that repeat in a playlist on Qobuz,
+  and no longer reports songs that never arrived: restore added a whole playlist
+  in one request, and Qobuz adds a repeated song once per request. It now adds
+  in order, reads the playlist back, and reports the real count and the missing
+  songs (CLI and web).
+- Exporting to M3U or text: a song title holding a line break added extra
+  entries to the file. Control characters now become spaces.
+- Find repeats: the same recording written `gb-aaa-91-00001` in one place and
+  `GBAAA9100001` in another was not found by its ISRC, as the ISRC was compared
+  as the service wrote it. It is now normalised first, as matching and upgrade
+  already did.
+- Find repeats: once a title held any edition word, every four-digit year and
+  every "version", "edition", "mono" and "stereo" in it was dropped. So "1979"
+  and "1979 (Remastered 2012)" were not found as duplicates, "Summer 1999
+  Remastered" and "Summer 2001 Remastered" counted as one song (and one was
+  offered for deletion), and "Stereo Love" was the same song as "Love". A year
+  is now dropped only in the version part (in brackets or after a spaced dash)
+  and beside an edition word; "mono" and "stereo" only in the version part.
+- Find repeats on Qobuz could delete the only real copy of a song: when one item
+  on a page of a playlist (or of favourites, playlists or an artist's releases)
+  could not be read, the last item of that page was read twice with the same
+  entry id, and the deduplicator offered to remove "the extra copy" by that id.
+  Paging now moves on, and stops, by the number of items Qobuz returned rather
+  than the number that could be read.
+- Upgrade and repair: being signed out, out of quota or rate-limited turned up to
+  600 searches into 600 "failed" checks and a plan that looked as if nothing
+  could be upgraded. Those errors now end the run and say what is wrong, as in
+  matching; any other failed search is still counted against its own song.
+- Qobuz: when Qobuz revoked your token while crosstune was running (signed out
+  elsewhere, password changed), every request failed with a bare "HTTP 401": the
+  web UI showed a 502 instead of asking you to connect Qobuz again, and scheduled
+  jobs did not flag the service. A 401 is now a sign-in error everywhere.
+- Qobuz: when Qobuz could not be reached, the client threw a bare `fetch` error,
+  so the server answered 500 "fetch failed", and a connection that stalled
+  hung the run for good. Each try now has a 60 second limit, and a failed fetch
+  is reported as a network error, as with TIDAL and Spotify.
+- Qobuz: if Qobuz answered the check of the app secret with a 5xx or 429 while
+  the credentials were being extracted, a wrong secret was chosen and cached; for
+  up to 7 days every signed request then failed with HTTP 400 after 15 seconds
+  of retries. The check now fails without choosing a secret, and a cached secret
+  whose first request still fails with 400 after every retry is dropped, so the
+  next start extracts it again.
+- Spotify's missing top tracks and similar artists, taken from Qobuz or TIDAL,
+  could come from another artist of the same name there, and a similar artist
+  could be mapped back onto the wrong one of several same-named Spotify artists
+  (written unseen by managed playlists). An artist is now taken only when
+  exactly one has the name.
+- Playlist from artists: a misspelt name, or an artist the service does not have,
+  was quietly replaced by whoever the search ranked first, and that stranger's
+  top tracks went into the playlist (and seeded similar-artists walks and
+  discographies). An artist now counts only when spelled the same, ignoring case,
+  accents and spacing ("Beyonce" finds "Beyoncé"), or differing only in
+  punctuation or "&" for "and"; otherwise the line is listed as unmatched.
+- Playlist from artists, Playlist from albums and Similar artists: one failed
+  request (an HTTP 500 or a timeout) lost everything found so far. An artist or
+  album line that fails is now listed ("could not be looked up", or "its songs
+  could not be fetched"), an artist whose similar artists cannot be read is not
+  expanded, and the rest carry on. An error every request would meet (signed out,
+  rate-limited, out of quota) still ends the run.
+- Playlist from albums: if the sign-in expired or the service rate-limited while
+  the chosen versions' tracks were fetched, each album was quietly listed as
+  "could not fetch tracks" and the playlist was still created, partial or empty.
+  Those errors now stop the build before anything is written; one album that
+  fails on its own (a stale id) is still reported and skipped.
+- The artist and album builders created an empty playlist, and reported success,
+  when no artist or album turned into a song. They now stop before creating
+  anything and say why ("No tracks to add (not found: ...); nothing was created").
+- Playlist from albums: "Band - Foo" matched "Foo (Live)" and "Foo (Instrumental)",
+  so highest quality or newest could pick a live or instrumental release; titles
+  made only of symbols ("+", "=", "÷") matched each other. The matcher dropped
+  every bracketed part of a title; it now drops only edition labels such as
+  Deluxe, Remaster or Reloaded, and compares a title with no letters as written.
+- Word play: titles like "Sorry (Not Sorry)" and "Time (Clock of the Heart)" lost
+  their bracketed part, so the one-word title search accepted the wrong song and
+  A-to-Z and acrostic used the wrong first letter. Only brackets holding a
+  version word or a year ("(Live)", "[Remastered 2009]", "(2011)") are dropped.
+- Word play: an acrostic with a repeated letter and only one song for it reported
+  two songs while writing one. The plan now shows the gap.
+- A long list resolved with a failure early on still cost a request for every
+  remaining item, and a concurrency limit of 0 resolved at once with nothing
+  done. Resolving now stops claiming items after the first failure and always
+  runs at least one at a time; results keep their input order.
+- Undoing a change to a playlist that was deleted on TIDAL or Spotify stopped for
+  good with "could not be read ... try again": a deleted playlist was told from
+  an unreadable one by looking for "HTTP 404" in the error text, which only Qobuz
+  holds. Both now count as gone, as elsewhere.
+- Undoing an import, restore or other add to favourites no longer removes
+  favourites you already had: History recorded every song sent as newly added,
+  even ones already favourites. Only songs that were actually new are now added
+  and recorded.
+- Undoing a sync older than the link's last 20 now pauses the linked playlist:
+  only the last 20 syncs were recognised, so the next sync read the undo as your
+  own removals and deleted those songs from the other service. History entries
+  now record which link they belong to (older entries still rely on the list).
+- Scheduled jobs: two runners (cron's `run-due` and the `serve` ticker) could
+  both judge a lock stale, and the slower one then deleted the lock the faster
+  had just taken, so both ran. A stale lock is now taken over atomically. A lock
+  whose process is alive on this host was also taken over after two hours,
+  giving a long job a second runner; age now applies only to locks from another
+  host. A lock taken before the machine last started is stale whatever process
+  now has its pid, so one crashed run can no longer stop every job.
+- The session token (`session.json`) was written in place, so a crash mid-write
+  left it truncated and you appeared signed out. It is now written to a
+  temporary file and renamed over.
+- A `links.json` that is valid JSON but the wrong shape (`null`, `{"links":5}`)
+  crashed with a TypeError. It now gets the same "cannot be read; fix or remove
+  it" error as broken JSON, and is never overwritten.
+- CLI: playlist-from-artists, playlist-from-albums and import took any
+  unrecognised token as an artist, album line or file, so a mistyped `--publc`,
+  or an `--apply` after the wrong command, became an artist name and
+  playlist-from-artists wrote at once; `--name --public` took `--public` as the
+  name. An unknown `--option` is now an error, an option that takes a value
+  refuses a missing value or another option, and a bare `--` makes the rest
+  names. `--json` and `--loglevel` are no longer stripped after a bare `--`.
+- Web page: choosing another service in a second tab retargeted this tab's
+  requests, as the choice was read from storage on every call. It is read once
+  per page load.
+- Web page: a fetch of an album's tracks started for an earlier preview could
+  overwrite the picker state of a newer one. Old results are now ignored.
+- Web page: *Delete...* in the sidebar group stayed clickable while the ticked
+  playlists were being deleted, so a second run could start on the same ticks.
+  The actions are now inert until the deletes and the refresh finish.
+- Web page: a playlist with edits not yet saved made the page change its stored
+  state (Combine's sources, the remembered tab and service, the address) before
+  the browser's own prompt appeared, and cancelling it left stale state. The
+  editor now counts as an unsaved preview, so the in-app dialog asks first.
+- Web page: signing in, signing out or forgetting an account reloaded the page
+  at once, losing unsaved previews in other tool views without asking. They now
+  ask like any other reload; if you stay, the accounts list is refreshed.
+- Web page: Combine could show the answer for other settings than the ones you
+  had chosen, as the mode was read again after the request and overlapping
+  requests raced. Each answer is now shown only for the settings it asked with,
+  changing options while a combine is running starts a newer one, and the stale
+  list cannot be saved meanwhile.
+
+### Security
+
+- The local server read a whole request body, of any size, before checking the
+  request's Host, Origin and nonce; served the page and its nonce to any Host;
+  and sent no protection headers. Requests are now authorised before their body
+  is read, bodies over 32 MiB get a 413, the page needs an allowed Host, and every
+  response carries `nosniff`, `X-Frame-Options: DENY` and a Content-Security-Policy
+  (own scripts, styles and fonts only; the page cannot be framed).
+- Any web page could fire a request such as
+  `<img src="http://localhost:53683/?code_autorisation=junk">` and use up, or
+  supply a code for, the Qobuz sign-in that was waiting: Qobuz's redirect carries
+  no OAuth state, so the listener completed the sign-in on any GET with that
+  query. It now refuses a request that is not a navigation to a document.
+- Exported CSV: a title such as `=HYPERLINK(...)` ran as a formula when the file
+  was opened in Excel or LibreOffice. A field starting with `=`, `+`, `-`, `@`,
+  tab or carriage return now gets a leading apostrophe; crosstune's own import
+  strips it again, so titles round-trip.
+- The folders under crosstune's config folder (sign-ins, accounts, jobs, links,
+  matches, History, locks) were created readable by other local users (0755).
+  New ones are created 0700; folders that already exist are not changed.
+- On Windows, a sign-in link containing `&` was cut there and the rest was run as
+  a command, as the browser was opened through `cmd /c start`. The link is now
+  handed to the system directly, without a shell.
