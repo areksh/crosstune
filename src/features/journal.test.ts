@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { qid } from "../services/ids.test-support.js";
 import { ServiceHub } from "../services/hub.js";
-import { tagId } from "../services/ids.js";
+import { tagId, type PlaylistId, type TrackId } from "../services/ids.js";
+import { SpotifyClient } from "../services/spotify/client.js";
+import { FakeSpotify } from "../services/spotify/fake-spotify.test-support.js";
+import { SpotifyService } from "../services/spotify/service.js";
 import { FakeQobuz } from "../services/qobuz/fake-qobuz.test-support.js";
 import type { MusicService } from "../services/service.js";
 import { addConfirmed } from "./playlist-add.js";
@@ -508,9 +511,82 @@ describe("recordingClient", () => {
       playlistTrackIds: [e2],
       insertBefore: 1,
       from: [1],
+      trackIds: [qid(2)],
     });
     // before add 1, after add 1, after add 2: the move's outcome is known.
     expect(account.calls.filter((c) => c.startsWith("getPlaylistTracks"))).toHaveLength(3);
+  });
+
+  it("takes a read of a playlist it has already changed as what is known of it", async () => {
+    const { store, journal, account, client } = setup();
+    const id = account.seedPlaylist("Late Night", [qid(1), qid(2)]);
+    await journal.run({ tool: "x" }, async () => {
+      await client.addTracksToPlaylist(id, [qid(3)]);
+      // Changed elsewhere meanwhile; the action reads the playlist again.
+      await account.addTracksToPlaylist(id, [qid(9)]);
+      await client.getPlaylistTracks(id);
+      await client.addTracksToPlaylist(id, [qid(4)]);
+    });
+    const added = entriesOf(store)[0]!.ops.flatMap((op) => (op.kind === "add-tracks" ? op.entries : []));
+    // Not the 9 that somebody else added.
+    expect(added.map((e) => e.trackId)).toEqual([qid(3), qid(4)]);
+  });
+
+  describe("where entries have no ids of their own (Spotify)", () => {
+    const P = tagId<PlaylistId>("spotify", "p");
+    const song = (letter: string) => tagId<TrackId>("spotify", letter);
+
+    function spotify(letters: string) {
+      const store = new MemoryStore();
+      const journal = new Journal({ store, source: "cli", now: () => new Date("2026-11-24T20:00:00.000Z") });
+      const fake = new FakeSpotify();
+      for (const letter of "abcxy") {
+        fake.addTrack(letter);
+      }
+      fake.seedPlaylist("p", [...letters].map((letter) => `spotify:track:${letter}`));
+      const service = new SpotifyService(
+        new SpotifyClient({ tokens: fake.tokens, fetchImpl: fake.fetchImpl, sleep: async () => {} }),
+      );
+      const client = recordingClient(service, journal);
+      const now = () => fake.uris("p").map((uri) => uri!.split(":")[2]).join("");
+      const ids = async () => (await client.getPlaylistTracks(P)).map((t) => t.playlistTrackId!);
+      return { store, journal, client, now, ids };
+    }
+
+    it("records only what an add put in, though a copy that stayed goes by a new id", async () => {
+      const { store, journal, client, now, ids } = spotify("aba");
+      await journal.run({ tool: "x" }, async () => {
+        // Without a read in between: the copy that stays is still "a#2" to us.
+        await client.removeTracksFromPlaylist(P, [(await ids())[0]!]);
+        await client.addTracksToPlaylist(P, [song("x"), song("a")]);
+      });
+      expect(now()).toBe("baxa");
+      const [removed, added] = entriesOf(store)[0]!.ops;
+      expect(removed).toMatchObject({ kind: "remove-tracks", entries: [{ trackId: song("a"), position: 0 }] });
+      // Read back, the "a" that stayed is "a#1": new as an id, not as an entry.
+      expect(added).toMatchObject({
+        kind: "add-tracks",
+        entries: [
+          { trackId: song("x"), position: 2 },
+          { trackId: song("a"), position: 3 },
+        ],
+      });
+      expect((added as Extract<Operation, { kind: "add-tracks" }>).entries).toHaveLength(2);
+    });
+
+    it("records a move named by the ids of a read made after its own removal", async () => {
+      const { store, journal, client, now, ids } = spotify("abab");
+      await journal.run({ tool: "x" }, async () => {
+        await client.removeTracksFromPlaylist(P, [(await ids())[0]!]);
+        // Read again: the last b is "b#2" still, the a before it "a#1" now.
+        await client.movePlaylistTracks(P, [(await ids())[1]!], 1);
+      });
+      expect(now()).toBe("abb");
+      expect(entriesOf(store)[0]!.ops).toMatchObject([
+        { kind: "remove-tracks", entries: [{ trackId: song("a"), position: 0 }] },
+        { kind: "move-tracks", from: [1], insertBefore: 1, trackIds: [song("a")] },
+      ]);
+    });
   });
 
   it("records a move's entries as positioned by the moves before it", async () => {

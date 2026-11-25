@@ -30,7 +30,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 import type { Playlist, Track } from "../services/model.js";
-import { MUSIC_WRITES } from "../services/service.js";
+import { MUSIC_WRITES, type Capabilities } from "../services/service.js";
 import { applyMove } from "./playlist-order.js";
 import {
   describeEntry,
@@ -258,6 +258,12 @@ export const MUTATING_METHODS = MUSIC_WRITES;
 
 /** The reads the recorder needs from the client it wraps. */
 export interface RecordableClient {
+  /**
+   * How the service names playlist entries; ids are taken to be stable when it
+   * does not say. Where they are positional, what an add put in is told by the
+   * tracks rather than by ids (see {@link addedByCount}).
+   */
+  readonly capabilities?: Pick<Capabilities, "entryIds">;
   getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
   /** Used to name playlists in labels; optional. */
   getPlaylist?(playlistId: PlaylistId): Promise<Playlist>;
@@ -436,7 +442,9 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
         unconfirmed = [...trackIds];
       } else {
         scope.snapshots.set(playlistId, after);
-        if (before !== undefined) {
+        if (before !== undefined && client.capabilities?.entryIds === "positional") {
+          entries = addedByCount(before, after);
+        } else if (before !== undefined) {
           const known = new Set(before.map((t) => t.playlistTrackId));
           entries = toEntries(after).filter((e) => !known.has(e.playlistTrackId));
         } else {
@@ -516,12 +524,14 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
       await call("movePlaylistTracks", playlistId, playlistTrackIds, insertBefore);
       let moved = [...playlistTrackIds];
       let from: number[] | undefined;
+      let trackIds: TrackId[] | undefined;
       if (before !== undefined && before.every((t) => t.playlistTrackId !== undefined)) {
         const places = new Map(before.map((t, index) => [t.playlistTrackId!, index]));
         // Qobuz ignores ids that are not in the playlist.
         moved = moved.filter((id) => places.has(id));
         from = moved.map((id) => places.get(id)!);
         const byId = new Map(before.map((t) => [t.playlistTrackId!, t]));
+        trackIds = moved.map((id) => byId.get(id)!.id);
         scope.snapshots.set(
           playlistId,
           applyMove([...byId.keys()], moved, insertBefore).map((id) => byId.get(id)!),
@@ -535,6 +545,7 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
           playlistTrackIds: moved,
           insertBefore,
           ...(from !== undefined && { from }),
+          ...(trackIds !== undefined && { trackIds }),
         });
       }
     },
@@ -547,16 +558,60 @@ export function recordingClient<T extends RecordableClient>(client: T, journal: 
     removeFavoriteArtists: favourites("removeFavoriteArtists", "remove-favourites", "artists"),
   };
 
+  /**
+   * A read of a playlist the action has already changed: what is known of it
+   * is replaced by what was just read. It is fresher; and where entries have
+   * no ids of their own, a read numbers them anew, so that the ids kept from
+   * before would no longer be the ones the action's next write names -- a move
+   * or removal by the new ids would then be made and not recorded.
+   */
+  const readPlaylist = async (playlistId: PlaylistId): Promise<Track[]> => {
+    const tracks = await client.getPlaylistTracks(playlistId);
+    const scope = journal.scope();
+    if (scope.snapshots.has(playlistId)) {
+      scope.snapshots.set(playlistId, [...tracks]);
+    }
+    return tracks;
+  };
+
   return new Proxy(client, {
     get(target, property) {
       if (typeof property === "string" && property in wrappers && typeof raw[property] === "function") {
         return (wrappers as Record<string, AnyMethod | undefined>)[property];
+      }
+      if (property === "getPlaylistTracks") {
+        return readPlaylist;
       }
       // Getters and methods run against the real client (its private fields).
       const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? (value as AnyMethod).bind(target) : value;
     },
   });
+}
+
+/**
+ * What an add put into a playlist whose entries have no ids of their own. An
+ * entry there is named by its song and which copy of it this is, counted at
+ * each read, so the same entry can go by another id in `after` than in
+ * `before` (once an earlier copy was removed or moved in between), and an id
+ * that is new need not be a new entry. So the tracks are counted instead: of
+ * each track there are more of in `after`, that many of its last copies are
+ * the new ones, as an add goes to the end.
+ */
+function addedByCount(before: readonly Track[], after: readonly Track[]): PlaylistEntryRecord[] {
+  const more = new Map<TrackId, number>();
+  after.forEach((track) => more.set(track.id, (more.get(track.id) ?? 0) + 1));
+  before.forEach((track) => more.set(track.id, (more.get(track.id) ?? 0) - 1));
+  const added: PlaylistEntryRecord[] = [];
+  for (let position = after.length - 1; position >= 0; position -= 1) {
+    const track = after[position]!;
+    const left = more.get(track.id) ?? 0;
+    if (left > 0 && track.playlistTrackId !== undefined) {
+      more.set(track.id, left - 1);
+      added.unshift({ trackId: track.id, playlistTrackId: track.playlistTrackId, position });
+    }
+  }
+  return added;
 }
 
 /** A playlist's entries (those with an entry id) with their positions. */

@@ -103,6 +103,14 @@ export type Operation =
        * was kept.
        */
       from?: number[];
+      /**
+       * The track of each entry moved. Where entries have no ids of their own
+       * (Spotify names one by its song and which copy it is, counted afresh at
+       * each read), undo finds the entries by this and by where the move put
+       * them. Absent when the playlist could not be read, and in records made
+       * before this was kept: undo then goes by the entry ids, as it did.
+       */
+      trackIds?: TrackId[];
     }
   | { kind: "add-favourites"; type: FavouriteType; ids: AnyId[] }
   | { kind: "remove-favourites"; type: FavouriteType; ids: AnyId[] };
@@ -458,6 +466,7 @@ function toOperation(value: unknown): Operation | undefined {
       if (playlistTrackIds === undefined || !isInt(value["insertBefore"])) {
         return undefined;
       }
+      const trackIds = readIds<TrackId>(value["trackIds"]);
       return {
         kind: "move-tracks",
         playlistId,
@@ -466,6 +475,7 @@ function toOperation(value: unknown): Operation | undefined {
         insertBefore: value["insertBefore"],
         ...(isIntArray(value["from"]) &&
           value["from"].length === playlistTrackIds.length && { from: value["from"] }),
+        ...(trackIds !== undefined && trackIds.length === playlistTrackIds.length && { trackIds }),
       };
     }
     default:

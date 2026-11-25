@@ -86,11 +86,25 @@ describe("serializeRecords / parseHistory", () => {
       { kind: "add-tracks", playlistId: qid(1), playlistName: "A", entries: entries(1), unconfirmed: [qid(7)] },
       { kind: "remove-tracks", playlistId: qid(1), entries: entries(1, 3, 4) },
       { kind: "move-tracks", playlistId: qid(1), playlistTrackIds: [qid(11)], insertBefore: 1 },
+      {
+        kind: "move-tracks",
+        playlistId: qid(1),
+        playlistTrackIds: [qid(11), qid(12)],
+        insertBefore: 1,
+        from: [3, 4],
+        trackIds: [qid(5), qid(6)],
+      },
       { kind: "add-favourites", type: "albums", ids: [qid("alb")] },
       { kind: "remove-favourites", type: "tracks", ids: [qid(8)] },
     ];
     const records = [record(entry({ ops }))];
     expect(parseHistory(serializeRecords(records))).toEqual(records);
+  });
+
+  it("reads a move whose tracks do not match its entries without them", () => {
+    const move = { kind: "move-tracks", playlistId: qid(1), playlistTrackIds: [qid(11), qid(12)], insertBefore: 1 };
+    const line = JSON.stringify({ v: 1, type: "entry", ...entry({ ops: [{ ...move, trackIds: [qid(5)] } as Operation] }) });
+    expect(parseHistory(line)).toEqual([record(entry({ ops: [move as Operation] }))]);
   });
 
   it("keeps what an undo renamed and made again", () => {
