@@ -603,3 +603,114 @@ describe("entries from before ids named their service", () => {
     expect(account.trackIds(id)).toEqual([qid(1), qid(2), qid(9)]);
   });
 });
+
+describe("stepping back through the history", () => {
+  /** A moves song 3 to the top; B then removes it. */
+  async function movedThenRemoved() {
+    const world = setup();
+    const { journal, account, client } = world;
+    const id = account.seedPlaylist("Mix", [qid(1), qid(2), qid(3)]);
+    await journal.run({ tool: "playlist-manager" }, () => client.movePlaylistTracks!(id, [account.entryIds(id)[2]!], 1));
+    await journal.run({ tool: "playlist-manager" }, () => client.removeTracksFromPlaylist(id, [account.entryIds(id)[0]!]));
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2)]);
+    return { ...world, id };
+  }
+
+  it("undoes an earlier move of a song that a later undo put back under a new id", async () => {
+    const { journal, account, undo, id } = await movedThenRemoved();
+    const [b, a] = journal.items();
+
+    await undo(b!.id);
+    expect(account.trackIds(id)).toEqual([qid(3), qid(1), qid(2)]);
+
+    const { plan, outcome } = await undo(a!.id);
+    expect(plan.steps.map(describeStep)).toEqual(["Put Mix back in its old order"]);
+    expect(outcome).toMatchObject({ undone: true, failed: [] });
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2), qid(3)]);
+  });
+
+  it("keeps the new ids on the undo's own entry", async () => {
+    const { journal, account, undo, id } = await movedThenRemoved();
+    const before = journal.items()[0]!;
+    const removed = before.ops.flatMap((op) => (op.kind === "remove-tracks" ? op.entries : []))[0]!;
+
+    await undo(before.id);
+
+    expect(journal.items()[0]).toMatchObject({
+      undoes: before.id,
+      renamed: [{ playlistId: id, entries: [[removed.playlistTrackId, account.entryIds(id)[0]]] }],
+    });
+  });
+
+  it("follows a song through several undos", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1), qid(2), qid(3)]);
+    // A moves 3 to the top; B removes it; undo B; C removes it again; undo C.
+    await journal.run({ tool: "playlist-manager" }, () => client.movePlaylistTracks!(id, [account.entryIds(id)[2]!], 1));
+    const a = journal.items()[0]!;
+    await journal.run({ tool: "playlist-manager" }, () => client.removeTracksFromPlaylist(id, [account.entryIds(id)[0]!]));
+    await undo();
+    await journal.run({ tool: "playlist-manager" }, () => client.removeTracksFromPlaylist(id, [account.entryIds(id)[0]!]));
+    await undo();
+    expect(account.trackIds(id)).toEqual([qid(3), qid(1), qid(2)]);
+
+    await undo(a.id);
+
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2), qid(3)]);
+  });
+
+  it("takes out what an earlier entry added, after a later undo put it back", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Mix", [qid(1)]);
+    await journal.run({ tool: "similar-artists" }, () => client.addTracksToPlaylist(id, [qid(2)]));
+    const a = journal.items()[0]!;
+    await journal.run({ tool: "deduplicate" }, () => client.removeTracksFromPlaylist(id, [account.entryIds(id)[1]!]));
+    await undo();
+    expect(account.trackIds(id)).toEqual([qid(1), qid(2)]);
+
+    const { plan } = await undo(a.id);
+
+    expect(plan.notes).toEqual([]);
+    expect(account.trackIds(id)).toEqual([qid(1)]);
+  });
+
+  it("does the same where ids are stable on another service (TIDAL)", async () => {
+    const { journal, fake, client, seed } = tidalSetup();
+    const id = seed("Mix", [1, 2, 3]);
+    const native = String(id).replace("tidal:", "");
+    const entries = async () => (await client.getPlaylistTracks(id)).map((t) => t.playlistTrackId!);
+    await journal.run({ tool: "playlist-manager" }, async () => client.movePlaylistTracks(id, [(await entries())[2]!], 1));
+    await journal.run({ tool: "playlist-manager" }, async () => client.removeTracksFromPlaylist(id, [(await entries())[0]!]));
+    expect(fake.contents(native)).toEqual(["tracks:1", "tracks:2"]);
+    const undo = async (entryId: string) => {
+      const items = journal.items();
+      const item = items.find((i) => i.id === entryId)!;
+      return applyUndo(journal, client, item, await planUndo(client, item, items));
+    };
+    const [b, a] = journal.items();
+
+    await undo(b!.id);
+    expect(fake.contents(native)).toEqual(["tracks:3", "tracks:1", "tracks:2"]);
+    await undo(a!.id);
+
+    expect(fake.contents(native)).toEqual(["tracks:1", "tracks:2", "tracks:3"]);
+  });
+
+  it("still reads an undo written before new ids were kept, and plans as it did then", async () => {
+    const { journal, account, client, store, undo, id } = await movedThenRemoved();
+    const [b, a] = journal.items();
+    await undo(b!.id);
+    // As an earlier version wrote the undo's entry: without the new ids.
+    store.text = store.text.replace(/,"renamed":\[.*?\]\]\}\]/, "");
+    expect(store.text).not.toContain("renamed");
+
+    const items = journal.items();
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({ undoes: b!.id, tool: "undo" });
+    const plan = await planUndo(client, items.find((i) => i.id === a!.id)!, items);
+
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.steps).toEqual([]);
+    expect(account.trackIds(id)).toEqual([qid(3), qid(1), qid(2)]);
+  });
+});

@@ -110,6 +110,16 @@ export type Operation =
 /** Where an action came from. */
 export type HistorySource = "cli" | "web";
 
+/**
+ * The entries of one playlist that an undo put back. A service gives an entry
+ * that is added again a new id, so each is kept as the id it had (in the
+ * records made before) and the id it has since.
+ */
+export interface RenamedEntries {
+  playlistId: PlaylistId;
+  entries: Array<[was: EntryId, now: EntryId]>;
+}
+
 /** One user action and the changes it made. */
 export interface HistoryEntry {
   /** Short unique id, used by `undo <id>`. */
@@ -129,6 +139,15 @@ export interface HistoryEntry {
   forgotten?: ServiceName;
   /** For a sync or settling of a linked playlist: the link, so undoing it can pause that link. */
   link?: string;
+  /**
+   * For an undo: the new ids of the entries it put back, by the ids they had.
+   * Entries made before the undo name them by the old ids; undoing one of those
+   * reads its ids through this (see ./undo.ts). Absent on an undo that put
+   * nothing back, and in records made before this was kept -- an earlier entry
+   * that names what such an undo put back is then undone as far as its ids
+   * still exist, as it always was.
+   */
+  renamed?: RenamedEntries[];
 }
 
 /** A line of the history file. */
@@ -259,7 +278,38 @@ function toRecord(value: unknown): HistoryRecord | undefined {
   if (isString(value["link"])) {
     entry.link = value["link"];
   }
+  const renamed = toRenamed(value["renamed"]);
+  if (renamed !== undefined) {
+    entry.renamed = renamed;
+  }
   return entry;
+}
+
+/**
+ * What an undo renamed, or undefined when there is nothing readable: the entry
+ * is then read without it, like one made before it was kept.
+ */
+function toRenamed(value: unknown): RenamedEntries[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out: RenamedEntries[] = [];
+  for (const item of value) {
+    const playlistId = isRecord(item) ? readId<PlaylistId>(item["playlistId"]) : undefined;
+    if (!isRecord(item) || playlistId === undefined || !Array.isArray(item["entries"])) {
+      return undefined;
+    }
+    const entries: Array<[EntryId, EntryId]> = [];
+    for (const pair of item["entries"] as unknown[]) {
+      const ids = Array.isArray(pair) && pair.length === 2 ? readIds<EntryId>(pair) : undefined;
+      if (ids === undefined) {
+        return undefined;
+      }
+      entries.push([ids[0]!, ids[1]!]);
+    }
+    out.push({ playlistId, entries });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function toEntries(value: unknown): PlaylistEntryRecord[] | undefined {

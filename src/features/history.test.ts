@@ -92,6 +92,64 @@ describe("serializeRecords / parseHistory", () => {
     const records = [record(entry({ ops }))];
     expect(parseHistory(serializeRecords(records))).toEqual(records);
   });
+
+  it("keeps what an undo renamed", () => {
+    const records = [
+      record(
+        entry({
+          tool: "undo",
+          undoes: "a0",
+          renamed: [{ playlistId: qid(1), entries: [[qid(11), qid(21)], [qid(12), qid(22)]] }],
+        }),
+      ),
+    ];
+    expect(parseHistory(serializeRecords(records))).toEqual(records);
+  });
+
+  it("reads an entry whose renamed ids it cannot read, without them", () => {
+    const line = JSON.stringify({ v: 1, type: "entry", ...entry(), renamed: [{ playlistId: "qobuz:1", entries: [["x"]] }] });
+    expect(parseHistory(line)).toEqual([record(entry())]);
+  });
+
+  it("reads the lines earlier versions wrote, as they meant them", () => {
+    // Verbatim from history files of November 2026: bare Qobuz ids (before
+    // ADR-0010), then tagged ones; an undo with nothing kept about new ids, a
+    // move with and without where its entries were, and an undone marker.
+    const text = [
+      '{"v":1,"type":"entry","id":"3f9a1c2e","at":"2026-11-03T18:02:11.412Z","tool":"deduplicate","source":"cli","label":"Removed 1 duplicate from Late Night","ops":[{"kind":"remove-tracks","playlistId":4242,"playlistName":"Late Night","entries":[{"trackId":101,"playlistTrackId":9001,"position":3}]}]}',
+      '{"v":1,"type":"entry","id":"7b2d4e10","at":"2026-11-22T09:15:00.000Z","tool":"playlist-manager","source":"web","label":"Reordered Late Night","ops":[{"kind":"move-tracks","playlistId":"qobuz:4242","playlistName":"Late Night","playlistTrackIds":["qobuz:9002"],"insertBefore":1,"from":[2]},{"kind":"move-tracks","playlistId":"qobuz:4242","playlistTrackIds":["qobuz:9003"],"insertBefore":2}]}',
+      '{"v":1,"type":"entry","id":"a81c77f0","at":"2026-11-23T10:00:00.000Z","tool":"undo","source":"web","label":"Undid: Removed 1 duplicate from Late Night","ops":[{"kind":"add-tracks","playlistId":"qobuz:4242","playlistName":"Late Night","entries":[{"trackId":"qobuz:101","playlistTrackId":"qobuz:9100","position":5}]}],"undoes":"3f9a1c2e"}',
+      '{"v":1,"type":"undone","id":"3f9a1c2e","by":"a81c77f0","at":"2026-11-23T10:00:00.100Z"}',
+      '{"v":1,"type":"entry","id":"c0ffee00","at":"2026-11-24T08:00:00.000Z","tool":"link","source":"cli","label":"Synced Mix","ops":[{"kind":"add-favourites","type":"tracks","ids":["tidal:77"]}],"link":"aaaaaaaa","error":"HTTP 500"}',
+    ].join("\n");
+
+    const items = foldHistory(parseHistory(text));
+
+    expect(items.map((i) => i.id)).toEqual(["c0ffee00", "a81c77f0", "7b2d4e10", "3f9a1c2e"]);
+    expect(items[3]).toEqual({
+      id: "3f9a1c2e",
+      at: "2026-11-03T18:02:11.412Z",
+      tool: "deduplicate",
+      source: "cli",
+      label: "Removed 1 duplicate from Late Night",
+      ops: [
+        {
+          kind: "remove-tracks",
+          playlistId: qid(4242),
+          playlistName: "Late Night",
+          entries: [{ trackId: qid(101), playlistTrackId: qid(9001), position: 3 }],
+        },
+      ],
+      undone: { at: "2026-11-23T10:00:00.100Z", by: "a81c77f0" },
+    });
+    expect(items[2]?.ops).toEqual([
+      { kind: "move-tracks", playlistId: qid(4242), playlistName: "Late Night", playlistTrackIds: [qid(9002)], insertBefore: 1, from: [2] },
+      { kind: "move-tracks", playlistId: qid(4242), playlistTrackIds: [qid(9003)], insertBefore: 2 },
+    ]);
+    expect(items[1]).toMatchObject({ undoes: "3f9a1c2e", tool: "undo" });
+    expect(items[1]).not.toHaveProperty("renamed");
+    expect(items[0]).toMatchObject({ link: "aaaaaaaa", error: "HTTP 500" });
+  });
 });
 
 describe("foldHistory", () => {

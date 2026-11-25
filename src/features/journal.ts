@@ -96,10 +96,28 @@ export interface RecordingScope {
   snapshots: Map<PlaylistId, Track[]>;
 }
 
+/**
+ * What an action can keep on its entry besides its operations: for an undo,
+ * the new ids of what it put back.
+ */
+export type EntryExtras = Pick<HistoryEntry, "renamed">;
+
+/** The entry being written, as the action running in it sees it. */
+export interface OpenEntry {
+  readonly id: string;
+  /** Keep this on the entry when it is written (replacing what was kept before). */
+  keep(extras: EntryExtras): void;
+}
+
 interface Draft extends RecordingScope {
   id: string;
   meta: EntryMeta;
   ops: Operation[];
+  extras: EntryExtras;
+}
+
+function newDraft(id: string, meta: EntryMeta, ops: Operation[] = []): Draft {
+  return { id, meta, ops, extras: {}, names: new Map(), snapshots: new Map() };
 }
 
 export class Journal {
@@ -125,11 +143,17 @@ export class Journal {
    * settles if it recorded anything (or is an undo), with the error noted when
    * `fn` failed; the result or error is passed through.
    */
-  async run<T>(meta: EntryMeta, fn: (entry: { readonly id: string }) => Promise<T>): Promise<T> {
-    const draft: Draft = { id: this.#newId(), meta, ops: [], names: new Map(), snapshots: new Map() };
+  async run<T>(meta: EntryMeta, fn: (entry: OpenEntry) => Promise<T>): Promise<T> {
+    const draft = newDraft(this.#newId(), meta);
+    const entry: OpenEntry = {
+      id: draft.id,
+      keep: (extras) => {
+        draft.extras = { ...draft.extras, ...extras };
+      },
+    };
     let failure: { error: unknown } | undefined;
     try {
-      return await this.#open.run(draft, () => fn({ id: draft.id }));
+      return await this.#open.run(draft, () => fn(entry));
     } catch (error) {
       failure = { error };
       throw error;
@@ -147,7 +171,7 @@ export class Journal {
       draft.ops.push(op);
       return;
     }
-    this.#write({ id: this.#newId(), meta: { tool: "other" }, ops: [op], names: new Map(), snapshots: new Map() });
+    this.#write(newDraft(this.#newId(), { tool: "other" }, [op]));
   }
 
   /** The open action's scratch, or a throwaway one outside any action. */
@@ -184,6 +208,9 @@ export class Journal {
     }
     if (failure !== undefined) {
       entry.error = failure.error instanceof Error ? failure.error.message : String(failure.error);
+    }
+    if (draft.extras.renamed !== undefined && draft.extras.renamed.length > 0) {
+      entry.renamed = draft.extras.renamed;
     }
     this.#append([{ type: "entry", ...entry }], now);
   }

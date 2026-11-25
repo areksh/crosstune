@@ -37,6 +37,20 @@ describe("forgetInHistory", () => {
     const [kept] = forgetInHistory(records, "tidal").records as Extract<HistoryRecord, { type: "entry" }>[];
     expect(kept).toMatchObject({ id: "m", label: "m", ops: [], forgotten: "tidal" });
   });
+
+  it("forgets the ids an undo gave what it put back, with the rest of that entry", () => {
+    const undo = {
+      ...entry("u", [
+        { kind: "add-tracks", playlistId: t(1), entries: [{ trackId: t(2), playlistTrackId: t(9), position: 0 }] },
+        { kind: "add-favourites", type: "tracks", ids: [q(1)] },
+      ]),
+      undoes: "m",
+      renamed: [{ playlistId: t(1), entries: [[t(3), t(9)]] }],
+    } as HistoryRecord;
+    const [kept] = forgetInHistory([undo], "tidal").records;
+    expect(kept).toMatchObject({ id: "u", ops: [], forgotten: "tidal" });
+    expect(kept).not.toHaveProperty("renamed");
+  });
 });
 
 describe("an entry kept after forgetting", () => {

@@ -19,6 +19,14 @@
  * gone are skipped and reported, as are tracks Qobuz no longer lets us add, and
  * moves recorded without where their entries came from. Favourites are re-added
  * or removed, and changed playlist details put back.
+ *
+ * **Ids that changed since.** A track that is put back is a new entry: its
+ * service gives it a new id, and every record made before names it by the old
+ * one. So an undo keeps, on its own entry, the new id of each entry it put back
+ * (`renamed`), and planning reads an entry's ids through what the undos made
+ * after it renamed ({@link renamesSince}). Undoing "moved a song to the top"
+ * after undoing "removed that song" then moves the song that was put back,
+ * rather than finding nothing under the old id.
  */
 
 import { isNotFound, labelOf } from "../services/errors.js";
@@ -40,6 +48,7 @@ import {
   type HistoryItem,
   type Operation,
   type PlaylistDetails,
+  type RenamedEntries,
 } from "./history.js";
 import type { Journal } from "./journal.js";
 import { addInOrder, missingFrom } from "./playlist-add.js";
@@ -203,7 +212,8 @@ export async function planUndo(
     plan.warnings.push(`A later change also touched it: "${later.label}".`);
   }
 
-  const ops = item.ops;
+  // As the entries are called now: undos made since may have put some back.
+  const ops = item.ops.map(renamesSince(item, items));
   const names = new Map<PlaylistId, string>();
   for (const op of ops) {
     if (op.kind === "create-playlist" || op.kind === "delete-playlist") {
@@ -412,6 +422,56 @@ function replayBackwards(
 }
 
 /**
+ * How to read an operation recorded by `item` now: with each entry id replaced
+ * by the one it has since, following what the undos made after `item` put back
+ * under new ids (oldest first, so an entry put back twice is followed through
+ * both). An undo that was itself undone still counts: its new id is then simply
+ * no longer in the playlist.
+ */
+function renamesSince(item: HistoryItem, items: readonly HistoryItem[]): (op: Operation) => Operation {
+  const at = items.findIndex((other) => other.id === item.id);
+  const renames = new Map<PlaylistId, Map<EntryId, EntryId>>();
+  // `items` is newest first; what was written after `item` comes before it.
+  for (const later of items.slice(0, Math.max(at, 0)).reverse()) {
+    for (const { playlistId, entries } of later.renamed ?? []) {
+      const known = renames.get(playlistId) ?? new Map<EntryId, EntryId>();
+      renames.set(playlistId, known);
+      entries.forEach(([was, now]) => known.set(was, now));
+    }
+  }
+  const now = (playlistId: PlaylistId, id: EntryId): EntryId => {
+    const known = renames.get(playlistId);
+    let current = id;
+    // Bounded, should a damaged file ever name ids in a circle.
+    for (let hops = 0; known !== undefined && hops < known.size; hops += 1) {
+      const next = known.get(current);
+      if (next === undefined) {
+        break;
+      }
+      current = next;
+    }
+    return current;
+  };
+  return (op) => {
+    if (renames.size === 0) {
+      return op;
+    }
+    switch (op.kind) {
+      case "add-tracks":
+      case "remove-tracks":
+        return {
+          ...op,
+          entries: op.entries.map((e) => ({ ...e, playlistTrackId: now(op.playlistId, e.playlistTrackId) })),
+        };
+      case "move-tracks":
+        return { ...op, playlistTrackIds: op.playlistTrackIds.map((id) => now(op.playlistId, id)) };
+      default:
+        return op;
+    }
+  };
+}
+
+/**
  * Whether an error says the playlist does not exist (rather than a failure to
  * read it), however its service puts that: Qobuz answers an HTTP 404, TIDAL
  * and Spotify raise a `not-found`.
@@ -427,17 +487,29 @@ function messageOf(error: unknown): string {
 /** Ids of the tracks that could not be put back. */
 type Unrestored = Set<TrackId>;
 
+/** What an undo made that later undos need to know of; kept on its entry. */
+interface Made {
+  /** The new ids of the entries it put back. */
+  renamed: RenamedEntries[];
+}
+
 /**
  * Run the steps of a plan in order, reporting each failure and carrying on. A
  * track that could not be put back is never taken out of where it is now.
  */
 export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<UndoResult> {
+  return (await runPlan(client, plan)).result;
+}
+
+/** {@link commitUndo}, with what it made. */
+async function runPlan(client: UndoClient, plan: UndoPlan): Promise<{ result: UndoResult; made: Made }> {
   const result: UndoResult = { done: [], failed: [], notes: [] };
+  const made: Made = { renamed: [] };
   const unrestored: Unrestored = new Set(plan.unrestorable);
   for (const step of plan.steps) {
     const text = describeStep(step);
     try {
-      const done = await runStep(client, step, result, unrestored);
+      const done = await runStep(client, step, result, unrestored, made);
       if (done !== false) {
         result.done.push(done === true ? text : done);
       }
@@ -445,7 +517,7 @@ export async function commitUndo(client: UndoClient, plan: UndoPlan): Promise<Un
       result.failed.push({ step: text, reason: messageOf(error) });
     }
   }
-  return result;
+  return { result, made };
 }
 
 /**
@@ -457,6 +529,7 @@ async function runStep(
   step: UndoStep,
   result: UndoResult,
   unrestored: Unrestored,
+  made: Made,
 ): Promise<boolean | string> {
   switch (step.kind) {
     case "delete-playlist":
@@ -483,7 +556,7 @@ async function runStep(
       await recreate(client, step, result, unrestored);
       return true;
     case "restore-tracks":
-      return restoreTracks(client, step, result, unrestored);
+      return restoreTracks(client, step, result, unrestored, made);
     case "reorder-playlist": {
       const current = entryIds(await client.getPlaylistTracks(step.playlistId));
       await moveInto(client, step.playlistId, current, mergeOrder(current, step.order));
@@ -569,6 +642,7 @@ async function restoreTracks(
   step: Extract<UndoStep, { kind: "restore-tracks" }>,
   result: UndoResult,
   unrestored: Unrestored,
+  made: Made,
 ): Promise<boolean | string> {
   let before: Track[];
   let after: Track[];
@@ -606,6 +680,10 @@ async function restoreTracks(
   }
   if (missing > 0) {
     result.notes.push(couldNotPutBack(missing, step.name));
+  }
+  if (newId.size > 0) {
+    // Kept whatever comes next: they are in the playlist under these ids now.
+    made.renamed.push({ playlistId: step.playlistId, entries: [...newId] });
   }
   try {
     const current = entryIds(after);
@@ -653,9 +731,11 @@ export async function applyUndo(
       : `${UNDID}${item.label}`;
   const result = await journal.run(
     { tool: "undo", label, undoes: item.id },
-    (entry) => {
+    async (entry) => {
       entryId = entry.id;
-      return commitUndo(client, plan);
+      const { result, made } = await runPlan(client, plan);
+      entry.keep({ renamed: made.renamed });
+      return result;
     },
   );
   const undone = result.failed.length === 0 || result.done.length > 0;
