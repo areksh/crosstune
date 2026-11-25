@@ -87,6 +87,14 @@ describe("stripVersionLabels", () => {
     expect(stripVersionLabels("Song (Live) [Remastered]")).toBe("Song");
   });
 
+  it("keeps a trailing bracket that is part of the title", () => {
+    expect(stripVersionLabels("Sorry (Not Sorry)")).toBe("Sorry (Not Sorry)");
+    expect(stripVersionLabels("Time (Clock of the Heart)")).toBe("Time (Clock of the Heart)");
+    expect(stripVersionLabels("Song (Live)")).toBe("Song");
+    expect(stripVersionLabels("Song (2011)")).toBe("Song");
+    expect(stripVersionLabels("Sorry (Not Sorry) [Live]")).toBe("Sorry (Not Sorry)");
+  });
+
   it("drops a dashed suffix naming a version", () => {
     expect(stripVersionLabels("Layla - 2011 Remaster")).toBe("Layla");
     expect(stripVersionLabels("Bohemian Rhapsody - Live Aid")).toBe("Bohemian Rhapsody");
@@ -330,9 +338,10 @@ describe("assignSlots", () => {
     expect(chosen.map((c) => c?.track.id)).toEqual([1, 2]);
   });
 
-  it("reuses a track only when it is the slot's only candidate", () => {
+  it("leaves a slot empty rather than reuse a track already chosen", () => {
     const a1 = candidate(1, "A");
-    expect(assignSlots([[a1], [a1]], true).map((c) => c?.track.id)).toEqual([1, 1]);
+    expect(assignSlots([[a1], [a1]], true).map((c) => c?.track.id)).toEqual([1, undefined]);
+    expect(assignSlots([[a1], [a1]], false).map((c) => c?.track.id)).toEqual([1, undefined]);
   });
 
   it("takes the best track regardless of artist when one-per-artist is off", () => {
@@ -682,6 +691,20 @@ describe("resolveWordPlay: acrostic and A to Z", () => {
       source: { type: "favourites" },
     });
     expect(chosenTitles(plan)).toEqual(["One", "Only You"]);
+  });
+
+  it("leaves a repeated letter's second slot unmatched when only one song starts with it", async () => {
+    const { client } = catalogue([], { getFavoriteTracks: vi.fn(async () => favourites) });
+    const plan = await resolveWordPlay(client, {
+      mode: "acrostic",
+      text: "UU",
+      source: { type: "favourites" },
+    });
+    // "Umbrella" is the only U song; the written playlist holds it once, so the
+    // plan must show one song and one gap, not two songs.
+    expect(chosenTitles(plan)).toEqual(["Umbrella", undefined]);
+    expect(plan.splits[0]!.unmatched).toEqual(["U"]);
+    expect(plan.splits[0]!.songCount).toBe(1);
   });
 
   it("reads a playlist when asked", async () => {
