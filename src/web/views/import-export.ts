@@ -9,9 +9,10 @@
  * matching and writing all live in the tested server modules.
  */
 
-import type { AnyId, PlaylistId } from "../../services/ids.js";
+import type { AnyId, PlaylistId, TrackId } from "../../services/ids.js";
 import { api, apiDownload, type Playlist } from "../api.js";
 import { el, setStep, showError } from "../dom.js";
+import { choiceList, type ChoiceSong } from "../song-choice.js";
 
 interface ExportResponse {
   filename: string;
@@ -22,6 +23,8 @@ interface ImportPlan {
   kind: "tracks" | "albums" | "artists";
   matched: Array<{ label: string; id: AnyId; via?: "id" | "isrc" | "search" }>;
   unmatched: string[];
+  /** Title-only lines: the songs of that title, for the user to choose from. */
+  toCheck?: Array<{ label: string; position: number; options: ChoiceSong[] }>;
   /** The format the server read (a CSV may turn out to be a Spotify export). */
   format?: string;
 }
@@ -34,6 +37,8 @@ type ImportTarget =
 let exportPlaylistsLoaded = false;
 let importPlaylistsLoaded = false;
 let currentPlan: ImportPlan | undefined;
+/** The song chosen for each of the plan's lines to check; null (the default) adds nothing. */
+let currentPicks: Array<TrackId | null> = [];
 /** The backup text the restore preview was read from: what is restored, whatever the box holds later. */
 let previewedBackup: string | undefined;
 
@@ -55,6 +60,7 @@ export function initImportExportView(): void {
 /** Drop the import preview: what it showed no longer matches the input or target. */
 function resetImportPreview(): void {
   currentPlan = undefined;
+  currentPicks = [];
   previewedBackup = undefined;
   el("ie-import-preview").hidden = true;
   setStep("import-steps", 0);
@@ -214,6 +220,7 @@ async function onResolve(): Promise<void> {
   showError(el("ie-commit-result"), undefined);
   showError(el("ie-commit-error"), undefined);
   currentPlan = undefined;
+  currentPicks = [];
   previewedBackup = undefined;
 
   const content = el<HTMLTextAreaElement>("ie-import-content").value.trim();
@@ -243,7 +250,9 @@ async function onResolve(): Promise<void> {
       content,
       kind: kindForTarget(target),
     });
-    currentPlan = { kind: plan.kind, matched: plan.matched, unmatched: plan.unmatched };
+    const toCheck = plan.toCheck ?? [];
+    currentPlan = { kind: plan.kind, matched: plan.matched, unmatched: plan.unmatched, toCheck };
+    currentPicks = toCheck.map(() => null);
     renderPlan(plan);
   } catch (error) {
     showError(errorNode, (error as Error).message);
@@ -253,11 +262,12 @@ async function onResolve(): Promise<void> {
   }
 }
 
-/** Show a plan: how many matched, and which entries did not. */
+/** Show a plan: how many matched, the lines to choose a song for, and which entries did not match. */
 function renderPlan(plan: ImportPlan): void {
   el("ie-import-preview").hidden = false;
   setStep("import-steps", 1);
-  const total = plan.matched.length + plan.unmatched.length;
+  const toCheck = plan.toCheck ?? [];
+  const total = plan.matched.length + toCheck.length + plan.unmatched.length;
   // How the matches were found: an id or ISRC is exact; a search can misfire.
   const byMethod = { id: 0, isrc: 0, search: 0 };
   for (const item of plan.matched) {
@@ -271,7 +281,34 @@ function renderPlan(plan: ImportPlan): void {
   const source = plan.format === "spotify" ? "Read as a Spotify (Exportify) export. " : "";
   el("ie-import-summary").textContent =
     `${source}Matched ${plan.matched.length} of ${total} ${plan.kind}` +
-    (how.length > 0 ? ` (${how.join(", ")}).` : ".");
+    (how.length > 0 ? ` (${how.join(", ")})` : "") +
+    (toCheck.length > 0 ? `; ${toCheck.length} to check` : "") +
+    ".";
+
+  // A title alone is anybody's song: nothing is chosen for these lines until the user does.
+  const check = el("ie-import-check");
+  check.textContent = "";
+  check.hidden = toCheck.length === 0;
+  if (toCheck.length > 0) {
+    check.append(
+      choiceList(
+        toCheck.map((line, index) => ({
+          song: line.label,
+          why: "Only a title was given.",
+          options: line.options,
+          onChange: (choice) => {
+            currentPicks[index] = choice ?? null;
+            updateCommitButton();
+          },
+        })),
+        {
+          heading: `${toCheck.length} to check`,
+          hint: "Nothing is added for these lines until you choose a song.",
+          leaveOut: "Don't add",
+        },
+      ),
+    );
+  }
 
   const unmatched = el("ie-import-unmatched");
   if (plan.unmatched.length === 0) {
@@ -282,12 +319,25 @@ function renderPlan(plan: ImportPlan): void {
     unmatched.textContent = `Not found: ${plan.unmatched.join(", ")}`;
   }
 
+  updateCommitButton();
+}
+
+/** Name what the import would write: the matched items and the songs picked so far. */
+function updateCommitButton(): void {
+  const plan = currentPlan;
+  if (plan === undefined) {
+    return;
+  }
+  const picked = currentPicks.filter((pick) => pick !== null).length;
+  const writes = plan.matched.length + picked;
   const commit = el<HTMLButtonElement>("ie-commit");
-  commit.disabled = plan.matched.length === 0;
+  commit.disabled = writes === 0;
   commit.textContent =
-    plan.matched.length === 0
+    writes === 0
       ? "Nothing to import"
-      : `Import ${plan.matched.length} matched ${plan.kind}`;
+      : picked === 0
+        ? `Import ${plan.matched.length} matched ${plan.kind}`
+        : `Import ${writes} ${plan.kind} (${picked} you chose)`;
 }
 
 /** Preview a backup restore by reading its counts from the JSON client-side. */
@@ -315,6 +365,9 @@ function renderRestorePreview(content: string, errorNode: HTMLElement): void {
   el("ie-import-preview").hidden = false;
   setStep("import-steps", 1);
   el("ie-import-summary").textContent = `Backup contains ${counts}.`;
+  const check = el("ie-import-check");
+  check.hidden = true;
+  check.textContent = "";
   const unmatched = el("ie-import-unmatched");
   unmatched.hidden = true;
   unmatched.textContent = "";
@@ -364,20 +417,23 @@ async function onCommit(): Promise<void> {
         showError(errorNode, "Choose a destination playlist.");
         return;
       }
-      const result = await api<{ written: number; playlist?: { name: string } }>(
+      const result = await api<{ written: number; skipped?: number; playlist?: { name: string } }>(
         "POST",
         "/api/import/commit",
-        { plan: currentPlan, target: commitTarget },
+        { plan: currentPlan, picks: currentPicks, target: commitTarget },
       );
+      const skipped = result.skipped ?? 0;
       resultNode.hidden = false;
       resultNode.textContent =
-        result.playlist !== undefined
+        (result.playlist !== undefined
           ? `Created "${result.playlist.name}" with ${result.written} tracks.`
-          : `Imported ${result.written} items.`;
+          : `Imported ${result.written} items.`) +
+        (skipped > 0 ? ` ${skipped} ${skipped === 1 ? "line" : "lines"} to check left out.` : "");
     }
     el("ie-import-preview").hidden = true;
     setStep("import-steps", 3);
     currentPlan = undefined;
+    currentPicks = [];
     previewedBackup = undefined;
     // Imported: nothing is left unsaved (the page asks about a typed import before reloading).
     el<HTMLTextAreaElement>("ie-import-content").value = "";
