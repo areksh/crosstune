@@ -31,6 +31,7 @@ import type { AlbumId } from "../services/ids.js";
 import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
+import { stripEditionLabels } from "./discography.js";
 import { stopsEverySong } from "./match.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
@@ -283,7 +284,7 @@ export async function findAlbumVersions(
  * Edition)") and artist credits vary ("Ritchie Blackmore's Rainbow" for
  * "Rainbow"), so a plain equality check misses real matches. Matching therefore:
  *
- *   - drops bracketed segments from titles and requires the remaining title
+ *   - drops bracketed segments that name an edition ("(Deluxe Edition)", "[2011 Remaster]" -- not "(Live)" or "(Instrumental)") from titles and requires the remaining title
  *     tokens to be *equal* -- so "Blackwater Park (Legacy Edition)" matches
  *     "Blackwater Park", but a sequel like "Danzig II" does not match "Danzig";
  *   - reconciles "&"/"and" and spelled-out numbers with digits ("Volume One" ==
@@ -317,19 +318,17 @@ const NUMBER_WORDS: Record<string, string> = {
   twelve: "12",
 };
 
-/** Remove bracketed segments, e.g. "(Deluxe Edition)" or "[Remastered]". */
-function stripBracketed(text: string): string {
-  return text.replace(/[([{][^)\]}]*[)\]}]/g, " ");
-}
-
 /**
  * Tokenise a title or artist for matching: drop bracketed segments, fold "&" to
  * "and", normalise (case, accents, edition noise), then map number words to
  * digits.
  */
 function matchTokens(text: string): string[] {
-  const cleaned = stripBracketed(text).replace(/&/g, " and ");
-  return normalise(cleaned)
+  const stripped = normalise(stripEditionLabels(text).replace(/&/g, " and "));
+  // A title that is nothing but symbols ("+", "=", "÷") normalises to nothing;
+  // compare it as written so those albums do not all match each other.
+  const cleaned = stripped.length > 0 ? stripped : text.trim().toLowerCase();
+  return cleaned
     .split(" ")
     .filter((token) => token.length > 0)
     .map((token) => NUMBER_WORDS[token] ?? token);
