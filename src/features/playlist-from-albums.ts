@@ -31,9 +31,11 @@ import type { AlbumId } from "../services/ids.js";
 import type { Album, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
+import { stopsEverySong } from "./match.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
   createPlaylistWithTracks,
+  ensureTracksToAdd,
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
 import { shapePlaylist, uniqueGroups, type AlbumOrder } from "./playlist-shape.js";
@@ -174,8 +176,9 @@ export interface ResolveAlbumsOptions {
  * An album link resolves to the one release it names (by id). Otherwise this
  * searches Qobuz for "artist album" and keeps the results whose artist and
  * title match the entry (normalised, so case and edition noise are ignored).
- * Entries with no match are collected in `unresolvedAlbums`; entries whose
- * every match was excluded by the filter's album terms in `excludedAlbums`.
+ * Entries with no match, or whose search failed, are collected in
+ * `unresolvedAlbums`; entries whose every match was excluded by the filter's
+ * album terms in `excludedAlbums`.
  */
 export async function resolveAlbumVersions(
   client: AlbumSearchClient & Partial<Pick<AlbumResolverClient, "getAlbum">>,
@@ -189,7 +192,16 @@ export async function resolveAlbumVersions(
     DEFAULT_CONCURRENCY,
     async (input): Promise<{ entry: AlbumEntry; versions: Album[]; fromLink?: boolean } | string> => {
       if (!("albumId" in input)) {
-        return { entry: input, versions: await findAlbumVersions(client, input) };
+        // One album's failed search is that line's problem alone; an error
+        // every line would run into (signed out, rate-limited) ends the run.
+        try {
+          return { entry: input, versions: await findAlbumVersions(client, input) };
+        } catch (error) {
+          if (stopsEverySong(error)) {
+            throw error;
+          }
+          return `${formatEntry(input)} (could not be looked up)`;
+        }
       }
       // A link names one release: use it as the only version.
       if (client.getAlbum === undefined) {
@@ -245,9 +257,10 @@ export async function resolveAlbumVersions(
  * Searches "artist album" first; if that yields no match, falls back to an
  * album-title-only search filtered by artist. The combined query sometimes
  * returns an empty page for a valid album, while the broader title search does
- * not, so the fallback markedly improves recall.
+ * not, so the fallback markedly improves recall. A failed search throws
+ * ({@link resolveAlbumVersions} reports it against the line).
  */
-async function findAlbumVersions(
+export async function findAlbumVersions(
   client: AlbumSearchClient,
   entry: AlbumEntry,
 ): Promise<Album[]> {
@@ -399,7 +412,8 @@ export interface FetchAlbumTracksResult {
   /**
    * Ids of albums whose track list could not be fetched (e.g. Qobuz returned a
    * 404 for the id, or a transient error). Reported rather than fatal so one bad
-   * album does not sink the whole operation.
+   * album does not sink the whole operation. An error every album would run
+   * into (signed out, rate-limited; see {@link stopsEverySong}) is thrown.
    */
   failedAlbumIds: AlbumId[];
 }
@@ -442,7 +456,10 @@ export async function fetchAlbumTracks(
       try {
         const tracks = await client.getAlbumTracks(albumId);
         return { albumId, tracks: applyTrackFilter(tracks, filter) };
-      } catch {
+      } catch (error) {
+        if (stopsEverySong(error)) {
+          throw error;
+        }
         return { albumId, failed: true };
       }
     },
@@ -537,7 +554,8 @@ export interface BuildAlbumPlaylistResult {
  * Resolve albums, pick one version each (per `preference`), then create and
  * fill a new playlist with their tracks.
  *
- * @throws {Error} if no album entries are given.
+ * @throws {Error} if no album entries are given, or no track is left to add
+ *   (so no empty playlist is created).
  */
 export async function buildPlaylistFromAlbums(
   client: AlbumPlaylistBuilderClient,
@@ -558,6 +576,8 @@ export async function buildPlaylistFromAlbums(
  * chosen versions' tracks, and create and fill a new playlist with them: the
  * write half of {@link buildPlaylistFromAlbums}, shared with the discography
  * mode (see ./discography.ts).
+ *
+ * @throws {Error} if no track is left to add (so no empty playlist is created).
  */
 export async function writeAlbumPlaylist(
   client: AlbumTracksClient & PlaylistWriterClient & FavouriteTracksClient,
@@ -571,7 +591,8 @@ export async function writeAlbumPlaylist(
 
   // Pick a version per album and gather its tracks. An album whose tracks fail
   // to fetch is reported rather than fatal, so one bad album does not sink the
-  // whole playlist.
+  // whole playlist -- unless every album would fail the same way (signed out,
+  // rate-limited): then nothing is written.
   const fetched: { query: string; album: Album; tracks: FilteredTrack[] }[] = [];
   const failedAlbums: string[] = [];
   for (const resolved of resolvedAlbums) {
@@ -579,7 +600,10 @@ export async function writeAlbumPlaylist(
     let tracks: Track[];
     try {
       tracks = await client.getAlbumTracks(album.id);
-    } catch {
+    } catch (error) {
+      if (stopsEverySong(error)) {
+        throw error;
+      }
       failedAlbums.push(resolved.query);
       continue;
     }
@@ -612,6 +636,11 @@ export async function writeAlbumPlaylist(
     excludedCount: entry.tracks.filter((t) => t.exclusion !== undefined).length,
   }));
 
+  ensureTracksToAdd(trackIds, [
+    ["not found", unresolvedAlbums],
+    ["every release excluded", excludedAlbums],
+    ["could not fetch tracks", failedAlbums],
+  ]);
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
     trackIds,

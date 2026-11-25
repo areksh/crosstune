@@ -85,7 +85,14 @@ export async function resolveDiscovery(
     ...(favourites !== undefined && { favourites }),
     seen: served.flatMap((entry) => entry.trackIds.map((id) => [`id:${id}`, "served earlier"] as const)),
   });
-  const { fetched } = await fetchArtistTracks(client, picks, def.tracksPerArtist, filter, picker);
+  const { fetched, failedArtists } = await fetchArtistTracks(client, picks, def.tracksPerArtist, filter, picker);
+  if (failedArtists.length > 0) {
+    // The rotation is kept until the next one: fail the run (to be retried)
+    // rather than keep one short of these artists.
+    throw new Error(
+      `Could not read the top tracks of ${failedArtists.map((artist) => artist.name).join(", ")}.`,
+    );
+  }
 
   const tracks: DesiredTrack[] = fetched.flatMap((entry) =>
     entry.tracks.map((track) => ({

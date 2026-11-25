@@ -37,6 +37,7 @@
 import { shortId, type ArtistId, type PlaylistId, type TrackId } from "../services/ids.js";
 import type { Artist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
+import { stopsEverySong } from "./match.js";
 import {
   fetchTopTrackPool,
   resolveArtistTracks,
@@ -233,6 +234,11 @@ export interface WalkResult {
   truncated: boolean;
   /** Distinct candidates the filter's artist terms left out, in first-seen order. */
   excludedArtists: Artist[];
+  /**
+   * Artists whose similar artists could not be looked up, so were not
+   * expanded (a walk that must be whole, like a job's snapshot, can refuse it).
+   */
+  failedArtists: Artist[];
 }
 
 /** An artist found by the walk, before its tracks are fetched. */
@@ -275,8 +281,10 @@ export async function resolveSimilarArtists(
  * `similarPerArtist` candidates not already seen. Seeds and `skipArtistIds`
  * are never suggested. A candidate matching one of the filter's artist terms
  * is skipped without using a slot (and recorded in `excludedArtists`); only
- * the artist terms matter here, the tracks are filtered when fetched. The
- * result is grouped by seed (in seed order), level by level within a seed.
+ * the artist terms matter here, the tracks are filtered when fetched. An
+ * artist whose lookup fails is not expanded (and is listed in
+ * `failedArtists`). The result is grouped by seed (in seed order), level by
+ * level within a seed.
  */
 export async function walkSimilarArtists(
   client: Pick<SimilarArtistsClient, "getSimilarArtists">,
@@ -295,17 +303,25 @@ export async function walkSimilarArtists(
   const found: FoundArtist[] = [];
   const appearances: Appearance[] = [];
   const excludedById = new Map<ArtistId, Artist>();
+  const failedArtists: Artist[] = [];
   let truncated = false;
   let frontier = options.seeds.map((seed) => ({ artist: seed, seed }));
 
   for (let level = 1; level <= options.depth && frontier.length > 0 && !truncated; level += 1) {
+    // An artist whose lookup fails is just not expanded; an error every lookup
+    // would run into (signed out, rate-limited) ends the walk.
     const candidateLists = await mapWithConcurrency(frontier, DEFAULT_CONCURRENCY, (node) =>
-      client.getSimilarArtists(node.artist.id, SIMILAR_CANDIDATE_LIMIT),
+      unlessFailed(client.getSimilarArtists(node.artist.id, SIMILAR_CANDIDATE_LIMIT)),
     );
     const next: typeof frontier = [];
     frontier.forEach((node, index) => {
+      const candidates = candidateLists[index];
+      if (candidates === undefined) {
+        failedArtists.push(node.artist);
+        return;
+      }
       let taken = 0;
-      for (const candidate of candidateLists[index] ?? []) {
+      for (const candidate of candidates) {
         if (truncated || taken >= options.similarPerArtist) {
           break;
         }
@@ -359,12 +375,15 @@ export async function walkSimilarArtists(
     appearances: bySeed(appearances),
     truncated,
     excludedArtists: [...excludedById.values()],
+    failedArtists,
   };
 }
 
 /**
  * Fetch each artist's top tracks (through a bounded pool), leaving out artists
- * Qobuz returned no tracks for and flagging short ones. The tracks are taken
+ * Qobuz returned no tracks for and flagging short ones. An artist whose fetch
+ * fails is flagged as having none, and listed in `failedArtists` too. The
+ * tracks are taken
  * in input order, so a `picker` (favourites, one copy of each song) sees the
  * artists in plan order whichever fetch finished first; it may carry on a run
  * from an earlier batch.
@@ -379,11 +398,13 @@ export async function fetchArtistTracks(
   fetched: ArtistTracks[];
   emptyArtists: UnderfilledArtist[];
   partialArtists: UnderfilledArtist[];
+  failedArtists: Artist[];
 }> {
   const deep = isFilterActive(filter) || picker?.active === true;
   const pools = await mapWithConcurrency(artists, DEFAULT_CONCURRENCY, (artist) =>
-    fetchTopTrackPool(client, artist.id, tracksPerArtist, deep),
+    unlessFailed(fetchTopTrackPool(client, artist.id, tracksPerArtist, deep)),
   );
+  const failedArtists = artists.filter((_artist, index) => pools[index] === undefined);
   const outcomes = artists.map((artist, index) => ({
     artist,
     ...takeTopTracks(pools[index] ?? [], tracksPerArtist, filter, picker),
@@ -407,7 +428,23 @@ export async function fetchArtistTracks(
       partialArtists.push(flag);
     }
   }
-  return { fetched, emptyArtists, partialArtists };
+  return { fetched, emptyArtists, partialArtists, failedArtists };
+}
+
+/**
+ * One artist's request, or undefined when it fails: one artist's failure is
+ * not the walk's. An error every request would run into (see
+ * {@link stopsEverySong}) is rethrown.
+ */
+async function unlessFailed<T>(request: Promise<T>): Promise<T | undefined> {
+  try {
+    return await request;
+  } catch (error) {
+    if (stopsEverySong(error)) {
+      throw error;
+    }
+    return undefined;
+  }
 }
 
 /** Join walked artists with their fetched tracks, dropping those with none. */

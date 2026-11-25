@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ServiceError } from "../services/errors.js";
 import type { Artist, Track } from "../services/model.js";
 import {
   describeEstimate,
@@ -481,9 +482,56 @@ describe("walkSimilarArtists", () => {
     expect(walk.found.map((f) => f.artist.id)).toEqual([11]);
     expect(walk.excludedArtists).toEqual([]);
   });
+
+  it("does not expand an artist whose lookup fails, and walks the rest", async () => {
+    const client = stubClient({
+      similar: { 1: [artist(11)], 2: [artist(21)], 11: [artist(111)] },
+    });
+    client.getSimilarArtists.mockImplementation(async (id: number) => {
+      if (id === 2) throw new ServiceError("qobuz", "api-response", "HTTP 500");
+      return ({ 1: [artist(11)], 11: [artist(111)] } as Record<number, Artist[]>)[id] ?? [];
+    });
+
+    const walk = await walkSimilarArtists(client, {
+      seeds: [artist(1), artist(2)],
+      similarPerArtist: 1,
+      depth: 2,
+    });
+
+    expect(walk.found.map((f) => f.artist.id)).toEqual([11, 111]);
+    expect(walk.failedArtists.map((a) => a.id)).toEqual([2]);
+  });
+
+  it("stops on an error every lookup would run into", async () => {
+    const client = stubClient({ similar: {} });
+    client.getSimilarArtists.mockRejectedValue(new ServiceError("qobuz", "authentication", "signed out"));
+    await expect(
+      walkSimilarArtists(client, { seeds: [artist(1)], similarPerArtist: 1, depth: 1 }),
+    ).rejects.toThrow("signed out");
+  });
 });
 
 describe("fetchArtistTracks", () => {
+  it("flags an artist whose tracks cannot be fetched as having none, and carries on", async () => {
+    const client = stubClient({ similar: {} });
+    client.getArtistTopTracks.mockImplementation(async (id: number) => {
+      if (id === 2) throw new ServiceError("qobuz", "network", "timed out");
+      return tracksFor(id);
+    });
+
+    const result = await fetchArtistTracks(client, [artist(1), artist(2), artist(3)], 1);
+
+    expect(result.fetched.map((f) => f.artist.id)).toEqual([1, 3]);
+    expect(result.emptyArtists.map((a) => a.artist.id)).toEqual([2]);
+    expect(result.failedArtists.map((a) => a.id)).toEqual([2]);
+  });
+
+  it("stops on an error every fetch would run into", async () => {
+    const client = stubClient({ similar: {} });
+    client.getArtistTopTracks.mockRejectedValue(new ServiceError("qobuz", "rate-limited", "slow down"));
+    await expect(fetchArtistTracks(client, [artist(1)], 1)).rejects.toThrow("slow down");
+  });
+
   it("fetches in input order, leaving out empty artists and flagging short ones", async () => {
     const client = stubClient({
       similar: {},

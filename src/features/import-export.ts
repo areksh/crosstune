@@ -39,10 +39,7 @@ import {
 import type { Album, Artist, Playlist, Track } from "../services/model.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
 import { normalise } from "./deduplicate.js";
-import {
-  resolveAlbumVersions,
-  selectAlbumVersion,
-} from "./playlist-from-albums.js";
+import { findAlbumVersions, selectAlbumVersion } from "./playlist-from-albums.js";
 import {
   addTracksToExistingPlaylist,
   createPlaylistWithTracks,
@@ -50,7 +47,7 @@ import {
   type PlaylistWriterClient,
 } from "./playlist-from-artists.js";
 import { stopsEverySong } from "./match.js";
-import { normaliseArtistName } from "./track-filter.js";
+import { findArtistByName } from "./artist-match.js";
 import { compareQuality } from "./upgrade.js";
 
 /** The interchange formats a collection can be written to and read from. */
@@ -804,24 +801,18 @@ async function resolveAlbum(
   if (item.title === undefined || item.artist === undefined) {
     return undefined;
   }
-  const { resolvedAlbums } = await resolveAlbumVersions(client, {
-    entries: [{ artist: item.artist, album: item.title }],
-  });
-  const resolved = resolvedAlbums[0];
-  const id =
-    resolved === undefined
-      ? undefined
-      : selectAlbumVersion(resolved.versions, "highest-quality")?.id;
+  // The search itself, not resolveAlbumVersions: that reports a failed search
+  // as an unmatched line, where this one's failure must reach attempt().
+  const versions = await findAlbumVersions(client, { artist: item.artist, album: item.title });
+  const id = selectAlbumVersion(versions, "highest-quality")?.id;
   return id === undefined ? undefined : { id, via: "search" };
 }
 
 /**
  * Resolve one parsed artist to a Qobuz artist id: a search result with the
- * same name, ignoring case, accents and spacing (see
- * {@link normaliseArtistName}), else one that differs only in punctuation
- * ("Guns N Roses" for "Guns N' Roses"). Nothing else counts: the first search
- * hit for an artist Qobuz lacks is somebody else, and favouriting them unseen
- * is worse than reporting the name unmatched.
+ * same name (see {@link findArtistByName}). Nothing else counts: the first
+ * search hit for an artist Qobuz lacks is somebody else, and favouriting them
+ * unseen is worse than reporting the name unmatched.
  */
 async function resolveArtist(
   client: ImportResolverClient,
@@ -833,12 +824,10 @@ async function resolveArtist(
   if (item.name === undefined) {
     return undefined;
   }
-  const candidates = await client.searchArtists(item.name, IMPORT_SEARCH_LIMIT);
-  const wanted = normaliseArtistName(item.name);
-  const loose = normalise(item.name);
-  const found =
-    candidates.find((artist) => normaliseArtistName(artist.name) === wanted) ??
-    (loose.length === 0 ? undefined : candidates.find((artist) => normalise(artist.name) === loose));
+  const found = findArtistByName(
+    await client.searchArtists(item.name, IMPORT_SEARCH_LIMIT),
+    item.name,
+  );
   return found === undefined ? undefined : { id: found.id, via: "search" };
 }
 

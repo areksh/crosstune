@@ -223,6 +223,40 @@ describe("resolveAlbumVersions", () => {
     expect(result.excludedAlbums).toEqual([]);
   });
 
+  it("reports an album whose search fails, and carries on", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Daft Punk Discovery": [album({ id: "disc", title: "Discovery", artist: "Daft Punk" })],
+      },
+    });
+    const searchAlbums = client.searchAlbums.getMockImplementation()!;
+    client.searchAlbums.mockImplementation(async (query: string) => {
+      if (query.startsWith("Radiohead")) throw new ServiceError("qobuz", "api-response", "HTTP 500");
+      return searchAlbums(query);
+    });
+
+    const result = await resolveAlbumVersions(client, {
+      entries: [
+        { artist: "Radiohead", album: "OK Computer" },
+        { artist: "Daft Punk", album: "Discovery" },
+      ],
+    });
+
+    expect(result.resolvedAlbums.map((r) => r.query)).toEqual(["Daft Punk - Discovery"]);
+    expect(result.unresolvedAlbums).toEqual(["Radiohead - OK Computer (could not be looked up)"]);
+  });
+
+  it.each(["authentication", "rate-limited"])(
+    "stops on a %s error, which every album would run into",
+    async (kind) => {
+      const client = stubClient({});
+      client.searchAlbums.mockRejectedValue(new ServiceError("qobuz", kind, "no"));
+      await expect(
+        resolveAlbumVersions(client, { entries: [{ artist: "A", album: "B" }] }),
+      ).rejects.toThrow("no");
+    },
+  );
+
   it("drops versions whose title or version matches an album term", async () => {
     const client = stubClient({
       albumsByQuery: {
@@ -307,6 +341,15 @@ describe("fetchAlbumTracks", () => {
     ]);
     expect(result.failedAlbumIds).toEqual(["bad"]);
   });
+
+  it.each(["authentication", "rate-limited", "quota"])(
+    "stops on a %s error instead of reporting every album failed",
+    async (kind) => {
+      const client = stubClient({});
+      client.getAlbumTracks.mockRejectedValue(new ServiceError("qobuz", kind, "signed out"));
+      await expect(fetchAlbumTracks(client, ["a", "b"])).rejects.toThrow("signed out");
+    },
+  );
 });
 
 describe("fetchAlbumTracks with a filter", () => {
@@ -663,6 +706,75 @@ describe("buildPlaylistFromAlbums", () => {
     expect(result.failedAlbums).toEqual(["Radiohead - OK Computer"]);
     expect(result.unresolvedAlbums).toEqual([]);
     expect(client.addTracksToPlaylist).toHaveBeenCalledWith(5, [10]);
+  });
+
+  it("stops, writing nothing, when signed out while fetching an album's tracks", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Daft Punk Discovery": [album({ id: "disc", title: "Discovery", artist: "Daft Punk" })],
+        "Radiohead OK Computer": [album({ id: "okc", title: "OK Computer", artist: "Radiohead" })],
+      },
+    });
+    client.getAlbumTracks.mockImplementation(async (id: string) => {
+      if (id === "okc") {
+        throw new ServiceError("qobuz", "authentication", "signed out");
+      }
+      return [{ id: 10, title: "One More Time" }];
+    });
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [
+          { artist: "Daft Punk", album: "Discovery" },
+          { artist: "Radiohead", album: "OK Computer" },
+        ],
+        playlistName: "Mix",
+      }),
+    ).rejects.toThrow("signed out");
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when no album yields a track, saying why", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Radiohead OK Computer": [album({ id: "okc", title: "OK Computer", artist: "Radiohead" })],
+      },
+    });
+    client.getAlbumTracks.mockRejectedValue(new Error("album/get failed with HTTP 404"));
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [
+          { artist: "Ghost", album: "Missing" },
+          { artist: "Radiohead", album: "OK Computer" },
+        ],
+        playlistName: "Mix",
+      }),
+    ).rejects.toThrow(
+      "No tracks to add (not found: Ghost - Missing; could not fetch tracks: Radiohead - OK Computer); nothing was created",
+    );
+    expect(client.createPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when every release is excluded", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Portishead Dummy": [
+          album({ id: "live", title: "Dummy", artist: "Portishead", version: "Live" }),
+        ],
+      },
+    });
+
+    await expect(
+      buildPlaylistFromAlbums(client, {
+        entries: [{ artist: "Portishead", album: "Dummy" }],
+        playlistName: "Mix",
+        filter: compileTrackFilter({ excludeAlbums: ["live"] }),
+      }),
+    ).rejects.toThrow(
+      "No tracks to add (every release excluded: Portishead - Dummy); nothing was created",
+    );
+    expect(client.createPlaylist).not.toHaveBeenCalled();
   });
 
   it("throws when no albums are given", async () => {

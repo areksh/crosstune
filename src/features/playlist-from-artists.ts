@@ -30,7 +30,9 @@ import {
   type TrackId,
 } from "../services/ids.js";
 import type { Artist, Playlist, Track } from "../services/model.js";
+import { findArtistByName } from "./artist-match.js";
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from "./concurrency.js";
+import { stopsEverySong } from "./match.js";
 import { shapePlaylist, uniqueGroups, type PlaylistOrder } from "./playlist-shape.js";
 import { describeLinkMismatch, linkNotFound, parseMusicLink } from "./music-links.js";
 import {
@@ -232,19 +234,25 @@ export async function resolveArtistTracks(
 
   // Look up and fetch with a bounded pool. Results come back in input order
   // (see mapWithConcurrency), so the grouped-by-artist preview keeps the order
-  // the user typed regardless of which lookups finished first.
+  // the user typed regardless of which lookups finished first. A lookup or
+  // fetch that fails is that artist's problem alone (reported unresolved);
+  // one every artist would run into (signed out, rate-limited) ends the run.
   const lookups = await mapWithConcurrency(
     options.artists,
     DEFAULT_CONCURRENCY,
     async (query): Promise<(ArtistMatch & { pool: Track[] }) | { problem: string }> => {
-      const match = await lookUpArtist(client, query);
+      const match = await failsAlone(
+        () => lookUpArtist(client, query),
+        `${query} (could not be looked up)`,
+      );
       if ("problem" in match || tracksPerArtist === 0) {
         return { ...match, pool: [] };
       }
-      return {
-        ...match,
-        pool: await fetchTopTrackPool(client, match.artist.id, tracksPerArtist, deep),
-      };
+      const pool = await failsAlone(
+        () => fetchTopTrackPool(client, match.artist.id, tracksPerArtist, deep),
+        `${query} (its songs could not be fetched)`,
+      );
+      return "problem" in pool ? pool : { ...match, pool };
     },
   );
   // Then take each artist's tracks in input order: the picker's "first copy"
@@ -298,6 +306,25 @@ export async function resolveArtistTracks(
   });
 
   return { resolvedArtists, unresolvedArtists, emptyArtists, partialArtists };
+}
+
+/**
+ * Run one artist's request, turning a failure into a `problem` to report
+ * against that artist alone; an error every artist would run into (see
+ * {@link stopsEverySong}) is rethrown.
+ */
+async function failsAlone<T>(
+  request: () => Promise<T>,
+  problem: string,
+): Promise<T | { problem: string }> {
+  try {
+    return await request();
+  } catch (error) {
+    if (stopsEverySong(error)) {
+      throw error;
+    }
+    return { problem };
+  }
 }
 
 /**
@@ -440,7 +467,8 @@ export async function addTracksToExistingPlaylist(
 /**
  * Resolve artists, then create and fill a new playlist with their top tracks.
  *
- * @throws {Error} if no artist names are given.
+ * @throws {Error} if no artist names are given, or no track is left to add
+ *   (so no empty playlist is created).
  */
 export async function buildPlaylistFromArtists(
   client: PlaylistBuilderClient,
@@ -475,6 +503,10 @@ export async function buildPlaylistFromArtists(
     excludedCount: resolved.excluded.length,
   }));
 
+  ensureTracksToAdd(trackIds, [
+    ["not found", unresolvedArtists],
+    ["no tracks available for", emptyArtists.map((empty) => empty.artist.name)],
+  ]);
   const playlist = await createPlaylistWithTracks(client, {
     name: options.playlistName,
     trackIds,
@@ -492,6 +524,28 @@ export async function buildPlaylistFromArtists(
     durationSeconds: shaped.seconds,
     droppedToFit: shaped.dropped.length,
   };
+}
+
+/**
+ * Refuse to create an empty playlist: when there are no tracks, throw, saying
+ * why from the labelled lists given (empty ones left out), else that every
+ * track was left out (by the filter, the picker or the length).
+ *
+ * @throws {Error} if `trackIds` is empty.
+ */
+export function ensureTracksToAdd(
+  trackIds: readonly TrackId[],
+  reasons: readonly (readonly [label: string, items: readonly string[]])[],
+): void {
+  if (trackIds.length > 0) {
+    return;
+  }
+  const why = reasons
+    .filter(([, items]) => items.length > 0)
+    .map(([label, items]) => `${label}: ${items.join(", ")}`);
+  throw new Error(
+    `No tracks to add (${why.length > 0 ? why.join("; ") : "every track was left out"}); nothing was created`,
+  );
 }
 
 /**
@@ -541,9 +595,11 @@ export async function lookUpArtist(
   }
 }
 
-/** Prefer an exact (case-insensitive) name match, else the first (most relevant) result. */
+/**
+ * The result spelled like the query (see {@link findArtistByName}); never just
+ * the first result, which for a typo or an artist the service lacks is
+ * somebody else.
+ */
 export function pickArtist(candidates: Artist[], query: string): Artist | undefined {
-  const wanted = query.trim().toLowerCase();
-  const exact = candidates.find((a) => a.name.toLowerCase() === wanted);
-  return exact ?? candidates[0];
+  return findArtistByName(candidates, query);
 }

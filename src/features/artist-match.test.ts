@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   artistCounts,
+  findArtistByName,
   linkLines,
   matchArtists,
   matchedIndexes,
@@ -124,5 +125,31 @@ describe("artistCounts", () => {
       { name: "A", id: 1, count: 2 },
       { name: "B", count: 1 },
     ]);
+  });
+});
+
+describe("findArtistByName", () => {
+  const artist = (id: number, name: string) => ({ id, name });
+
+  it("takes the result spelled the same, ignoring case, accents and spacing", () => {
+    const found = findArtistByName([artist(1, "Beyonce Tribute"), artist(2, "Beyoncé")], "beyonce ");
+    expect(found?.id).toBe(2);
+  });
+
+  it("takes one differing only in punctuation when nothing is spelled the same", () => {
+    expect(findArtistByName([artist(1, "Guns N' Roses")], "Guns N Roses")?.id).toBe(1);
+    expect(findArtistByName([artist(1, "Simon and Garfunkel")], "Simon & Garfunkel")?.id).toBe(1);
+  });
+
+  it("never takes the first result for a name nothing matches", () => {
+    expect(findArtistByName([artist(1, "Beyoncé"), artist(2, "Beyond")], "Beyonse")).toBeUndefined();
+  });
+
+  it("keeps the search's order when several are spelled the same", () => {
+    expect(findArtistByName([artist(1, "Nirvana"), artist(2, "Nirvana")], "Nirvana")?.id).toBe(1);
+  });
+
+  it("does not let names of punctuation alone match each other", () => {
+    expect(findArtistByName([artist(1, "!!!")], "???")).toBeUndefined();
   });
 });
