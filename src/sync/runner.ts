@@ -42,7 +42,8 @@ export interface LinksDeps {
   runs: { append(record: RunRecord, now?: Date): void };
   matches: MatchMemory;
   connect: LinkConnect;
-  journalRun<T>(label: string, fn: (entry: { id: string }) => Promise<T>): Promise<T>;
+  /** `link` is stored on the History entry, so undoing it, however old, pauses that link. */
+  journalRun<T>(label: string, fn: (entry: { id: string }) => Promise<T>, link?: string): Promise<T>;
 }
 
 export interface LinksSummary {
@@ -131,8 +132,14 @@ function isDue(state: LinkState, now: Date): boolean {
   return state.nextRunAt === undefined || Date.parse(state.nextRunAt) <= now.getTime();
 }
 
-/** Whether a history entry was one of a link's syncs (read without the lock). */
-export function isLinkEntry(deps: Pick<LinksDeps, "links" | "state">, entryId: string): boolean {
+/**
+ * Whether a history entry was one of a link's syncs (read without the lock):
+ * by the link id on the entry, else (older entries) by the link's recent list.
+ */
+export function isLinkEntry(deps: Pick<LinksDeps, "links" | "state">, entryId: string, linkId?: string): boolean {
+  if (linkId !== undefined && deps.links.load().links.some((link) => link.id === linkId)) {
+    return true;
+  }
   return deps.links.load().links.some((link) => {
     try {
       return (deps.state.load(link.id).entries ?? []).includes(entryId);
@@ -237,7 +244,7 @@ export async function runLinks(
           },
         });
         return synced;
-      });
+      }, link.id);
       state = { ...outcome.state, entries: state.entries ?? outcome.state.entries ?? [] };
       const added = outcome.changes.reduce((sum, change) => sum + change.added, 0);
       const removed = outcome.changes.reduce((sum, change) => sum + change.removed, 0);
@@ -275,7 +282,7 @@ export async function runLinks(
 }
 
 /** Pause the links a history entry was a sync of; their ids. */
-export function pausedByUndo(deps: Pick<LinksDeps, "links" | "state">, entryId: string, now: Date): string[] {
+export function pausedByUndo(deps: Pick<LinksDeps, "links" | "state">, entryId: string, now: Date, linkId?: string): string[] {
   return deps.links.load().links.flatMap((link) => {
     let state: LinkState;
     try {
@@ -283,7 +290,7 @@ export function pausedByUndo(deps: Pick<LinksDeps, "links" | "state">, entryId: 
     } catch {
       return []; // it cannot run either until it is fixed
     }
-    if (!(state.entries ?? []).includes(entryId)) {
+    if (link.id !== linkId && !(state.entries ?? []).includes(entryId)) {
       return [];
     }
     deps.state.save(link.id, { ...state, paused: { since: now.toISOString(), reason: "undone" } });

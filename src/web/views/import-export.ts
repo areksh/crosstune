@@ -344,13 +344,17 @@ async function onCommit(): Promise<void> {
         favouriteTracks: number;
         favouriteAlbums: number;
         favouriteArtists: number;
-        playlists: unknown[];
+        playlists: Array<{ name: string; missing: unknown[] }>;
       }>("POST", "/api/restore", { content });
       resultNode.hidden = false;
       resultNode.textContent =
         `Restored ${result.favouriteTracks} favourite tracks, ` +
         `${result.favouriteAlbums} albums, ${result.favouriteArtists} artists, ` +
-        `and ${result.playlists.length} playlists.`;
+        `and ${result.playlists.length} playlists.` +
+        result.playlists
+          .filter((p) => p.missing.length > 0)
+          .map((p) => ` "${p.name}": ${p.missing.length} songs did not arrive.`)
+          .join("");
     } else {
       if (currentPlan === undefined) {
         return;

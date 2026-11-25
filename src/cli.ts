@@ -754,7 +754,7 @@ async function runUndo(client: MusicService, journal: Journal, args: UndoArgs): 
     return;
   }
   // Paused first, so that no sync reads the undo half-done as the user's edits.
-  const paused = await openLinks(journal, undefined).undone(item.id);
+  const paused = await openLinks(journal, undefined).undone(item.id, item.link);
   if (paused.length > 0) {
     logger.info(`The linked playlist this synced is paused; resume it when its copies are as you want them.`);
   }
@@ -1347,7 +1347,7 @@ function openLinks(journal: Journal, connections: Connections | undefined): Link
       connections === undefined
         ? async () => ({ ok: false, reason: "needs-sign-in", message: "not connected" })
         : linkConnect(connections),
-    journalRun: (label, fn) => journal.run({ tool: "link", label }, fn),
+    journalRun: (label, fn, link) => journal.run({ tool: "link", label, ...(link !== undefined && { link }) }, fn),
     lock: async (fn) => {
       const lock = await acquireLockWithin(jobsLockPath(dir), WRITE_LOCK_WAIT_MS);
       if (lock === undefined) {
@@ -2295,6 +2295,11 @@ function planRestore(
         `${result.favouriteAlbums} albums, ${count(result.favouriteArtists, "artist")}, ` +
         `and recreated ${result.playlists.length} playlists.`,
     );
+    for (const playlist of result.playlists) {
+      if (playlist.missing.length > 0) {
+        logger.info(`  ${playlist.name}: ${count(playlist.missing.length, "song")} did not arrive.`);
+      }
+    }
   };
 }
 

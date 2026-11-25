@@ -20,7 +20,7 @@ export interface LinksServiceDeps {
   runs: { append(record: RunRecord, now?: Date): void; read(id?: string, limit?: number): RunRecord[] };
   matches: MatchMemory;
   connect: LinkConnect;
-  journalRun<T>(label: string, fn: (entry: { id: string }) => Promise<T>): Promise<T>;
+  journalRun<T>(label: string, fn: (entry: { id: string }) => Promise<T>, link?: string): Promise<T>;
   /** Run `fn` holding the jobs lock (no managed playlist refresh meanwhile). */
   lock<T>(fn: () => Promise<T>): Promise<T>;
   newId?: () => string;
@@ -48,7 +48,7 @@ export interface LinksService {
    * A history entry is about to be undone: pause the links it was a sync of,
    * first, so that no sync reads the undo half-done as the user's edits.
    */
-  undone(entryId: string): Promise<string[]>;
+  undone(entryId: string, link?: string): Promise<string[]>;
   /** The copies side by side: what each changed since the last sync. Writes nothing. */
   compare(id: string): Promise<CopyComparison>;
 }
@@ -116,7 +116,7 @@ export function linksService(deps: LinksServiceDeps): LinksService {
               // Undoing the settling pauses the link, as undoing a sync does.
               const save = savingEntries((next) => deps.state.save(id, next), state, entry.id);
               return resolveConflict({ clients, copies: link.copies, state, matches: deps.matches, now: now(), choice, save });
-            });
+            }, link.id);
       });
     },
 
@@ -167,8 +167,8 @@ export function linksService(deps: LinksServiceDeps): LinksService {
       }),
 
     // Only an undo of a link's own entry waits for the lock.
-    undone: async (entryId) =>
-      isLinkEntry(deps, entryId) ? deps.lock(async () => pausedByUndo(deps, entryId, now())) : [],
+    undone: async (entryId, linkId) =>
+      isLinkEntry(deps, entryId, linkId) ? deps.lock(async () => pausedByUndo(deps, entryId, now(), linkId)) : [],
 
     compare: async (id) => {
       const link = find(id);

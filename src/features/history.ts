@@ -127,6 +127,8 @@ export interface HistoryEntry {
   error?: string;
   /** It also changed a service since forgotten: kept to read, not to undo. */
   forgotten?: ServiceName;
+  /** For a sync or settling of a linked playlist: the link, so undoing it can pause that link. */
+  link?: string;
 }
 
 /** A line of the history file. */
@@ -253,6 +255,9 @@ function toRecord(value: unknown): HistoryRecord | undefined {
   }
   if (isServiceName(value["forgotten"])) {
     entry.forgotten = value["forgotten"];
+  }
+  if (isString(value["link"])) {
+    entry.link = value["link"];
   }
   return entry;
 }

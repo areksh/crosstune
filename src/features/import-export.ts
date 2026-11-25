@@ -22,6 +22,7 @@
  * for hand-editing or moving lists between services.
  */
 
+import { addInOrder, missingFrom } from "./playlist-add.js";
 import { titleKeys, tokens, tokensOverlap, withoutFeaturing } from "./song-text.js";
 import { normaliseIsrc } from "../services/isrc.js";
 import {
@@ -1160,8 +1161,11 @@ export interface RestoreResult {
   favouriteTracks: number;
   favouriteAlbums: number;
   favouriteArtists: number;
-  /** One entry per playlist recreated, with the tracks added to it. */
-  playlists: Array<{ name: string; trackCount: number }>;
+  /**
+   * One entry per playlist recreated: the tracks it really holds (read back)
+   * and the backup's songs that did not arrive, counting repeats.
+   */
+  playlists: Array<{ name: string; trackCount: number; missing: TrackId[] }>;
 }
 
 /**
@@ -1185,13 +1189,15 @@ export async function restoreBackup(
   const playlists: RestoreResult["playlists"] = [];
   for (const playlist of backup.playlists) {
     const ids = playlist.tracks.map((t) => t.id);
-    await createPlaylistWithTracks(client, {
-      name: playlist.name,
-      trackIds: ids,
-      isPublic: playlist.isPublic ?? false,
+    // In order, repeats included (Qobuz adds an id once per request), then
+    // read back: songs no longer offered vanish without an error.
+    const created = await client.createPlaylist(playlist.name, {
       ...(playlist.description !== undefined && { description: playlist.description }),
+      isPublic: playlist.isPublic ?? false,
     });
-    playlists.push({ name: playlist.name, trackCount: ids.length });
+    await addInOrder(client, created.id, ids);
+    const got = (await client.getPlaylistTracks(created.id)).map((t) => t.id);
+    playlists.push({ name: playlist.name, trackCount: got.length, missing: missingFrom(ids, got) });
   }
   return {
     favouriteTracks: trackIds.length,

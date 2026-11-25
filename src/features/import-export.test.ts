@@ -28,6 +28,7 @@ import {
   type ImportWriterClient,
   type LibraryBackup,
 } from "./import-export.js";
+import { FakeAccount } from "./fake-account.test-support.js";
 
 const tracks: Collection = {
   kind: "tracks",
@@ -319,6 +320,14 @@ function fakeWriter(): ImportWriterClient & { calls: Record<string, unknown[]> }
   };
 }
 
+/** Plays back what restoreBackup adds, as the writer's playlist. */
+function readBackFrom(writer: ReturnType<typeof fakeWriter>): void {
+  writer.getPlaylistTracks = async () =>
+    ((writer.calls["addTracksToPlaylist"] ?? []) as [unknown, TrackId[]][]).flatMap(([, ids]) =>
+      ids.map((id) => ({ id }) as never),
+    );
+}
+
 describe("commitImport", () => {
   it("adds matched tracks to favourites", async () => {
     const writer = fakeWriter();
@@ -444,13 +453,35 @@ describe("buildBackup and restoreBackup", () => {
       },
       playlists: [{ name: "Chill", tracks: [{ id: qid(9), title: "c" }] }],
     };
+    readBackFrom(writer);
     const result = await restoreBackup(writer, backup);
     expect(writer.calls["addFavoriteTracks"]).toEqual([[[qid(1), qid(2)]]]);
     expect(writer.calls["addFavoriteAlbums"]).toEqual([[[qid("alb")]]]);
     expect(writer.calls["addFavoriteArtists"]).toEqual([[[qid(55)]]]);
     expect(writer.calls["createPlaylist"]).toEqual([["Chill", { isPublic: false }]]);
     expect(writer.calls["addTracksToPlaylist"]).toEqual([[qid(100), [qid(9)]]]);
-    expect(result.playlists).toEqual([{ name: "Chill", trackCount: 1 }]);
+    expect(result.playlists).toEqual([{ name: "Chill", trackCount: 1, missing: [] }]);
+  });
+
+  it("restores a playlist's repeated songs on a Qobuz-like account and reports what is missing", async () => {
+    const account = new FakeAccount();
+    account.unplayable.add(qid(4));
+    const backup: LibraryBackup = {
+      formatVersion: 1,
+      exportedAt: "",
+      favourites: { tracks: [], albums: [], artists: [] },
+      playlists: [
+        { name: "Loops", tracks: [1, 2, 1, 3].map((n) => ({ id: qid(n), title: "t" })) },
+        { name: "Gone", tracks: [qid(1), qid(4)].map((id) => ({ id, title: "t" })) },
+      ],
+    };
+    const result = await restoreBackup(account as never, backup);
+    const ids = [...account.playlists.keys()];
+    expect(account.trackIds(ids[0]!)).toEqual([qid(1), qid(2), qid(1), qid(3)]);
+    expect(result.playlists).toEqual([
+      { name: "Loops", trackCount: 4, missing: [] },
+      { name: "Gone", trackCount: 1, missing: [qid(4)] },
+    ]);
   });
 
   it("rejects content that is not a backup", () => {
