@@ -129,7 +129,10 @@ preview-and-edit step before anything is changed (see [Web UI](#web-ui)).
 ## Requirements
 
 - Node.js `>=18`
-- A paying Qobuz subscription (the streaming API rejects accounts without one).
+- A subscription on at least one of Qobuz, TIDAL or Spotify: Qobuz's streaming
+  API rejects accounts without one, and Spotify's app must be owned by a
+  Premium account (see [Several services](#several-services)). Qobuz is not
+  required if you use only TIDAL or Spotify.
 
 ## Quick start (development)
 
@@ -185,7 +188,13 @@ tracks per artist, default 10), `--public` (make the playlist public),
 `--exclude-track <term>`, `--exclude-album <term>` and `--exclude-artist <name>`
 (see [Filters](#filters)). An excluded track is replaced by the artist's next most popular one; Qobuz
 lists at most 30 top tracks per artist, so a strict filter can still leave an
-artist short.
+artist short. A name counts only when an artist of that name exists (ignoring
+case, accents and spacing: "Beyonce" finds "Beyoncé"); one that does not match
+is listed as not found, never replaced by the search's first result, and when
+no artist gives any song nothing is created. Anything starting with `--` that
+the command does not know is an error rather than an artist's name; to give a
+name that starts with `--`, put a bare `--` before the names. The same holds
+for `playlist-from-albums` and `import`.
 
 ```sh
 # Build a playlist from whole albums, given as "Artist - Album"
@@ -206,6 +215,10 @@ compilation) are left out. A release whose title or version matches `--exclude-a
 every release of an album matches, the album is skipped and reported. Each
 entry is one line in `Artist - Album` form, split on the first ` - ` so album
 titles keep any hyphens.
+An album whose title does not match the line (a live or instrumental release
+does not stand in for "Foo"; only edition labels such as "Deluxe" or
+"Remastered" are ignored) is listed as not found rather than replaced by the
+search's first result, and when no album gives any song nothing is created.
 
 ```sh
 # Every Portishead studio album, oldest first, one version of each
@@ -603,7 +616,11 @@ npm run dev -- --loglevel warn export --playlist 12345678 --format m3u > mix.m3u
 is one of `json`, `csv`, `text` or `m3u` (inferred from `--out`'s extension when
 omitted, else `json`); a backup is always JSON. CSV and plain text carry a single
 collection; M3U carries tracks only; JSON is lossless and the only format for a
-whole-account backup. `--all-playlists` needs `--out-dir <dir>` (created if
+whole-account backup. In CSV, a field that starts with `=`, `+`, `-` or `@`
+(or a tab or carriage return) is written with a leading apostrophe so a
+spreadsheet does not run it as a formula; crosstune's own `import` strips it
+again. In M3U and text, line breaks in a title become spaces.
+`--all-playlists` needs `--out-dir <dir>` (created if
 missing) and writes one file per playlist, named after it: characters that are
 not allowed in file names become `_`, and playlists with the same name get
 " (2)", " (3)", ...
@@ -632,9 +649,15 @@ given (`json`, `csv`, `text`, `m3u`, or `spotify`). Each entry is resolved to a
 Qobuz item by its id when the file carries one (JSON always does; CSV and M3U
 can); else, for a track with an ISRC, by searching Qobuz for that ISRC (the same
 recording); otherwise by searching for the artist and title and best-matching.
-The report says how many matched each way; entries that match nothing are
-listed. Like `deduplicate`, `import` only resolves and **reports** unless
-`--apply` is given.
+A track line with a title but no artist is never guessed from its title: it is
+matched only by its ISRC, otherwise listed as unmatched ("no artist given"). An
+artist line is taken only when a search result has that name (ignoring case,
+accents and spacing, then punctuation). The report says how many matched each
+way; entries that match nothing are listed, and so is one whose search failed
+("(could not be looked up)"), while the rest carry on. Like `deduplicate`, `import` only resolves and **reports** unless
+`--apply` is given. Restoring a backup adds each playlist's songs in order
+(repeats included), reads the playlist back, and reports how many arrived and
+which songs did not (a song the service no longer offers, say).
 
 **From Spotify:** export the playlist with [Exportify](https://exportify.net)
 and import the CSV into favourite tracks or a playlist. Its header ("Track
@@ -758,8 +781,6 @@ any notes and warnings, and only acts on confirmation. Undone entries are
 dimmed. The home page shows the latest change with links to undo it or open
 the history. With `--json`, `history` prints `entries` and `undo` prints
 `entry`, `plan` (`steps`, `notes`, `warnings`), `applied` and `result`.
-
-If the browser does not open automatically, the CLI prints the URL to visit.
 
 #### Managed playlists
 
@@ -901,6 +922,70 @@ accept or ignore (Run now, Preview, Pause, Edit, Delete -- optionally with a
 playlist crosstune made). *Manage a playlist* sets one up with a preview;
 *New releases*, *Similar artists* and *Combine playlists* have a *Keep this
 updated...* button that opens the form filled in.
+
+#### Services, accounts and copying
+
+```sh
+# Sign in to TIDAL or Spotify (Qobuz is just `login`)
+npm run dev -- login tidal --client-id <your app's client id>
+npm run dev -- login spotify --print-url
+
+# Who is signed in to what, and forget a service
+npm run dev -- accounts
+npm run dev -- forget spotify
+
+# Copy a playlist to another service (dry run, then --apply)
+npm run dev -- copy --playlist 12345678 --to tidal
+npm run dev -- copy --playlist 12345678 --to tidal --name "Road Trip" --apply
+
+# Copy your Spotify favourites to Qobuz, taking the likely matches too
+npm run dev -- copy --favourites --from spotify --to qobuz --apply --accept-likely
+```
+
+`login [tidal|spotify] [--client-id <id>] [--print-url]` signs in to one
+service (Qobuz when none is named). TIDAL and Spotify need an app you
+registered, whose client id you pass once with `--client-id` (it is then
+remembered; the Accounts page in the web UI keeps it too). The browser comes
+back to a temporary local address on port 53683. With `--print-url`, or when
+that port cannot be used, the command prints the sign-in link instead: open it
+on any device, then paste the address of the page it ends on (it may not
+load).
+
+`accounts` lists what is saved for each service: who is signed in, or that it
+is not connected. It reads only your saved files and asks no service.
+`forget <qobuz|tidal|spotify>` signs the service out and deletes what is kept
+about it: its remembered matches, the linked and managed playlists that use it,
+and its History entries.
+
+`copy` matches a playlist's songs on another service by ISRC, then by name (see
+[Several services](#several-services)). Give the source as `--playlist <id or
+link>` (a plain number is Qobuz's; others are written `tidal:<id>` or `spotify:<id>`, or pasted as links) or as `--favourites --from <service>`,
+and the destination with `--to <service>`, which must differ from the source's.
+Like `import`, it only **reports** unless `--apply` is given: how many songs
+were found exactly, how many are only likely, and which were not found. With
+`--apply`, the exact matches are written to a new private playlist (named
+`--name`, else the source playlist's name) or, for favourites, added to the
+destination's favourites. Likely matches are left out unless `--accept-likely`
+writes their best option too, unseen; the web UI lets you choose among them.
+Your choices there are remembered in `matches.json`.
+
+#### What crosstune keeps
+
+Everything is under `$XDG_CONFIG_HOME/crosstune/` (usually
+`~/.config/crosstune/`). Directories are created private to you (0700) and
+files owner-only (0600). `forget` and *Disconnect and forget* remove what
+concerns one service.
+
+| File | Holds |
+| ---- | ----- |
+| `session.json` | Qobuz's sign-in |
+| `bundle.json` | the Qobuz web player's app id and secret, cached for a week |
+| `sessions/<service>.json` | the TIDAL and Spotify sign-ins |
+| `accounts.json` | who is signed in to each service, and the client ids of your apps (no secrets) |
+| `links.json`, `links-state/` | linked playlists and the state of each |
+| `jobs.json`, `jobs-state/`, `jobs-runs.jsonl`, `jobs-global.json` | managed playlists and tidy-ups, each one's state, the run log, and flags that stop every job |
+| `matches.json` | the matches you chose when copying between services |
+| `history.jsonl` | History, for undo |
 
 #### Logging
 
@@ -1224,14 +1309,22 @@ playlist tells you what its next refresh will do to your edits.
    are listed.
 3. Commit to add the matched items (or restore the backup).
 
-The browser only ever talks to the local server, which owns the Qobuz session;
-your Qobuz token is never sent to the page. The server is reachable only from
+The browser only ever talks to the local server, which owns every service's
+sign-in; no token is ever sent to the page. The server is reachable only from
 your own machine, and every request must carry a per-run secret that only the
 served page can read (guarding against other local pages acting on your
-account). See [ADR-0002](docs/adr/0002-web-ui-architecture.md) for the design.
-The one exception is *Show artwork*, which, once you turn it on, has the
-browser load cover images from Qobuz's public image server; see
-[ADR-0004](docs/adr/0004-optional-artwork.md).
+account). The page and every other file are served only to an allowed Host
+(against DNS rebinding); a request is authorised from its headers *before* its
+body is read, and a body over 32 MiB is refused. Every response carries a
+Content-Security-Policy (the page's own scripts, styles and fonts only, and
+images from the page or the services' image servers), `X-Content-Type-Options:
+nosniff` and `X-Frame-Options: DENY`, so the page cannot be framed by another
+site. See [ADR-0002](docs/adr/0002-web-ui-architecture.md) for the design.
+The one exception to "the page talks only to the local server" is *Show album
+covers*, asked once and kept in *Settings*: once you turn it on, the browser
+loads cover images straight from the Qobuz, TIDAL and Spotify image servers;
+see [ADR-0004](docs/adr/0004-optional-artwork.md) and
+[ADR-0015](docs/adr/0015-cover-tint-in-the-page.md).
 
 ## Development
 
