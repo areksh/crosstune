@@ -21,7 +21,7 @@
  * or removed, and changed playlist details put back.
  */
 
-import { labelOf } from "../services/errors.js";
+import { isNotFound, labelOf } from "../services/errors.js";
 import {
   checkAllOn,
   shortId,
@@ -411,9 +411,13 @@ function replayBackwards(
   return { order: list, removedTracks, unknownMoves };
 }
 
-/** Whether an error says the playlist does not exist (rather than a failure to read it). */
+/**
+ * Whether an error says the playlist does not exist (rather than a failure to
+ * read it), however its service puts that: Qobuz answers an HTTP 404, TIDAL
+ * and Spotify raise a `not-found`.
+ */
 function isGone(error: unknown): boolean {
-  return messageOf(error).includes("HTTP 404");
+  return isNotFound(error);
 }
 
 function messageOf(error: unknown): string {

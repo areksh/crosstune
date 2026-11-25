@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { tagId, type PlaylistId, type TrackId } from "../services/ids.js";
 import { qid } from "../services/ids.test-support.js";
+import { TidalClient } from "../services/tidal/client.js";
+import { FakeTidal } from "../services/tidal/fake-tidal.test-support.js";
+import { TidalService } from "../services/tidal/service.js";
 import { FakeAccount, MemoryStore } from "./fake-account.test-support.js";
 import { createPlaylistWithTracks } from "./playlist-from-artists.js";
 import { Journal, recordingClient } from "./journal.js";
@@ -36,6 +40,35 @@ function setup() {
     return { plan, outcome };
   };
   return { store, journal, account, client, undo };
+}
+
+/** A journal whose entries are a minute apart, so they order by time. */
+function newJournal() {
+  const store = new MemoryStore();
+  let n = 0;
+  let minute = 0;
+  const journal = new Journal({
+    store,
+    source: "cli",
+    now: () => new Date(Date.UTC(2026, 10, 2, 20, minute++)),
+    newId: () => `e${++n}`,
+  });
+  return { store, journal };
+}
+
+/** TIDAL (the fake behind the real service), recorded. */
+function tidalSetup() {
+  const { store, journal } = newJournal();
+  const fake = new FakeTidal();
+  for (let n = 1; n <= 9; n += 1) {
+    fake.addTrack(String(n));
+  }
+  const service = new TidalService(new TidalClient({ tokens: fake.tokens(), fetchImpl: fake.fetch, sleep: async () => {} }));
+  const client = recordingClient(service, journal);
+  const track = (native: number) => tagId<TrackId>("tidal", native);
+  const seed = (name: string, natives: readonly number[]) =>
+    tagId<PlaylistId>("tidal", fake.seedPlaylist(name, natives.map((n) => ({ type: "tracks", id: String(n) }))));
+  return { store, journal, fake, client, track, seed };
 }
 
 describe("undo of a created playlist", () => {
@@ -185,6 +218,26 @@ describe("undo of playlist changes", () => {
 
     expect(plan.steps).toEqual([]);
     expect(plan.notes).toEqual(["Late Night no longer exists, so its changes are not undone."]);
+  });
+
+  it("tells a deleted playlist from an unreadable one on TIDAL too", async () => {
+    const { journal, fake, client, track, seed } = tidalSetup();
+    const kept = seed("Kept", [1]);
+    const gone = seed("Gone", [2]);
+    await journal.run({ tool: "similar-artists" }, async () => {
+      await client.addTracksToPlaylist(kept, [track(3)]);
+      await client.addTracksToPlaylist(gone, [track(4)]);
+    });
+    fake.playlists.delete(String(gone).replace("tidal:", ""));
+
+    const items = journal.items();
+    const plan = await planUndo(client, items[0]!, items);
+
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.notes).toEqual(["Gone no longer exists, so its changes are not undone."]);
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 1 track from Kept"]);
+    await applyUndo(journal, client, items[0]!, plan);
+    expect(fake.contents(String(kept).replace("tidal:", ""))).toEqual(["tracks:1"]);
   });
 
   it("puts a reordered playlist back in its old order, and can redo it", async () => {
