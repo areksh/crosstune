@@ -93,9 +93,12 @@
  *
  *   crosstune import (--favourites | --favourite-albums | --favourite-artists
  *       | --playlist <id> | --new-playlist <name> | --account)
- *       [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>
+ *       [--format <json|csv|text|m3u|spotify>] [--public] [--apply]
+ *       [--accept-likely] <file>
  *       Import a file into favourites or a playlist, resolving each entry to a
  *       Qobuz item (by its id when present, else by its ISRC, else by search).
+ *       A line with only a title is one to check (listed with "?"): it is left
+ *       out unless --accept-likely takes the first song of that title.
  *       --account restores a full backup. Without --apply it resolves and
  *       reports only; the format is inferred from the filename when --format is
  *       omitted, and a CSV exported from Spotify by Exportify is recognised
@@ -315,6 +318,7 @@ import {
   type CollectionKind,
   type Format,
   type ImportFormat,
+  type ImportOption,
   type ImportTarget,
 } from "./features/import-export.js";
 import {
@@ -2235,29 +2239,47 @@ function planImport(argv: string[]): (client: MusicService) => Promise<void> {
     if (plan.unmatched.length > 0) {
       logger.warn(`not found: ${plan.unmatched.join(", ")}`);
     }
+    // Title-only lines: nothing is taken for them unless asked to take the first song.
+    const toCheck = plan.toCheck ?? [];
+    if (toCheck.length > 0) {
+      logger.info(`  ${toCheck.length} to check (only a title given):`);
+      for (const line of toCheck) {
+        logger.info(`  ? ${line.label} -> ${describeOption(line.options[0]!)}${line.options.length > 1 ? ` (+${line.options.length - 1} more)` : ""}`);
+      }
+    }
+    const later = toCheck.length > 0 && !args.acceptLikely ? `; the ${toCheck.length} to check only with --accept-likely` : "";
 
     if (!args.apply) {
-      if (plan.matched.length > 0) {
+      if (plan.matched.length > 0 || toCheck.length > 0) {
         logger.info(
-          `\n(dry run -- pass --apply to import the ${plan.matched.length} matched ${kind})`,
+          `\n(dry run -- pass --apply to import the ${plan.matched.length} matched ${kind}${args.acceptLikely && toCheck.length > 0 ? ` and the first song for each of the ${toCheck.length} to check` : later})`,
         );
       }
       return;
     }
-    if (plan.matched.length === 0) {
-      logger.info("\nNothing to import.");
+    const picks = args.acceptLikely ? toCheck.map((line) => line.options[0]!.id) : [];
+    if (plan.matched.length === 0 && picks.length === 0) {
+      logger.info(`\nNothing to import${later.length > 0 ? ` (the ${toCheck.length} to check only with --accept-likely)` : ""}.`);
       return;
     }
-    const result = await commitImport(client, plan, target);
+    const result = await commitImport(client, plan, target, picks);
     output.assign({ applied: true, result });
+    const skipped = result.skipped > 0 ? ` (${result.skipped} to check left out; pass --accept-likely to take them)` : "";
     if (result.playlist !== undefined) {
       logger.info(
-        `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.written, "track")}.`,
+        `\nCreated "${result.playlist.name}" (id ${shortId(result.playlist.id)}) with ${count(result.written, "track")}${skipped}.`,
       );
     } else {
-      logger.info(`\nImported ${result.written} ${kind}.`);
+      logger.info(`\nImported ${result.written} ${kind}${skipped}.`);
     }
   };
+}
+
+/** A song offered for a line to check: "Yesterday – The Beatles [Help!, 1965]". */
+function describeOption(option: ImportOption): string {
+  const title = option.version === undefined ? option.title : `${option.title} (${option.version})`;
+  const where = [option.album, option.releaseDate?.slice(0, 4)].filter((part) => part !== undefined && part.length > 0);
+  return `${title}${option.artist === undefined ? "" : ` – ${option.artist}`}${where.length > 0 ? ` [${where.join(", ")}]` : ""}`;
 }
 
 /** Executor for restoring a full-account backup (dry-run unless `apply`). */
@@ -2657,7 +2679,7 @@ function printUsage(): void {
       "  crosstune upgrade (--favourites | --playlist <id> | --all-playlists) [--allow-signature-match] [--remove-unplayable] [--apply]",
       "  crosstune export (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --account) [--format <json|csv|text|m3u>] [--out <file>]",
       "  crosstune export --all-playlists --out-dir <dir> [--format <json|csv|text|m3u>]",
-      "  crosstune import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] <file>",
+      "  crosstune import (--favourites | --favourite-albums | --favourite-artists | --playlist <id> | --new-playlist <name> | --account) [--format <json|csv|text|m3u|spotify>] [--public] [--apply] [--accept-likely] <file>",
       "  crosstune combine --playlist <id> --playlist <id> [...] [--favourites] [--mode merge|only-first|common] [--order sequential|interleave|shuffle] [--keep highest-quality|first] [--exact-ids-only] [--name <name>] [--public] [--apply]",
       "  crosstune stats (--favourites | --playlist <id> | --everything) [--json] [--decade-playlist <decade> [--name <name>] [--public] [--apply]]",
       "  crosstune history [--limit N]",

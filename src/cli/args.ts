@@ -777,6 +777,11 @@ export interface ImportArgs {
   isPublic: boolean;
   /** Whether to actually write (otherwise resolve and report only). */
   apply: boolean;
+  /**
+   * Whether a title-only line (one to check) takes the first song offered for
+   * it; without it those lines are left out. The same flag as `copy`'s.
+   */
+  acceptLikely: boolean;
 }
 
 /**
@@ -787,7 +792,8 @@ export interface ImportArgs {
  * `--new-playlist <name>`. One positional file argument is required.
  * `--format` (one of the export formats, or `spotify` for an Exportify CSV)
  * overrides the format inferred from the filename; `--public` marks
- * a new playlist public; `--apply` performs the write (otherwise it is a dry run).
+ * a new playlist public; `--apply` performs the write (otherwise it is a dry run);
+ * `--accept-likely` takes the first song offered for each title-only line.
  *
  * @throws {Error} if the target, the file, or a given format is missing/invalid.
  */
@@ -797,6 +803,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
   let format: ImportFormat | undefined;
   let isPublic = false;
   let apply = false;
+  let acceptLikely = false;
 
   let rest = false; // after a bare `--`
   for (let i = 0; i < argv.length; i += 1) {
@@ -861,6 +868,9 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
       case "--apply":
         apply = true;
         break;
+      case "--accept-likely":
+        acceptLikely = true;
+        break;
       default:
         if (arg !== undefined) {
           files.push(positionalArg(arg));
@@ -887,6 +897,7 @@ export function parseImportArgs(argv: readonly string[]): ImportArgs {
     file: files[0]!,
     isPublic,
     apply,
+    acceptLikely,
     ...(format !== undefined && { format }),
   };
 }
