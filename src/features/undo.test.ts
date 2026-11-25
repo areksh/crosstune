@@ -626,6 +626,27 @@ describe("an undo that went through only in part", () => {
     expect(account.trackIds(again)).toEqual([qid(4), qid(4), qid(5), qid(4)]);
   });
 
+  it("leaves alone a playlist it made again in full, when something else is left to do", async () => {
+    const { journal, account, client, undo } = setup();
+    const id = account.seedPlaylist("Old", [qid(4), qid(5)]);
+    account.favourites.tracks = [qid(8)];
+    await journal.run({ tool: "other" }, async () => {
+      await client.deletePlaylist(id);
+      await client.removeFavoriteTracks([qid(8)]);
+    });
+    const original = journal.items()[0]!.id;
+    account.failAfter("addFavoriteTracks", 0);
+    await undo(original);
+    expect(account.playlists.size).toBe(1);
+
+    const { plan, outcome } = await undo(original);
+
+    expect(plan.steps.map(describeStep)).toEqual(["Add 1 track back to Favourites"]);
+    expect(outcome.undone).toBe(true);
+    expect([...account.playlists.values()].map((p) => p.entries.map((e) => e.trackId))).toEqual([[qid(4), qid(5)]]);
+    expect(account.favourites.tracks).toEqual([qid(8)]);
+  });
+
   it("makes the playlist again from nothing when the one it had begun is gone", async () => {
     const { journal, account, client, undo } = setup();
     const id = account.seedPlaylist("Old", [qid(4), qid(4)]);
