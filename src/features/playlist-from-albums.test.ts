@@ -170,6 +170,40 @@ describe("resolveAlbumVersions", () => {
     ]);
   });
 
+  it("keeps live and instrumental releases apart from the studio album, but folds editions", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Band Foo": [
+          album({ id: "live", title: "Foo (Live)", artist: "Band" }),
+          album({ id: "inst", title: "Foo (Instrumental)", artist: "Band" }),
+          album({ id: "plain", title: "Foo", artist: "Band" }),
+          album({ id: "dlx", title: "Foo (Deluxe Edition)", artist: "Band" }),
+          album({ id: "rem", title: "Foo (2011 Remaster)", artist: "Band" }),
+        ],
+      },
+    });
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ artist: "Band", album: "Foo" }],
+    });
+    expect(result.resolvedAlbums[0]?.versions.map((v) => v.id)).toEqual(["plain", "dlx", "rem"]);
+  });
+
+  it("matches a symbol-only title only to itself", async () => {
+    const client = stubClient({
+      albumsByQuery: {
+        "Ed Sheeran ÷": [
+          album({ id: "plus", title: "+", artist: "Ed Sheeran" }),
+          album({ id: "eq", title: "=", artist: "Ed Sheeran" }),
+          album({ id: "div", title: "÷", artist: "Ed Sheeran" }),
+        ],
+      },
+    });
+    const result = await resolveAlbumVersions(client, {
+      entries: [{ artist: "Ed Sheeran", album: "÷" }],
+    });
+    expect(result.resolvedAlbums[0]?.versions.map((v) => v.id)).toEqual(["div"]);
+  });
+
   it("does not conflate a self-titled album with its numbered sequels", async () => {
     const client = stubClient({
       albumsByQuery: {

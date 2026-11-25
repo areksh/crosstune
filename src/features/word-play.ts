@@ -229,21 +229,31 @@ export function rawWords(text: string): string[] {
   return text.split(/\s+/).filter((word) => word.length > 0);
 }
 
-/** Version words that mark a trailing " - ..." suffix as a label, not a title part. */
-const DASH_LABEL =
-  /\s+[-–—]\s+[^-–—]*\b(?:remaster(?:ed)?|live|version|edit|mix|remix|mono|stereo|demo|acoustic|instrumental|single|radio|bonus|deluxe|edition|take|session|recorded|feat|featuring)\b[^-–—]*$/iu;
+/** Version words that mark a trailing label (a " - ..." suffix or a bracket) as a label, not a title part. */
+const LABEL_WORDS =
+  "remaster(?:ed)?|live|version|edit|mix|remix|mono|stereo|demo|acoustic|instrumental|single|radio|bonus|deluxe|edition|take|session|recorded|feat|featuring";
+const DASH_LABEL = new RegExp(
+  String.raw`\s+[-–—]\s+[^-–—]*\b(?:${LABEL_WORDS})\b[^-–—]*$`,
+  "iu",
+);
 const TRAILING_BRACKETS = /\s*(?:\([^()]*\)|\[[^[\]]*\])\s*$/u;
+/** A bracket is a version label when it holds a label word or a four-digit year. */
+const BRACKET_LABEL = new RegExp(String.raw`\b(?:${LABEL_WORDS})\b|\b(?:19|20)\d\d\b`, "iu");
 
 /**
  * A title without its trailing version labels: bracketed groups at the end
- * ("Roads (Live)", "Help! [Remastered 2009]") and a dashed suffix naming a
- * version ("Layla - 2011 Remaster"). A title that is nothing but a label is
- * kept as it is.
+ * that name a version ("Roads (Live)", "Help! [Remastered 2009]" -- but not a
+ * part of the title such as "Sorry (Not Sorry)" or "Time (Clock of the
+ * Heart)") and a dashed suffix naming a version ("Layla - 2011 Remaster"). A
+ * title that is nothing but a label is kept as it is.
  */
 export function stripVersionLabels(title: string): string {
   let current = title.trim();
   for (;;) {
-    const next = current.replace(TRAILING_BRACKETS, "").replace(DASH_LABEL, "").trim();
+    const next = current
+      .replace(TRAILING_BRACKETS, (bracket) => (BRACKET_LABEL.test(bracket) ? "" : bracket))
+      .replace(DASH_LABEL, "")
+      .trim();
     if (next === current || next.length === 0) {
       return current;
     }
@@ -509,7 +519,9 @@ function matchContains(
  * the fewest candidates choose first, each taking its best candidate whose
  * track is not already chosen and -- with `onePerArtist` -- whose artist is not
  * already used; failing that, the best unused track (repeating an artist);
- * failing that, its best candidate. A slot with no candidates stays empty.
+ * failing that the slot stays empty, rather than repeating a track already
+ * chosen (the written playlist holds each song once, so a repeat would be
+ * counted but never written). A slot with no candidates stays empty.
  */
 export function assignSlots<T extends WordPlayCandidate>(
   candidateLists: readonly (readonly T[])[],
@@ -531,8 +543,10 @@ export function assignSlots<T extends WordPlayCandidate>(
     };
     const pick =
       (onePerArtist ? list.find((c) => freshTrack(c) && freshArtist(c)) : undefined) ??
-      list.find(freshTrack) ??
-      list[0]!;
+      list.find(freshTrack);
+    if (pick === undefined) {
+      continue;
+    }
     chosen[index] = pick;
     usedTracks.add(pick.track.id);
     const key = artistKey(pick.track);

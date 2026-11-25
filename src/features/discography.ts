@@ -88,7 +88,7 @@ export function parseIncludeList(raw: string): ReleaseType[] {
 
 /** Words that mark an edition of an album rather than a different album. */
 const EDITION_WORDS =
-  /\b(deluxe|remaster(ed)?|remasterised|anniversary|expanded|edition|reissue|bonus|special|legacy|collector'?s|version|mono|stereo|super)\b/i;
+  /\b(deluxe|remaster(ed)?|remasterised|anniversary|expanded|edition|reissue|reloaded|bonus|special|legacy|collector'?s|version|mono|stereo|super)\b/i;
 
 /**
  * An album title without its edition labels, for grouping the editions of one
@@ -99,12 +99,22 @@ const EDITION_WORDS =
  * ("(Part 2)", "(Live)") are kept, so those stay separate albums.
  */
 export function editionKey(title: string): string {
-  const stripped = title
+  return normalise(stripEditionLabels(title));
+}
+
+/**
+ * A title with only its edition labels removed (bracketed segments and " - "
+ * suffixes that name an edition), otherwise untouched: no case folding or
+ * punctuation clean-up. Brackets that name something else ("(Live)",
+ * "(Instrumental)", "(Part 2)") stay. Shared by {@link editionKey} and the
+ * album-line matcher so both agree on what counts as an edition.
+ */
+export function stripEditionLabels(title: string): string {
+  return title
     .replace(/[([{][^)\]}]*[)\]}]/g, (segment) => (EDITION_WORDS.test(segment) ? " " : segment))
     .replace(/\s+[-–—]\s+(.*)$/, (suffix, rest: string) =>
       EDITION_WORDS.test(rest) ? " " : suffix,
     );
-  return normalise(stripped);
 }
 
 /** True when the release is by the artist (or does not say who it is by). */
