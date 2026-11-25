@@ -435,6 +435,74 @@ export function pruneRecords(
   return records.filter((r) => keep.has(r.id) && (r.type === "undone" || Date.parse(r.at) >= cutoff));
 }
 
+/**
+ * {@link pruneRecords} over the file's text, line by line, for compaction. A
+ * line that stays is kept exactly as it was written, so nothing a newer
+ * crosstune added to it is lost. A line that is not a readable record (of
+ * another version, with an operation this version does not know, or damaged)
+ * is not ours to throw away, and stays too -- with the undone marker of its
+ * entry -- until it says it is older than the history goes back; it does not
+ * count towards `maxEntries`. `dropped` is how many lines went.
+ */
+export function pruneHistoryText(
+  text: string,
+  now: Date,
+  limits: HistoryLimits = HISTORY_LIMITS,
+): { text: string; dropped: number } {
+  const cutoff = now.getTime() - limits.maxAgeDays * DAY_MS;
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  const parsed = lines.map((line) => parseHistory(line)[0]);
+  // The entries of the unreadable lines that stay: their markers stay as well.
+  const unread = new Set<string>();
+  const unreadable = lines.map((line, index) => {
+    if (parsed[index] !== undefined) {
+      return false;
+    }
+    const { id, at, marker } = glance(line);
+    if (at !== undefined && at < cutoff) {
+      return false;
+    }
+    if (id !== undefined && !marker) {
+      unread.add(id);
+    }
+    return true;
+  });
+  const kept = new Set(
+    pruneRecords(
+      parsed.filter((record): record is HistoryRecord => record !== undefined),
+      now,
+      limits,
+    ),
+  );
+  const out = lines.filter((_, index) => {
+    const record = parsed[index];
+    if (record === undefined) {
+      return unreadable[index];
+    }
+    return kept.has(record) || (record.type === "undone" && unread.has(record.id));
+  });
+  return { text: out.map((line) => `${line}\n`).join(""), dropped: lines.length - out.length };
+}
+
+/** What can be told of a line that is not a readable record: its entry and when it is from. */
+function glance(line: string): { id?: string; at?: number; marker: boolean } {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return { marker: false };
+  }
+  if (!isRecord(value)) {
+    return { marker: false };
+  }
+  const at = isString(value["at"]) ? Date.parse(value["at"]) : NaN;
+  return {
+    ...(isString(value["id"]) && { id: value["id"] }),
+    ...(!Number.isNaN(at) && { at }),
+    marker: value["type"] === "undone",
+  };
+}
+
 /** How many items an entry added and removed (tracks, albums and artists alike). */
 export function summarise(entry: HistoryEntry): { added: number; removed: number } {
   let added = 0;

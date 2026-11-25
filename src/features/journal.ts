@@ -37,7 +37,7 @@ import {
   foldHistory,
   HISTORY_LIMITS,
   parseHistory,
-  pruneRecords,
+  pruneHistoryText,
   serializeRecords,
   type FavouriteType,
   type HistoryEntry,
@@ -188,16 +188,22 @@ export class Journal {
     this.#append([{ type: "entry", ...entry }], now);
   }
 
-  /** Append records, compacting the file instead when that drops old ones. */
+  /**
+   * Append records, compacting the file instead when that drops old ones.
+   * Compaction goes line by line ({@link pruneHistoryText}): what stays is
+   * kept as it was written, and so is a line this version cannot read.
+   */
   #append(records: HistoryRecord[], now: Date): void {
     try {
       const write = (): true => {
-        const all = [...parseHistory(this.#store.read()), ...records];
-        const kept = pruneRecords(all, now, this.#limits);
-        if (kept.length < all.length) {
-          this.#store.replace(serializeRecords(kept));
+        const before = this.#store.read();
+        // A last line cut off (a crash mid-write) must not swallow these.
+        const added = `${before.length > 0 && !before.endsWith("\n") ? "\n" : ""}${serializeRecords(records)}`;
+        const { text, dropped } = pruneHistoryText(before + added, now, this.#limits);
+        if (dropped > 0) {
+          this.#store.replace(text);
         } else {
-          this.#store.append(serializeRecords(records));
+          this.#store.append(added);
         }
         return true;
       };

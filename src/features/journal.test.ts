@@ -146,6 +146,76 @@ describe("Journal", () => {
     expect(entriesOf(store).map((e) => e.id)).toEqual(["id2", "id3"]);
   });
 
+  it("keeps the lines it cannot read when it compacts, exactly as they were", () => {
+    const store = new MemoryStore();
+    let n = 0;
+    const journal = new Journal({
+      store,
+      source: "web",
+      now: () => new Date("2026-11-02T20:00:00.000Z"),
+      newId: () => `id${++n}`,
+      limits: { maxEntries: 2, maxAgeDays: 90 },
+    });
+    journal.record(createOp);
+    // Written by a newer crosstune, or damaged: not ours to throw away.
+    const newer = '{"v":2,"type":"entry","id":"n1","at":"2026-11-02T19:00:00.000Z","ops":"something new"}';
+    const unknownOp =
+      '{"v":1,"type":"entry","id":"n2","at":"2026-11-02T19:30:00.000Z","tool":"x","source":"cli","label":"L","ops":[{"kind":"pin-playlist","playlistId":"qobuz:5"}]}';
+    const itsMarker = '{"v":1,"type":"undone","id":"n2","by":"n3","at":"2026-11-02T19:40:00.000Z"}';
+    const damaged = '{"v":1,"type":"entry","id":"n4","at":"2026-11-0';
+    store.text += `${newer}\n${unknownOp}\n${itsMarker}\n${damaged}\n`;
+    journal.record(createOp);
+    expect(store.replaces).toBe(0);
+
+    journal.record(createOp);
+
+    expect(store.replaces).toBe(1);
+    expect(entriesOf(store).map((e) => e.id)).toEqual(["id2", "id3"]);
+    // Where they were: after the entry that went, before the ones that stay.
+    expect(store.text.split("\n").slice(0, 4)).toEqual([newer, unknownOp, itsMarker, damaged]);
+  });
+
+  it("keeps what it does not know of an entry it can read when it compacts", () => {
+    const store = new MemoryStore();
+    const journal = new Journal({
+      store,
+      source: "web",
+      now: () => new Date("2026-11-02T20:00:00.000Z"),
+      limits: { maxEntries: 2, maxAgeDays: 90 },
+    });
+    const withMore =
+      '{"v":1,"type":"entry","id":"m1","at":"2026-11-02T20:00:00.000Z","tool":"x","source":"cli","label":"L","ops":[],"somethingNewer":[1,2]}';
+    const older =
+      '{"v":1,"type":"entry","id":"o1","at":"2026-11-02T19:00:00.000Z","tool":"x","source":"cli","label":"L","ops":[]}';
+    store.text = `${older}\n${withMore}\n`;
+    journal.record(createOp);
+    expect(store.replaces).toBe(1);
+    expect(store.text).not.toContain(older);
+    expect(store.text.split("\n")).toContain(withMore);
+  });
+
+  it("drops a line it cannot read once it is older than the history goes back", () => {
+    const store = new MemoryStore();
+    const journal = new Journal({
+      store,
+      source: "web",
+      now: () => new Date("2026-11-02T20:00:00.000Z"),
+      limits: { maxEntries: 5, maxAgeDays: 90 },
+    });
+    const old = '{"v":2,"type":"entry","id":"n1","at":"2026-06-01T00:00:00.000Z","ops":"something new"}';
+    store.text = `${old}\n`;
+    journal.record(createOp);
+    expect(store.text).not.toContain(old);
+    expect(entriesOf(store)).toHaveLength(1);
+  });
+
+  it("starts a new line after a last line that was cut off", () => {
+    const { store, journal } = setup();
+    store.text = '{"v":1,"type":"entry","id":"cut","at":"2026-11-0';
+    journal.record(createOp);
+    expect(entriesOf(store).map((e) => e.id)).toEqual(["id1"]);
+  });
+
   it("compacts inside the store's exclusive section", () => {
     const store = new MemoryStore();
     let inside = false;
