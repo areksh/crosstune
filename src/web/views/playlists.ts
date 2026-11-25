@@ -486,6 +486,9 @@ async function removeArtists(): Promise<void> {
   }
   const panel = el("pl-artists");
   panel.inert = true;
+  const button = el<HTMLButtonElement>("pl-artists-remove");
+  button.disabled = true;
+  button.textContent = `Removing ${songCount(total)}...`;
   try {
     const { reports } = await api<{ reports: RemovalReport[] }>("POST", "/api/manager/remove-artists/commit", { removals }, listService);
     const removed = reports.reduce((n, report) => n + report.removed, 0);
@@ -504,5 +507,6 @@ async function removeArtists(): Promise<void> {
     showError(el("pl-artists-error"), (error as Error).message);
   } finally {
     panel.inert = false;
+    updateRemoveButton();
   }
 }

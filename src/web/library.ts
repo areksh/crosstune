@@ -297,7 +297,12 @@ async function deleteTicked(chosen: readonly ManagerPlaylist[]): Promise<void> {
   const actions = el("lib-group-actions");
   actions.inert = true;
   try {
+    const button = actions.querySelector<HTMLButtonElement>("button.danger-text");
+    let done = 0;
     for (const playlist of chosen) {
+      if (button !== null) {
+        button.textContent = `Deleting ${++done} of ${chosen.length}...`;
+      }
       try {
         await api("POST", "/api/manager/delete", { playlistId: playlist.id }, serviceOf(playlist.id));
         ticked.delete(playlist.id);
