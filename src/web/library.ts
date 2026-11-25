@@ -19,6 +19,7 @@ import { currentTab, TAB_CHANGED } from "./shell.js";
 import { openDialog } from "./dialog.js";
 import { rememberService, rememberTab } from "./service.js";
 import { reloadHere } from "./hosting.js";
+import { wireRangeTick } from "./range-tick.js";
 import { useSources } from "./views/combine.js";
 import { startRemoveArtists } from "./views/playlists.js";
 import { knownLinks, LINKS_CHANGED } from "./views/links.js";
@@ -190,14 +191,14 @@ function playlistRow(playlist: SidebarRow): HTMLLIElement {
   box.className = "lib-tick";
   box.checked = ticked.has(playlist.id);
   box.setAttribute("aria-label", `Tick ${playlist.name}`);
-  box.addEventListener("change", () => {
-    if (box.checked) {
-      ticked.add(playlist.id);
-    } else {
-      ticked.delete(playlist.id);
-    }
-    renderGroup();
-  });
+  // Shift-click ticks the rows between this and the last one clicked.
+  wireRangeTick(
+    box,
+    playlist.id,
+    () => document.getElementById("lib-playlists"),
+    (key, on) => (on ? ticked.add(key as PlaylistId) : ticked.delete(key as PlaylistId)),
+    renderGroup,
+  );
   item.classList.add("lib-item");
   item.prepend(box);
   return item;
