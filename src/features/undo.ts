@@ -42,11 +42,25 @@
  * that a try began to make again is known by `recreated` on the try's entry,
  * and is filled rather than made a second time. What is planned is therefore
  * only what is left, however far the tries got.
+ *
+ * **Entries without ids of their own.** Spotify gives a playlist entry no id:
+ * one is named by its song and which copy of it this is, counted afresh at
+ * each read (`capabilities.entryIds` is `positional`). The id an entry was
+ * recorded under then says nothing about it later -- once the first of two
+ * copies is removed, the copy that stayed goes by the removed one's id. On
+ * such a service the replay goes by what does last: the track, and the place
+ * the record gives. What was removed is always put back (it cannot be "still
+ * there"); what was added or moved is looked for where the operation left it,
+ * which is exact while nothing else has changed the playlist. If something
+ * has, the nearest copy of the track is taken instead, but only while the
+ * playlist holds as many copies as the recorded id counted: with fewer, one
+ * was taken out since, and which cannot be told, so no copy is touched.
  */
 
 import { isNotFound, labelOf } from "../services/errors.js";
 import {
   checkAllOn,
+  serviceOf,
   shortId,
   type AlbumId,
   type AnyId,
@@ -57,6 +71,7 @@ import {
   type TrackId,
 } from "../services/ids.js";
 import type { Playlist, Track } from "../services/model.js";
+import type { Capabilities } from "../services/service.js";
 import {
   laterConflicts,
   type FavouriteType,
@@ -70,9 +85,30 @@ import type { Journal } from "./journal.js";
 import { addInOrder, missingFrom } from "./playlist-add.js";
 import { mergeOrder, planOrder } from "./playlist-order.js";
 
+/** How a service names playlist entries; stable when it does not say. */
+interface NamesEntries {
+  readonly capabilities?: Pick<Capabilities, "entryIds">;
+}
+
 /** The read planning needs. */
-export interface UndoPlanClient {
+export interface UndoPlanClient extends NamesEntries {
   getPlaylistTracks(playlistId: PlaylistId): Promise<Track[]>;
+  /**
+   * Of the hub of services: the service named. A playlist's entries are named
+   * as its own service names them, whichever service the hub is used as.
+   */
+  service?(name: ServiceName): NamesEntries;
+}
+
+/** Whether the entries of a playlist have no ids of their own (see the top of this file). */
+function isPositional(client: UndoPlanClient, playlistId: PlaylistId): boolean {
+  try {
+    const own: NamesEntries = client.service === undefined ? client : client.service(serviceOf(playlistId));
+    return own.capabilities?.entryIds === "positional";
+  } catch {
+    // Its service is not connected: reading the playlist fails, and says so.
+    return false;
+  }
 }
 
 /** Everything undoing can call; QobuzClient (recorded) satisfies it. */
@@ -319,6 +355,7 @@ export async function planUndo(
             ops.filter(here),
             tried.filter(here),
             current.get(op.playlistId),
+            isPositional(client, op.playlistId),
           );
         }
     }
@@ -396,6 +433,7 @@ function planPlaylist(
   mine: readonly Operation[],
   tried: readonly Operation[],
   tracks: Track[] | undefined,
+  positional: boolean,
 ): void {
   const created = mine.some((op) => op.kind === "create-playlist");
   if (tracks === undefined) {
@@ -417,7 +455,7 @@ function planPlaylist(
   const cells: Cell[] = tracks.flatMap((t) =>
     t.playlistTrackId === undefined ? [] : [{ id: t.playlistTrackId, trackId: t.id, state: "here" as const }],
   );
-  const { order, restore, doomed, gone, unknownMoves } = replayBackwards(cells, mine, tried);
+  const { order, restore, doomed, gone, unknownMoves } = replayBackwards(cells, mine, tried, positional);
 
   if (created && doomed.size === tracks.length) {
     plan.steps.push({
@@ -532,9 +570,20 @@ interface Replayed {
  * aside to stand for the removed entry it was added for; an entry it removed
  * was one the change had added, and is put in again as `taken`, so that the
  * change's own addition finds it there and nothing more is done about it.
+ *
+ * `positional`: the entries have no ids of their own, so the ones an operation
+ * names are found by track and place (see the top of this file), and one that
+ * is not in the playlist goes by a made-up id.
  */
-function replayBackwards(cells: readonly Cell[], mine: readonly Operation[], tried: readonly Operation[]): Replayed {
+function replayBackwards(
+  cells: readonly Cell[],
+  mine: readonly Operation[],
+  tried: readonly Operation[],
+  positional: boolean,
+): Replayed {
   let list: Cell[] = [...cells];
+  /** The ids as read: where they are positional, `<song>#<n>` is among them while there are n copies. */
+  const idsNow = new Set(cells.map((cell) => cell.id));
   const inList = new Set(cells);
   const byId = new Map(cells.map((cell) => [cell.id, cell]));
   /** What the earlier tries put back, until it is known for which removed entry. */
@@ -551,10 +600,57 @@ function replayBackwards(cells: readonly Cell[], mine: readonly Operation[], tri
     const cell = byId.get(id);
     return cell !== undefined && inList.has(cell) ? cell : undefined;
   };
-  const absent = (id: EntryId, trackId: TrackId, state: "back" | "taken"): Cell => {
+  let madeUp = 0;
+  const absent = (recorded: EntryId, trackId: TrackId, state: "back" | "taken"): Cell => {
+    // A positional id may be some other entry's by now, so one that is not in
+    // the playlist gets a name no entry has. It names the place in the order
+    // to return to, and is never sent to the service.
+    const id = positional ? (`${recorded}~${(madeUp += 1)}` as EntryId) : recorded;
     const cell: Cell = { id, trackId, state };
     byId.set(id, cell);
     return cell;
+  };
+  /**
+   * The entry an operation names, in the list as that operation left it:
+   * `at` is where it was then. `spoken` are those already found for the same
+   * operation.
+   */
+  const locate = (
+    wanted: { id: EntryId; trackId: TrackId | undefined; at: number },
+    spoken: ReadonlySet<Cell>,
+  ): Cell | undefined => {
+    if (!positional || wanted.trackId === undefined) {
+      const cell = find(wanted.id);
+      return cell !== undefined && !spoken.has(cell) ? cell : undefined;
+    }
+    const there = list[wanted.at];
+    if (there !== undefined && there.trackId === wanted.trackId && !spoken.has(there)) {
+      return there;
+    }
+    // Not where it was: something else changed the playlist. The nearest copy
+    // (the earlier of two as near), unless there are fewer copies than then.
+    if (!idsNow.has(wanted.id)) {
+      return undefined;
+    }
+    let nearest: Cell | undefined;
+    let off = Infinity;
+    for (const [index, cell] of list.entries()) {
+      if (cell.trackId === wanted.trackId && !spoken.has(cell) && Math.abs(index - wanted.at) < off) {
+        nearest = cell;
+        off = Math.abs(index - wanted.at);
+      }
+    }
+    return nearest;
+  };
+  const locateAll = (wanted: ReadonlyArray<{ id: EntryId; trackId: TrackId | undefined; at: number }>) => {
+    const spoken = new Set<Cell>();
+    return wanted.map((one) => {
+      const cell = locate(one, spoken);
+      if (cell !== undefined) {
+        spoken.add(cell);
+      }
+      return cell;
+    });
   };
   const takeOut = (out: readonly Cell[]): void => {
     if (out.length > 0) {
@@ -578,7 +674,7 @@ function replayBackwards(cells: readonly Cell[], mine: readonly Operation[], tri
   for (let i = steps.length - 1; i >= 0; i -= 1) {
     const { op, own } = steps[i]!;
     if (op.kind === "add-tracks") {
-      const found = op.entries.map((e) => find(e.playlistTrackId));
+      const found = locateAll(op.entries.map((e) => ({ id: e.playlistTrackId, trackId: e.trackId, at: e.position })));
       for (const cell of found) {
         if (!own) {
           if (cell?.state === "here") {
@@ -600,12 +696,13 @@ function replayBackwards(cells: readonly Cell[], mine: readonly Operation[], tri
       // also when it is in the playlist without the try's add being on
       // record -- else any it put back of that track, unless that one is
       // another removed entry's by id), or one still to put back.
-      const back: Array<Cell | undefined> = op.entries.map(
-        (e) => claim((cell) => cell.id === e.playlistTrackId) ?? find(e.playlistTrackId),
+      // Without ids of their own, an id says nothing: by track only.
+      const back: Array<Cell | undefined> = op.entries.map((e) =>
+        positional ? undefined : (claim((cell) => cell.id === e.playlistTrackId) ?? find(e.playlistTrackId)),
       );
       op.entries.forEach((e, k) => {
         back[k] ??=
-          claim((cell) => cell.trackId === e.trackId && !removedIds.has(cell.id)) ??
+          claim((cell) => cell.trackId === e.trackId && (positional || !removedIds.has(cell.id))) ??
           absent(e.playlistTrackId, e.trackId, "back");
       });
       takeOut(back.filter((cell): cell is Cell => cell !== undefined && inList.has(cell)));
@@ -618,10 +715,14 @@ function replayBackwards(cells: readonly Cell[], mine: readonly Operation[], tri
         }
         continue;
       }
-      const back = op.playlistTrackIds.flatMap((id, k) => {
-        const cell = find(id);
-        return cell === undefined ? [] : [{ cell, position: from[k]! }];
-      });
+      // The move left its entries side by side, in the order given, after
+      // the entries that were ahead of where they went and did not move.
+      const ahead = Math.min(Math.max(op.insertBefore - 1, 0), list.length);
+      const first = ahead - from.filter((place) => place < ahead).length;
+      const found = locateAll(
+        op.playlistTrackIds.map((id, k) => ({ id, trackId: op.trackIds?.[k], at: first + k })),
+      );
+      const back = found.flatMap((cell, k) => (cell === undefined ? [] : [{ cell, position: from[k]! }]));
       takeOut(back.map((item) => item.cell));
       putIn(back);
     }
@@ -945,8 +1046,9 @@ async function restoreTracks(
       newId.set(entry.playlistTrackId, id);
     }
   }
-  if (newId.size > 0) {
+  if (newId.size > 0 && !isPositional(client, step.playlistId)) {
     // Kept whatever comes next: they are in the playlist under these ids now.
+    // (Not where ids are positional: these would be other entries' tomorrow.)
     made.renamed.push({ playlistId: step.playlistId, entries: [...newId] });
   }
   if (failure !== undefined) {

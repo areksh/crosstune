@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { ServiceHub } from "../services/hub.js";
 import { tagId, type PlaylistId, type TrackId } from "../services/ids.js";
 import { qid } from "../services/ids.test-support.js";
+import { SpotifyClient } from "../services/spotify/client.js";
+import { FakeSpotify } from "../services/spotify/fake-spotify.test-support.js";
+import { SpotifyService } from "../services/spotify/service.js";
 import { TidalClient } from "../services/tidal/client.js";
 import { FakeTidal } from "../services/tidal/fake-tidal.test-support.js";
 import { TidalService } from "../services/tidal/service.js";
@@ -995,5 +999,338 @@ describe("stepping back through the history", () => {
     expect(plan.blocked).toBeUndefined();
     expect(plan.steps).toEqual([]);
     expect(account.trackIds(id)).toEqual([qid(3), qid(1), qid(2)]);
+  });
+});
+
+/**
+ * Spotify (the fake behind the real service), recorded. Its entries have no
+ * ids of their own: one is named `<song>#<copy>`, counted afresh at each read.
+ * A playlist is written as its songs' letters, "abac".
+ */
+function spotifySetup(playlists: Record<string, string>) {
+  const { store, journal } = newJournal();
+  const fake = new FakeSpotify();
+  for (const name of "abcdefghxyz") {
+    fake.addTrack(name, { name: `Song ${name}` });
+  }
+  const songs = (letters: string) => [...letters].map((letter) => `spotify:track:${letter}`);
+  for (const [name, letters] of Object.entries(playlists)) {
+    fake.seedPlaylist(name, songs(letters));
+  }
+  const service = new SpotifyService(
+    new SpotifyClient({ tokens: fake.tokens, fetchImpl: fake.fetchImpl, sleep: async () => {} }),
+  );
+  /** Requests that fail: a method's name to how many more calls go through first. */
+  const failing = new Map<string, number>();
+  for (const method of ["addTracksToPlaylist", "movePlaylistTracks", "removeTracksFromPlaylist"] as const) {
+    const real = service[method].bind(service) as (...args: unknown[]) => Promise<void>;
+    (service as unknown as Record<string, unknown>)[method] = async (...args: unknown[]) => {
+      const left = failing.get(method);
+      if (left !== undefined) {
+        failing.set(method, left - 1);
+        if (left <= 0) {
+          failing.delete(method);
+          throw new Error(`${method} failed with HTTP 500`);
+        }
+      }
+      return real(...args);
+    };
+  }
+  const client = recordingClient(service, journal);
+  const playlist = (name: string) => tagId<PlaylistId>("spotify", name);
+  const track = (letter: string) => tagId<TrackId>("spotify", letter);
+  const now = (name: string) => fake.uris(name).map((uri) => uri!.split(":")[2]).join("");
+  /** The ids of the entries holding these places (0-based), as a fresh read names them. */
+  const entriesAt = async (name: string, places: readonly number[]) => {
+    const tracks = await client.getPlaylistTracks(playlist(name));
+    return places.map((place) => tracks[place]!.playlistTrackId!);
+  };
+  /** Change a playlist as the user would, in Spotify's own app. */
+  const elsewhere = (name: string, letters: string) => fake.edit(name, () => songs(letters));
+  const undo = async (id?: string, through: Parameters<typeof planUndo>[0] & Parameters<typeof applyUndo>[1] = client) => {
+    const items = journal.items();
+    const item = id === undefined ? items[0]! : items.find((i) => i.id === id)!;
+    const plan = await planUndo(through, item, items);
+    const outcome = await applyUndo(journal, through, item, plan);
+    return { plan, outcome };
+  };
+  return { store, journal, fake, service, client, playlist, track, now, entriesAt, elsewhere, undo, failing };
+}
+
+describe("undo where entries have no ids of their own (Spotify)", () => {
+  it("puts back the removed copy of a song that is in the playlist more than once", async () => {
+    const { journal, client, playlist, now, entriesAt, undo } = spotifySetup({ p: "abac" });
+    await journal.run({ tool: "deduplicate" }, async () =>
+      client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [0])),
+    );
+    expect(now("p")).toBe("bac");
+
+    // The copy that stayed is "a#1" now, as the removed one was then.
+    const { plan, outcome } = await undo();
+
+    expect(plan.steps.map(describeStep)).toEqual(["Put 1 track back in p, in its old place"]);
+    expect(outcome).toMatchObject({ undone: true, failed: [] });
+    expect(now("p")).toBe("abac");
+  });
+
+  it("puts back the later copy too, and can redo both", async () => {
+    const { journal, client, playlist, now, entriesAt, undo } = spotifySetup({ p: "abacad" });
+    await journal.run({ tool: "deduplicate" }, async () =>
+      client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [2, 4])),
+    );
+    expect(now("p")).toBe("abcd");
+
+    await undo();
+    expect(now("p")).toBe("abacad");
+
+    await undo(journal.items()[0]!.id);
+    expect(now("p")).toBe("abcd");
+  });
+
+  it("takes out the copy it added, not one the user added later", async () => {
+    const { journal, client, playlist, track, now, elsewhere, undo } = spotifySetup({ p: "ab" });
+    await journal.run({ tool: "similar-artists" }, () => client.addTracksToPlaylist(playlist("p"), [track("a")]));
+    expect(now("p")).toBe("aba");
+    // The user takes their first copy out, and later adds c and the song again.
+    elsewhere("p", "baca");
+
+    const { plan } = await undo();
+
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 1 track from p"]);
+    expect(now("p")).toBe("bca");
+  });
+
+  it("leaves the user's own copy alone when the one it added is gone", async () => {
+    const { journal, client, playlist, track, now, elsewhere, undo } = spotifySetup({ p: "abc" });
+    await journal.run({ tool: "similar-artists" }, () => client.addTracksToPlaylist(playlist("p"), [track("a")]));
+    expect(now("p")).toBe("abca");
+    elsewhere("p", "abc"); // the user took the added copy out again
+
+    const { plan } = await undo();
+
+    expect(plan.steps).toEqual([]);
+    expect(plan.notes).toEqual(["1 of the tracks added to p is no longer in it."]);
+    expect(now("p")).toBe("abc");
+  });
+
+  it("moves a song back when another copy of it changed which copy it counts as", async () => {
+    const { journal, client, playlist, now, entriesAt, undo } = spotifySetup({ p: "axay" });
+    await journal.run({ tool: "playlist-manager" }, async () =>
+      client.movePlaylistTracks(playlist("p"), await entriesAt("p", [0]), 5),
+    );
+    expect(now("p")).toBe("xaya");
+
+    const { plan } = await undo();
+
+    expect(plan.steps.map(describeStep)).toEqual(["Put p back in its old order"]);
+    expect(now("p")).toBe("axay");
+  });
+
+  it("reverses a change that removed, added and moved in one go", async () => {
+    const { journal, client, playlist, track, now, entriesAt, undo } = spotifySetup({ p: "abab" });
+    await journal.run({ tool: "playlist-manager" }, async () => {
+      await client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [0]));
+      await client.addTracksToPlaylist(playlist("p"), [track("c"), track("a")]);
+      await client.movePlaylistTracks(playlist("p"), await entriesAt("p", [4]), 1);
+    });
+    expect(now("p")).toBe("ababc");
+
+    await undo();
+    expect(now("p")).toBe("abab");
+
+    await undo(journal.items()[0]!.id);
+    expect(now("p")).toBe("ababc");
+  });
+
+  it("steps back through the history", async () => {
+    const { journal, client, playlist, now, entriesAt, undo } = spotifySetup({ p: "abcb" });
+    // A moves the last b to the top; B then removes it.
+    await journal.run({ tool: "playlist-manager" }, async () =>
+      client.movePlaylistTracks(playlist("p"), await entriesAt("p", [3]), 1),
+    );
+    await journal.run({ tool: "playlist-manager" }, async () =>
+      client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [0])),
+    );
+    expect(now("p")).toBe("abc");
+    const [b, a] = journal.items();
+
+    await undo(b!.id);
+    expect(now("p")).toBe("babc");
+    await undo(a!.id);
+
+    expect(now("p")).toBe("abcb");
+  });
+
+  it("deletes a playlist it created, and only its own songs from one that gained others", async () => {
+    const { journal, fake, client, track, now, elsewhere, undo } = spotifySetup({});
+    let made = "";
+    await journal.run({ tool: "playlist-from-artists" }, async () => {
+      const playlist = await client.createPlaylist("Road Trip");
+      made = String(playlist.id).replace("spotify:", "");
+      await client.addTracksToPlaylist(playlist.id, [track("a"), track("b")]);
+      await client.addTracksToPlaylist(playlist.id, [track("a")]);
+    });
+    const original = journal.items()[0]!.id;
+    expect(now(made)).toBe("aba");
+
+    const first = await undo(original);
+    expect(first.plan.steps.map(describeStep)).toEqual(["Delete the playlist Road Trip (3 tracks)"]);
+    expect(fake.shown).not.toContain(made);
+
+    await undo(first.outcome.entryId); // made again, under a new id
+    const again = fake.shown.at(-1)!;
+    expect(now(again)).toBe("aba");
+    elsewhere(again, "xabay");
+    const redone = journal.items()[0]!;
+    const { plan } = await undo(redone.id);
+    expect(plan.steps.map(describeStep)).toEqual(["Remove 3 tracks from Road Trip"]);
+    expect(now(again)).toBe("xy");
+  });
+
+  it("finishes an undo that failed part-way without putting anything back twice", async () => {
+    const { journal, client, playlist, now, entriesAt, undo, failing } = spotifySetup({ early: "abac", late: "xyxz" });
+    await journal.run({ tool: "deduplicate" }, async () => {
+      await client.removeTracksFromPlaylist(playlist("early"), await entriesAt("early", [0]));
+      await client.removeTracksFromPlaylist(playlist("late"), await entriesAt("late", [0]));
+    });
+    const original = journal.items()[0]!.id;
+    expect([now("early"), now("late")]).toEqual(["bac", "yxz"]);
+    failing.set("addTracksToPlaylist", 1); // late is put back; early fails
+
+    const first = await undo(original);
+    expect(first.outcome.undone).toBe(false);
+    expect([now("early"), now("late")]).toEqual(["bac", "xyxz"]);
+
+    const { plan, outcome } = await undo(original);
+    expect(plan.steps.map(describeStep)).toEqual(["Put 1 track back in early, in its old place"]);
+    expect(outcome.undone).toBe(true);
+    expect([now("early"), now("late")]).toEqual(["abac", "xyxz"]);
+  });
+
+  it("moves into place what an earlier try could only put back at the end", async () => {
+    const { journal, client, playlist, now, entriesAt, undo, failing } = spotifySetup({ p: "abac" });
+    await journal.run({ tool: "deduplicate" }, async () =>
+      client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [0])),
+    );
+    const original = journal.items()[0]!.id;
+    failing.set("movePlaylistTracks", 0);
+
+    const first = await undo(original);
+    expect(first.outcome.undone).toBe(false);
+    expect(now("p")).toBe("baca");
+
+    const { plan, outcome } = await undo(original);
+    expect(plan.steps.map(describeStep)).toEqual(["Put p back in its old order"]);
+    expect(outcome.undone).toBe(true);
+    expect(now("p")).toBe("abac");
+  });
+
+  it("goes by the playlist's own service when the app is on another", async () => {
+    const { journal, client, playlist, now, entriesAt, undo } = spotifySetup({ p: "abac" });
+    const tidal = tidalSetup();
+    const hub = new ServiceHub();
+    hub.connect(client);
+    hub.connect(tidal.client);
+    await journal.run({ tool: "deduplicate" }, async () =>
+      client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", [0])),
+    );
+
+    await undo(undefined, hub.scoped("tidal"));
+
+    expect(now("p")).toBe("abac");
+  });
+
+  it("reverses any mix of adding, removing and moving, and redoes it", async () => {
+    let seed = 5;
+    const random = (n: number): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return Math.floor((seed / 4294967296) * n);
+    };
+    const letters = "abcd";
+    for (let round = 0; round < 60; round += 1) {
+      const start = Array.from({ length: 3 + random(8) }, () => letters[random(letters.length)]).join("");
+      const { journal, client, playlist, track, now, entriesAt, undo } = spotifySetup({ p: start });
+      await journal.run({ tool: "playlist-manager" }, async () => {
+        for (let step = 0; step < 2 + random(5); step += 1) {
+          const size = now("p").length;
+          const picked = Array.from({ length: size }, (_, place) => place).filter(() => random(3) === 0);
+          if (random(3) === 0) {
+            await client.addTracksToPlaylist(playlist("p"), [track(letters[random(letters.length)]!), track("xyz"[random(3)]!)]);
+          } else if (random(2) === 0) {
+            await client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", picked.slice(0, size - 1)));
+          } else {
+            await client.movePlaylistTracks(playlist("p"), await entriesAt("p", picked), 1 + random(size + 1));
+          }
+        }
+      });
+      if (journal.items().length === 0) {
+        continue;
+      }
+      const after = now("p");
+      const { outcome } = await undo();
+      expect(outcome.failed, `round ${round}`).toEqual([]);
+      expect(now("p"), `round ${round}: ${start} -> ${after}`).toBe(start);
+      await undo(journal.items()[0]!.id);
+      expect(now("p"), `round ${round}: redo`).toBe(after);
+    }
+  });
+
+  it("ends where the change began, whichever request fails, with nothing put back twice", async () => {
+    let seed = 17;
+    const random = (n: number): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return Math.floor((seed / 4294967296) * n);
+    };
+    const letters = "abcd";
+    const writes = ["addTracksToPlaylist", "movePlaylistTracks", "removeTracksFromPlaylist"];
+    let retried = 0;
+    for (let round = 0; round < 80; round += 1) {
+      const start = Array.from({ length: 3 + random(8) }, () => letters[random(letters.length)]).join("");
+      const { journal, client, playlist, track, now, entriesAt, undo, failing } = spotifySetup({ p: start });
+      await journal.run({ tool: "playlist-manager" }, async () => {
+        for (let step = 0; step < 2 + random(5); step += 1) {
+          const size = now("p").length;
+          const picked = Array.from({ length: size }, (_, place) => place).filter(() => random(3) === 0);
+          if (random(3) === 0) {
+            await client.addTracksToPlaylist(playlist("p"), [track(letters[random(letters.length)]!), track("xyz"[random(3)]!)]);
+          } else if (random(2) === 0) {
+            await client.removeTracksFromPlaylist(playlist("p"), await entriesAt("p", picked.slice(0, size - 1)));
+          } else {
+            await client.movePlaylistTracks(playlist("p"), await entriesAt("p", picked), 1 + random(size + 1));
+          }
+        }
+      });
+      const original = journal.items()[0]?.id;
+      if (original === undefined) {
+        continue;
+      }
+      let undone = false;
+      for (let attempt = 0; attempt < 6 && !undone; attempt += 1) {
+        if (attempt < 2) {
+          failing.set(writes[random(writes.length)]!, random(3));
+        }
+        undone = (await undo(original)).outcome.undone;
+        retried += undone ? 0 : 1;
+      }
+      expect(undone, `round ${round}`).toBe(true);
+      expect(now("p"), `round ${round}`).toBe(start);
+    }
+    expect(retried).toBeGreaterThan(10);
+  });
+
+  it("still undoes a move recorded before the songs moved were kept, by its ids as before", async () => {
+    const { journal, client, playlist, now, entriesAt } = spotifySetup({ p: "abc" });
+    await journal.run({ tool: "playlist-manager" }, async () =>
+      client.movePlaylistTracks(playlist("p"), await entriesAt("p", [2]), 1),
+    );
+    const item = structuredClone(journal.items()[0]!);
+    for (const op of item.ops) {
+      if (op.kind === "move-tracks") {
+        delete op.trackIds;
+      }
+    }
+    const plan = await planUndo(client, item, [item]);
+    await commitUndo(client, plan);
+    expect(now("p")).toBe("abc");
   });
 });
