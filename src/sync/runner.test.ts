@@ -4,7 +4,7 @@ import { MemoryMatches } from "../features/match.js";
 import { ServiceError } from "../services/errors.js";
 import type { ServiceName } from "../services/ids.js";
 import { emptyLinkState, type LinkState } from "./model.js";
-import { parseLinksFile, pausedByUndo, runLinks, validateLink, type Link, type LinksDeps } from "./runner.js";
+import { isLinkEntry, parseLinksFile, pausedByUndo, runLinks, validateLink, type Link, type LinksDeps } from "./runner.js";
 import { SyncAccount } from "./world.test-support.js";
 
 const NOW = new Date("2026-11-23T12:00:00Z");
@@ -117,6 +117,29 @@ describe("runLinks", () => {
     expect(pausedByUndo(deps, "nope", NOW)).toEqual([]);
     expect(pausedByUndo(deps, "e2", NOW)).toEqual(["aaaaaaaa"]);
     expect(states.get("aaaaaaaa")?.paused).toEqual({ since: NOW.toISOString(), reason: "undone" });
+  });
+
+  it("is paused by undoing a sync older than the entries the link remembers, by the link id on the entry", async () => {
+    const { deps, states } = setup();
+    states.set("aaaaaaaa", { ...emptyLinkState(), entries: ["e99"] });
+    // The entry fell out of the capped list, but the History entry names its link.
+    expect(isLinkEntry(deps, "old", undefined)).toBe(false);
+    expect(isLinkEntry(deps, "old", "aaaaaaaa")).toBe(true);
+    expect(isLinkEntry(deps, "old", "bbbbbbbb")).toBe(false);
+    expect(pausedByUndo(deps, "old", NOW, "aaaaaaaa")).toEqual(["aaaaaaaa"]);
+    expect(states.get("aaaaaaaa")?.paused).toEqual({ since: NOW.toISOString(), reason: "undone" });
+  });
+
+  it("hands the link id to the history for each sync", async () => {
+    const { deps } = setup();
+    const seen: Array<string | undefined> = [];
+    const inner = deps.journalRun;
+    deps.journalRun = (label, fn, link) => {
+      seen.push(link);
+      return inner(label, fn, link);
+    };
+    await runLinks(deps, NOW);
+    expect(seen).toEqual(["aaaaaaaa"]);
   });
 
   it("records only the syncs that wrote something, so a real one is not pushed out", async () => {

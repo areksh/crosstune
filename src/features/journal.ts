@@ -85,6 +85,8 @@ export interface EntryMeta {
   label?: string;
   /** For an undo: the entry it reverses (the entry is written even if empty). */
   undoes?: string;
+  /** For a sync of a linked playlist: its link id, kept on the entry. */
+  link?: string;
 }
 
 /** Per-action scratch the recorder keeps: playlist names and known contents. */
@@ -176,6 +178,9 @@ export class Journal {
     };
     if (draft.meta.undoes !== undefined) {
       entry.undoes = draft.meta.undoes;
+    }
+    if (draft.meta.link !== undefined) {
+      entry.link = draft.meta.link;
     }
     if (failure !== undefined) {
       entry.error = failure.error instanceof Error ? failure.error.message : String(failure.error);

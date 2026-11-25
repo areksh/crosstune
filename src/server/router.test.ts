@@ -2189,7 +2189,7 @@ describe("POST /api/history/plan and /api/history/undo", () => {
     const seen: number[] = [];
     d.links = { undone: vi.fn(async () => (seen.push(account.playlists.size), ["abcdef01"])) } as unknown as NonNullable<ApiDeps["links"]>;
     expect((await handleApi(request("POST", "/api/history/undo", { id }), d)).status).toBe(200);
-    expect(d.links.undone).toHaveBeenCalledWith(id);
+    expect(d.links.undone).toHaveBeenCalledWith(id, undefined);
     expect(seen).toEqual([1]); // the playlist was still there
   });
 

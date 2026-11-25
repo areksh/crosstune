@@ -54,6 +54,15 @@ describe("Journal", () => {
     ]);
   });
 
+  it("keeps a link id on the entry, and reads it back", async () => {
+    const { store, journal } = setup();
+    await journal.run({ tool: "link", label: "Synced Mix", link: "aaaaaaaa" }, async () => {
+      journal.record(createOp);
+    });
+    expect(entriesOf(store)[0]?.link).toBe("aaaaaaaa");
+    expect(journal.items()[0]?.link).toBe("aaaaaaaa");
+  });
+
   it("uses an explicit label and hands the run its entry id", async () => {
     const { store, journal } = setup();
     let seen = "";
