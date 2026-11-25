@@ -553,6 +553,8 @@ button.tab[aria-pressed="true"] {
 .lib-group {
   position: sticky;
   bottom: -24px;
+  /* Above the rows' ticks (z-index 1), which would otherwise paint over it. */
+  z-index: 2;
   margin: 14px -12px -24px;
   padding: 12px 14px 16px;
   background: var(--panel);
