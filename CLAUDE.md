@@ -8,9 +8,11 @@ Local-first tools for music on Qobuz, TIDAL and Spotify (playlist builders,
 deduplicator, upgrade and repair, import/export/backup, a playlist manager,
 managed playlists, copying between services and two-way linked playlists),
 exposed through a CLI and a local web UI. TypeScript, Node >=18, ESM. It was
-called `qobuz-helper` until ADR-0014; nothing of that name is kept in the code or user docs (the CHANGELOG history and the immutable ADRs keep it). The README is the user-facing manual; the
-architectural reasoning is in `docs/adr/` (read 0001-0003 before structural
-work, and 0010-0013 before touching services, accounts, matching or sync).
+called `qobuz-helper` until ADR-0014; nothing of that name is kept in the code
+or user docs (the CHANGELOG history and the immutable ADRs keep it). The README
+is the user-facing manual; the architectural reasoning is in `docs/adr/` (read
+0001-0003 before structural work, and 0010-0013 before touching services,
+accounts, matching or sync).
 
 ## Commands
 

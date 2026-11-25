@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Shift-click ticks a range**: tick a playlist or song, then Shift-click
+  another to tick or untick everything between them, in the library sidebar,
+  the Playlists list, Remove artists and the song lists of the tools.
 - **The ask box** at the top of the web UI (Ctrl+K): paste links or a list of
   artists or albums, or type a playlist's name or a tool, and pick what to do.
   It replaces Home's paste box; Home shows the playlists changed most recently.
@@ -644,6 +647,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requests raced. Each answer is now shown only for the settings it asked with,
   changing options while a combine is running starts a newer one, and the stale
   list cannot be saved meanwhile.
+- Web page: the bar with Combine, Remove artists and Delete for ticked
+  playlists was drawn under the tick boxes of the rows scrolled behind it, so
+  they got in the way of its buttons: the boxes were stacked above the bar. The
+  bar now sits above them.
+- Web page: removing artists, and deleting several ticked playlists, gave no
+  sign that anything was happening, so it looked stuck. The buttons now read
+  "Removing N songs..." and "Deleting 2 of 5..." until they are done.
 
 ### Security
 
