@@ -749,8 +749,10 @@ days old, are kept; older ones are dropped the next time something is written.
 
 **What undo does.** For each playlist an entry touched, undo removes the
 entries it added (by their entry ids, so copies of the same track you added
-yourself are left alone), puts the tracks it removed back in their old
-positions and the ones it moved back where they were, and deletes a playlist the
+yourself are left alone; Spotify has no ids for a playlist's entries, so there
+undo goes by the song and the place the change left it, and touches nothing
+when it cannot tell which copy was the change's), puts the tracks it removed
+back in their old positions and the ones it moved back where they were, and deletes a playlist the
 entry created if it still holds only what the entry put there (otherwise it
 removes just those tracks and keeps the playlist). A song is never taken out of
 where a change put it if it could not be put back where it was. Changed playlist
@@ -758,8 +760,12 @@ names, descriptions and visibility are set back. Favourites it added are removed
 it removed are added back. `undo` without an id picks the latest change that is
 neither undone nor itself an undo, so running it again walks back through your
 history. The undo is recorded as an entry of its own ("Undid: ..."), which can
-in turn be undone to redo the change; an entry cannot be undone twice. A step
-that fails is reported and the others still run.
+in turn be undone to redo the change. A step that fails is reported and the
+others still run; the entry then stays open, and undoing it again does only
+what is left, without putting anything back twice. Once every step has gone
+through, the entry cannot be undone again. Undoing entries one after another
+works however they overlap: an earlier entry follows the songs a later undo
+put back.
 
 Undoing an entry that is not the latest is allowed; you are warned when later
 entries touched the same playlist or favourites, since undo then cannot always

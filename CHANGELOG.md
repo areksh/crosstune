@@ -662,6 +662,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Web page: removing artists, and deleting several ticked playlists, gave no
   sign that anything was happening, so it looked stuck. The buttons now read
   "Removing N songs..." and "Deleting 2 of 5..." until they are done.
+- Undo: an undo that failed part-way (say one HTTP 500 while putting songs
+  back in one of two playlists) was marked undone and could never be
+  finished, leaving those songs only in the History file: an entry counted as
+  undone as soon as any one step went through. It now stays open, and undoing
+  it again does only what is left, without putting anything back twice or
+  making a deleted playlist a second time.
+- Undo on Spotify could do nothing, or take out the wrong copy, when a song was
+  in a playlist more than once: removing the first of two copies could not be
+  undone, and undoing an add could remove a copy you added later. Spotify's
+  playlist entries have no ids of their own, and undo compared the recorded
+  ones with freshly counted ones. Undo there now goes by the song and its
+  recorded place.
+- History on Spotify: a change that removed one copy of a song and then added
+  songs recorded the copy that stayed as one it added, so undoing it would have
+  removed your own song; and a move or removal made after re-reading the
+  playlist within the same change was not recorded at all. The recorder now
+  tells what an add put in by counting songs, and keeps up with re-reads.
+- Stepping back through History did nothing for an entry whose songs a later
+  undo had put back (say, undoing "moved a song to the top" after undoing
+  "removed that song"), yet marked it undone: a song put back gets a new entry
+  id. Undos now keep the new ids, and earlier entries are read through them.
+- Once History passed 200 entries or 90 days, each write dropped for good any
+  line this version could not read (written by a newer crosstune, or with an
+  unknown operation), and anything a newer version had added to an entry it
+  could read. Those lines are now kept as written.
 
 ### Security
 

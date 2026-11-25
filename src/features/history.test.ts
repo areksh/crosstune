@@ -133,8 +133,8 @@ describe("serializeRecords / parseHistory", () => {
   });
 
   it("reads the lines earlier versions wrote, as they meant them", () => {
-    // Verbatim from history files of November 2026: bare Qobuz ids (before
-    // ADR-0010), then tagged ones; an undo with nothing kept about new ids, a
+    // Written to the format of history files of November 2026 (composed, not
+    // copied from a real file): bare Qobuz ids (before ADR-0010), then tagged ones; an undo with nothing kept about new ids, a
     // move with and without where its entries were, and an undone marker.
     const text = [
       '{"v":1,"type":"entry","id":"3f9a1c2e","at":"2026-11-03T18:02:11.412Z","tool":"deduplicate","source":"cli","label":"Removed 1 duplicate from Late Night","ops":[{"kind":"remove-tracks","playlistId":4242,"playlistName":"Late Night","entries":[{"trackId":101,"playlistTrackId":9001,"position":3}]}]}',
